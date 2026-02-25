@@ -17,7 +17,8 @@ class Database:
     """SQLite 연결 및 세션 관리."""
 
     def __init__(self, db_path: str = "data_store/ats.db"):
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        if db_path != ":memory:":
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self.db_path = db_path
         self.engine = create_engine(
             f"sqlite:///{db_path}",

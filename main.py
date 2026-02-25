@@ -7,7 +7,13 @@ Usage:
     python main.py start            장중 매매 시작
     python main.py status           시스템 상태 확인
     python main.py init-db          DB 초기화
-    python main.py backtest         백테스트 실행 (미구현)
+    python main.py backtest         백테스트 실행
+        --start 2024-01-01          시작일 (필수)
+        --end   2024-12-31          종료일 (필수)
+        [--capital 100000000]       초기 자본금 (기본: 1억)
+        [--data-dir path]           OHLCV CSV 디렉토리
+        [--export-trades path.csv]  매매 내역 CSV 저장
+        [--export-equity path.csv]  자산곡선 CSV 저장
 """
 
 from __future__ import annotations
@@ -186,6 +192,41 @@ def cmd_status():
     database.close()
 
 
+def cmd_backtest():
+    """백테스트를 실행한다."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="ATS Backtest")
+    parser.add_argument("command", help="backtest")
+    parser.add_argument("--start", required=True, help="Start date (YYYY-MM-DD or YYYYMMDD)")
+    parser.add_argument("--end", required=True, help="End date (YYYY-MM-DD or YYYYMMDD)")
+    parser.add_argument("--capital", type=float, default=100_000_000, help="Initial capital (default: 100M)")
+    parser.add_argument("--data-dir", default="data_store/backtest_data", help="OHLCV CSV directory")
+    parser.add_argument("--export-trades", default=None, help="Export trades to CSV path")
+    parser.add_argument("--export-equity", default=None, help="Export equity curve to CSV path")
+    args = parser.parse_args()
+
+    config_manager = ConfigManager()
+    config = config_manager.load()
+    setup_logger(level=config.log_level)
+
+    from backtest.engine import BacktestEngine
+
+    engine = BacktestEngine(
+        config=config,
+        initial_capital=args.capital,
+        data_dir=args.data_dir,
+    )
+
+    result = engine.run(start_date=args.start, end_date=args.end)
+    result.print_summary()
+
+    if args.export_trades:
+        result.export_trades_csv(args.export_trades)
+    if args.export_equity:
+        result.export_equity_csv(args.export_equity)
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -197,6 +238,7 @@ def main():
         "start": cmd_start,
         "init-db": cmd_init_db,
         "status": cmd_status,
+        "backtest": cmd_backtest,
     }
 
     if command in commands:

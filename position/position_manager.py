@@ -151,6 +151,7 @@ class PositionManager:
         self.repo.update_position(
             position_id,
             status=PositionStatus.CLOSING.value,
+            exit_reason=exit_signal.exit_reason,
         )
 
         event_map = {
