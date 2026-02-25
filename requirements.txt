@@ -1,0 +1,31 @@
+# ATS Dependencies
+# Python 3.11+
+
+# HTTP Client
+requests>=2.31.0
+httpx>=0.25.0
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Database
+SQLAlchemy>=2.0.0
+
+# Configuration
+PyYAML>=6.0
+python-dotenv>=1.0.0
+
+# Telegram Notification
+python-telegram-bot>=20.0
+
+# Scheduling (optional, for advanced scheduling)
+APScheduler>=3.10.0
+
+# Logging
+loguru>=0.7.0
+
+# Testing
+pytest>=7.4.0
+pytest-mock>=3.12.0
+pytest-cov>=4.1.0

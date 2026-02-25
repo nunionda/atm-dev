@@ -1,0 +1,26 @@
+# ATS .gitignore
+
+# 민감 정보 (NFR-S01)
+.env
+
+# 런타임 데이터
+data_store/
+*.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
