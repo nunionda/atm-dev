@@ -1,0 +1,41 @@
+.operations-page {
+    padding-top: 100px;
+    padding-bottom: 40px;
+}
+
+.operations-header {
+    margin: 20px 0;
+}
+
+.operations-header .page-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.operations-header .page-subtitle {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.operations-grid {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.operations-main {
+    min-width: 0;
+}
+
+.operations-side {
+    min-width: 0;
+}
+
+@media (max-width: 1024px) {
+    .operations-grid {
+        grid-template-columns: 1fr;
+    }
+}

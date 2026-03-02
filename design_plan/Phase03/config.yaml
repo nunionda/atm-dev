@@ -1,0 +1,69 @@
+# ===== ATS 전략 설정 파일 =====
+# 문서 참조: ATS-BRD-001 v1.0, Section 2.5
+# 변경 시 장중(09:00~15:30) 외 시간에 수정할 것
+
+system:
+  name: "ATS-MomentumSwing"
+  version: "1.0.0"
+  log_level: "INFO"           # DEBUG | INFO | WARNING | ERROR
+
+schedule:
+  pre_market_start: "08:50"   # 시스템 기동
+  market_open: "09:00"        # 장 시작
+  buy_start: "09:30"          # 매수 시작 (장초반 관망 후)
+  buy_end: "15:00"            # 신규 매수 중단
+  market_close: "15:30"       # 장 마감
+  report_time: "15:35"        # 일일 리포트 생성
+  scan_interval_sec: 60       # 스캔 주기 (초)
+
+universe:
+  type: "KOSPI200"
+  exclude: []                 # 매매 제외 종목 코드 리스트
+
+strategy:
+  name: "MomentumSwing"
+
+  # 이동평균선 (BRD §2.3.1 PS1)
+  ma_short: 5                 # 단기 이평선 (일)
+  ma_long: 20                 # 장기 이평선 (일)
+
+  # MACD (BRD §2.3.1 PS2)
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+
+  # RSI (BRD §2.3.2 CF1)
+  rsi_period: 14
+  rsi_lower: 30               # 과매도 기준
+  rsi_upper: 70               # 과매수 기준
+
+  # 볼린저밴드 (BRD §2.3.3 RG4)
+  bb_period: 20
+  bb_std: 2                   # 표준편차 배수
+
+  # 거래량 (BRD §2.3.2 CF2)
+  volume_ma_period: 20        # 거래량 이평 기간
+  volume_multiplier: 1.5      # 평균 대비 배수
+
+exit:
+  stop_loss_pct: -0.03        # 손절 -3% (BR-S01 불변)
+  take_profit_pct: 0.07       # 익절 +7%
+  trailing_stop_pct: -0.03    # 트레일링 스탑 -3%
+  max_holding_days: 10        # 최대 보유일
+
+portfolio:
+  max_positions: 10           # 최대 보유 종목수 (BR-P01)
+  max_weight_per_stock: 0.15  # 종목당 최대 비중 15% (BR-P02)
+  min_cash_ratio: 0.20        # 최소 현금 비율 20% (BR-P03)
+
+risk:
+  daily_loss_limit: -0.03     # 일일 손실 한도 -3% (BR-R01)
+  mdd_limit: -0.10            # MDD 한도 -10% (BR-R02)
+  max_order_amount: 3000000   # 1회 최대 주문금액 (BR-R04)
+
+order:
+  default_buy_type: "LIMIT"   # 매수 주문 유형 (LIMIT | MARKET)
+  buy_timeout_min: 30         # 매수 미체결 취소 시간 (BR-B06)
+  sell_timeout_min: 15        # 매도 미체결 → 시장가 전환 (BR-S05)
+  max_retry: 3                # 주문 재시도 횟수 (BR-O05)
+  retry_interval_sec: 5       # 재시도 간격 (초)

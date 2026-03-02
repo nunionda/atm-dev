@@ -1,0 +1,38 @@
+.vp-overlay {
+    position: absolute;
+    top: 0;
+    right: 50px; /* offset from price axis */
+    bottom: 0;
+    width: 30%;
+    max-width: 200px;
+    pointer-events: none;
+    z-index: 5;
+}
+
+.vp-bar {
+    position: absolute;
+    right: 0;
+    display: flex;
+    border-radius: 2px 0 0 2px;
+    overflow: hidden;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+}
+
+.vp-bar:hover {
+    opacity: 0.9;
+}
+
+.vp-buy {
+    background: rgba(34, 197, 94, 0.35);
+    height: 100%;
+}
+
+.vp-sell {
+    background: rgba(239, 68, 68, 0.35);
+    height: 100%;
+}
+
+.vp-poc {
+    border-top: 1px dashed rgba(234, 179, 8, 0.5);
+}

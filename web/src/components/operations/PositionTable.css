@@ -1,0 +1,135 @@
+.position-table-wrapper {
+    padding: 16px;
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    background: rgba(99, 102, 241, 0.2);
+    color: #818cf8;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.total-pnl {
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.total-pnl.positive { color: #22c55e; }
+.total-pnl.negative { color: #ef4444; }
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+.position-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+}
+
+.position-table th {
+    text-align: left;
+    padding: 8px 10px;
+    color: var(--text-muted);
+    font-weight: 500;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    white-space: nowrap;
+}
+
+.position-table th.num {
+    text-align: right;
+}
+
+.position-table td {
+    padding: 10px 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    white-space: nowrap;
+}
+
+.position-table td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.position-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.pos-status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    border: 1px solid;
+    font-size: 0.68rem;
+    font-weight: 600;
+}
+
+.stock-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.stock-name {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.stock-code {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.pnl-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.text-profit { color: #22c55e; }
+.text-loss { color: #ef4444; }
+
+.stop-price { color: #f87171; }
+.tp-price { color: #4ade80; }
+
+.holding-warn {
+    color: #f59e0b !important;
+    font-weight: 600;
+}
+
+.loading-placeholder {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}

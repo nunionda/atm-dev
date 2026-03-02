@@ -1,0 +1,81 @@
+.ohlcv-overlay {
+    position: absolute;
+    top: 6px;
+    left: 10px;
+    z-index: 10;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ohlcv-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.ohlcv-ticker {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-right: 4px;
+}
+
+.ohlcv-lbl {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.ohlcv-val {
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+.ohlcv-val.up { color: #22c55e; }
+.ohlcv-val.down { color: #ef4444; }
+
+.ohlcv-change {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-variant-numeric: tabular-nums;
+}
+
+.ohlcv-change.up {
+    color: #22c55e;
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.ohlcv-change.down {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.ohlcv-vol {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+.ohlcv-indicators {
+    gap: 8px;
+}
+
+.ohlcv-ind {
+    font-size: 0.63rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.ohlcv-ind b {
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-right: 2px;
+}

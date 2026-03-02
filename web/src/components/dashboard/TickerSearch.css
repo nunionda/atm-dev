@@ -1,0 +1,136 @@
+.ticker-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.ticker-search-input-wrap {
+    position: relative;
+    flex: 1;
+}
+
+.ticker-search-input-wrap input {
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    padding: 0.5rem 1rem;
+    font-size: 1rem;
+    outline: none;
+    width: 250px;
+}
+
+.ticker-search-input-wrap input::placeholder {
+    color: var(--text-muted);
+}
+
+/* Dropdown */
+.ticker-dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: -0.5rem;
+    right: -0.5rem;
+    min-width: 360px;
+    background: rgba(15, 15, 30, 0.95);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+    z-index: 100;
+    overflow: hidden;
+    animation: dropdownFadeIn 0.15s ease-out;
+}
+
+@keyframes dropdownFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.ticker-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.ticker-dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.ticker-dropdown-item:hover,
+.ticker-dropdown-item.active {
+    background: rgba(99, 102, 241, 0.15);
+}
+
+.ticker-item-code {
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--text-primary);
+    min-width: 72px;
+    font-family: monospace;
+}
+
+.ticker-item-name {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.ticker-item-name-kr {
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.ticker-item-name-en {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.ticker-market-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.badge-KS {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+}
+
+.badge-KQ {
+    background: rgba(168, 85, 247, 0.2);
+    color: #c084fc;
+}
+
+.badge-US {
+    background: rgba(34, 197, 94, 0.2);
+    color: #4ade80;
+}
+
+.badge-CRYPTO {
+    background: rgba(251, 191, 36, 0.2);
+    color: #fbbf24;
+}
+
+.ticker-dropdown-empty {
+    padding: 1rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}

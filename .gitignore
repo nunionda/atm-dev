@@ -6,6 +6,7 @@
 # 런타임 데이터
 data_store/
 *.db
+temp.json
 
 # Python
 __pycache__/
@@ -14,6 +15,9 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+
+# Node
+node_modules/
 
 # IDE
 .vscode/

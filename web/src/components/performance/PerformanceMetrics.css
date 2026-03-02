@@ -1,0 +1,50 @@
+.perf-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.perf-metric-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+}
+
+.perf-icon {
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.perf-metric-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.perf-metric-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.perf-metric-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.perf-metric-value.positive { color: #22c55e; }
+.perf-metric-value.negative { color: #ef4444; }
+
+.perf-metric-sub {
+    font-size: 0.66rem;
+    color: var(--text-muted);
+}
+
+@media (max-width: 768px) {
+    .perf-metrics {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}

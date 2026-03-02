@@ -1,0 +1,120 @@
+.risk-page {
+    padding-top: 100px;
+    padding-bottom: 40px;
+}
+
+.risk-header {
+    margin-bottom: 24px;
+}
+
+.risk-header .page-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.risk-header .page-subtitle {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.halt-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    margin-bottom: 16px;
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #f87171;
+}
+
+.halt-banner strong {
+    display: block;
+    font-size: 0.85rem;
+    margin-bottom: 2px;
+}
+
+.halt-banner span {
+    font-size: 0.78rem;
+    opacity: 0.8;
+}
+
+.risk-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 16px;
+}
+
+.risk-gauges {
+    padding: 20px;
+}
+
+.risk-counters {
+    padding: 20px;
+}
+
+.risk-events {
+    grid-column: 1 / -1;
+}
+
+.counter-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 16px;
+}
+
+.counter-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 14px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.counter-icon {
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.counter-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.counter-label {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.counter-value {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.counter-value.danger {
+    color: #ef4444;
+}
+
+.counter-desc {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+
+@media (max-width: 768px) {
+    .risk-grid {
+        grid-template-columns: 1fr;
+    }
+    .risk-events {
+        grid-column: 1;
+    }
+}

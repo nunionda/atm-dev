@@ -1,0 +1,127 @@
+.theory-page {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 3rem;
+    padding-top: 2rem;
+    padding-bottom: 4rem;
+    min-height: calc(100vh - 100px);
+}
+
+/* Sidebar */
+.theory-sidebar {
+    padding: 2rem;
+    height: max-content;
+    position: sticky;
+    top: 6rem;
+}
+
+.sidebar-group {
+    margin-bottom: 2rem;
+}
+
+.sidebar-group:last-child {
+    margin-bottom: 0;
+}
+
+.group-title {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+    font-weight: 600;
+}
+
+.group-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.group-list a {
+    display: block;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    transition: all var(--transition-fast);
+}
+
+.group-list a:hover {
+    background: var(--border-light);
+    color: var(--text-primary);
+}
+
+.group-list a.active {
+    background: rgba(59, 130, 246, 0.1);
+    color: var(--accent-primary);
+    font-weight: 500;
+    border-left: 3px solid var(--accent-primary);
+}
+
+/* Main Content */
+.theory-content {
+    padding: 1rem 0;
+}
+
+.content-header {
+    margin-bottom: 3rem;
+}
+
+.breadcrumb {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+    font-family: monospace;
+}
+
+.content-header h1 {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.lead-text {
+    font-size: 1.15rem;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    max-width: 800px;
+}
+
+.content-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.doc-card {
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.doc-icon {
+    margin-bottom: 0.5rem;
+}
+
+.doc-card h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.doc-card p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+@media (max-width: 968px) {
+    .theory-page {
+        grid-template-columns: 1fr;
+    }
+
+    .theory-sidebar {
+        position: relative;
+        top: 0;
+    }
+}

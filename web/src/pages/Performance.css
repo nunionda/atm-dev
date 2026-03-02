@@ -1,0 +1,30 @@
+.performance-page {
+    padding-top: 100px;
+    padding-bottom: 40px;
+}
+
+.perf-header {
+    margin-bottom: 24px;
+}
+
+.perf-header .page-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.perf-header .page-subtitle {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.equity-section {
+    margin-top: 16px;
+    margin-bottom: 16px;
+    padding: 16px;
+}
+
+.equity-section .section-title {
+    margin-bottom: 12px;
+}

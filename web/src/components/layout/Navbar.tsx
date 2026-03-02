@@ -1,0 +1,68 @@
+import { Link, useLocation } from 'react-router-dom';
+import { LineChart, BookOpen, Radio, Shield, BarChart3, ChevronRight } from 'lucide-react';
+import './Navbar.css';
+
+export function Navbar() {
+    const location = useLocation();
+
+    const isActive = (path: string) => location.pathname.startsWith(path);
+
+    return (
+        <nav className="navbar glass-panel">
+            <div className="nav-container container">
+                <Link to="/" className="nav-logo">
+                    <div className="logo-icon">
+                        <LineChart className="text-gradient" size={24} />
+                    </div>
+                    <span className="logo-text">ATS <span className="text-secondary">Theory</span></span>
+                </Link>
+
+                <div className="nav-links">
+                    <Link
+                        to="/dashboard"
+                        className={`nav-link ${isActive('/dashboard') ? 'active' : ''}`}
+                    >
+                        <LineChart size={18} />
+                        <span>Dashboard</span>
+                    </Link>
+                    <Link
+                        to="/operations"
+                        className={`nav-link ${isActive('/operations') ? 'active' : ''}`}
+                    >
+                        <Radio size={18} />
+                        <span>Operations</span>
+                    </Link>
+                    <Link
+                        to="/risk"
+                        className={`nav-link ${isActive('/risk') ? 'active' : ''}`}
+                    >
+                        <Shield size={18} />
+                        <span>Risk</span>
+                    </Link>
+                    <Link
+                        to="/performance"
+                        className={`nav-link ${isActive('/performance') ? 'active' : ''}`}
+                    >
+                        <BarChart3 size={18} />
+                        <span>Performance</span>
+                    </Link>
+                    <Link
+                        to="/theory"
+                        className={`nav-link ${isActive('/theory') ? 'active' : ''}`}
+                    >
+                        <BookOpen size={18} />
+                        <span>Docs</span>
+                    </Link>
+                </div>
+
+                <div className="nav-actions">
+                    <button className="btn-secondary nav-btn">Log In</button>
+                    <button className="btn-primary nav-btn">
+                        Get Started
+                        <ChevronRight size={16} />
+                    </button>
+                </div>
+            </div>
+        </nav>
+    );
+}
