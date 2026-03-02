@@ -6,7 +6,6 @@
 # 런타임 데이터
 data_store/
 *.db
-temp.json
 
 # Python
 __pycache__/
@@ -16,15 +15,17 @@ __pycache__/
 venv/
 *.egg-info/
 
-# Node
-node_modules/
-
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 
+# Node
+node_modules/
+dist/
+
 # OS
 .DS_Store
 Thumbs.db
+temp.json
