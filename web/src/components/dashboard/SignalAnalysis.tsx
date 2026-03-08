@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { TrendingUp, TrendingDown, CheckCircle, XCircle, Target, LogOut, Compass, Activity, Gauge, ChevronDown } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { TrendingUp, TrendingDown, CheckCircle, XCircle, Target, LogOut, Compass, Activity, Gauge, ChevronDown, BarChart2, RefreshCw } from 'lucide-react';
 import type { AnalyticsData } from '../../lib/api';
 import {
     analyzeEntrySignals,
@@ -7,6 +7,8 @@ import {
     computeVolumeMA,
     type SignalCheck,
     type Verdict,
+    type TrendFilter,
+    type SMCAnalysis,
 } from '../../lib/signalEngine';
 import { analyzeFutures, computeATREntry, type FuturesAnalysis, type SetupBias, type ATREntryCalc } from '../../lib/futuresEngine';
 import './SignalAnalysis.css';
@@ -17,6 +19,7 @@ interface SignalAnalysisProps {
     currencySymbol: string;
     isKorean: boolean;
     onSelectTicker?: (symbol: string) => void;
+    refetch?: () => void;
 }
 
 const INDEX_BUTTONS = [
@@ -74,7 +77,7 @@ function fmtIndicator(v: number | null | undefined, decimals = 2): string {
     return v.toLocaleString(undefined, { maximumFractionDigits: decimals });
 }
 
-// --- Futures Analysis Panels ---
+// --- ATR Entry Panel ---
 
 function ATREntryPanel({ calc, fmtPrice }: { calc: ATREntryCalc; fmtPrice: (v: number) => string }) {
     const [expanded, setExpanded] = useState(false);
@@ -265,41 +268,22 @@ function ATREntryPanel({ calc, fmtPrice }: { calc: ATREntryCalc; fmtPrice: (v: n
     );
 }
 
-function FuturesPanel({ analysis, fmtPrice, atrEntry, ticker, onSelectTicker }: {
+// --- Technical Analysis Panels (on-demand) ---
+
+function TechAnalysisPanels({ analysis, fmtPrice }: {
     analysis: FuturesAnalysis;
     fmtPrice: (v: number) => string;
-    atrEntry: ATREntryCalc | null;
-    ticker: string;
-    onSelectTicker?: (symbol: string) => void;
 }) {
     const { trend, momentum, volatility, levels, setup } = analysis;
     const biasStyle = BIAS_STYLE[setup.bias];
 
     return (
         <>
-            {/* Index Quick Select */}
-            {onSelectTicker && (
-                <div className="index-quick-btns">
-                    {INDEX_BUTTONS.map(idx => (
-                        <button
-                            key={idx.symbol}
-                            className={`index-btn ${ticker === idx.symbol ? 'active' : ''}`}
-                            onClick={() => onSelectTicker(idx.symbol)}
-                        >
-                            {idx.label}
-                        </button>
-                    ))}
-                </div>
-            )}
-
-            {/* ATR Entry Calculator */}
-            {atrEntry && <ATREntryPanel calc={atrEntry} fmtPrice={fmtPrice} />}
-
             {/* Setup Overview */}
             <div className="sa-entry-section glass-panel">
                 <h3 className="sa-section-title">
                     <Compass size={16} />
-                    Futures Trade Setup
+                    Trade Setup
                 </h3>
 
                 <div className="sa-verdict-area">
@@ -498,12 +482,180 @@ function getRsiClass(rsi: number | null): string {
     return '';
 }
 
+// --- Confidence Bar ---
+
+function ConfidenceBar({ score, label }: { score: number; label: string }) {
+    const getColor = (s: number) => {
+        if (s >= 75) return '#22c55e';
+        if (s >= 55) return '#84cc16';
+        if (s >= 35) return '#eab308';
+        return '#ef4444';
+    };
+    const color = getColor(score);
+
+    return (
+        <div className="confidence-bar-container">
+            <div className="confidence-bar-meta">
+                <span className="confidence-bar-score" style={{ color }}>{score}</span>
+                <span className="confidence-bar-label-text" style={{ color, background: `${color}20`, border: `1px solid ${color}40` }}>{label}</span>
+            </div>
+            <div className="confidence-bar-track">
+                <div className="confidence-bar-fill" style={{ width: `${score}%`, background: color }} />
+            </div>
+        </div>
+    );
+}
+
+// --- Trend Overview Panel ---
+
+function TrendOverviewPanel({ trend }: { trend: TrendFilter }) {
+    const biasColor = trend.bias.includes('BULL') ? '#22c55e' : trend.bias.includes('BEAR') ? '#ef4444' : '#94a3b8';
+
+    return (
+        <div className="sa-entry-section glass-panel">
+            <h3 className="sa-section-title">
+                <TrendingUp size={16} />
+                Trend Overview
+            </h3>
+            <div className="ft-indicator-grid">
+                <div className="ft-row">
+                    <span className="ft-label">MA 배열</span>
+                    <span className="ft-value">{trend.maAlignment}</span>
+                </div>
+                <div className="ft-row">
+                    <span className="ft-label">ADX 추세강도</span>
+                    <span className="ft-value">
+                        {trend.adxStrength}
+                        {trend.adxValue != null && <span className="ft-num"> ({trend.adxValue.toFixed(1)})</span>}
+                    </span>
+                </div>
+                <div className="ft-row">
+                    <span className="ft-label">방향지표 (DI)</span>
+                    <span className="ft-value">{trend.diSignal}</span>
+                </div>
+                {trend.pctFrom200 != null && (
+                    <div className="ft-row">
+                        <span className="ft-label">200MA 대비</span>
+                        <span className="ft-value" style={{ color: trend.pctFrom200 >= 0 ? '#22c55e' : '#ef4444' }}>
+                            {trend.pctFrom200 >= 0 ? '+' : ''}{trend.pctFrom200.toFixed(1)}%
+                        </span>
+                    </div>
+                )}
+                {trend.pctFrom50 != null && (
+                    <div className="ft-row">
+                        <span className="ft-label">50MA 대비</span>
+                        <span className="ft-value" style={{ color: trend.pctFrom50 >= 0 ? '#22c55e' : '#ef4444' }}>
+                            {trend.pctFrom50 >= 0 ? '+' : ''}{trend.pctFrom50.toFixed(1)}%
+                        </span>
+                    </div>
+                )}
+            </div>
+            <div className="trend-bias-badge" style={{ color: biasColor, background: `${biasColor}1a`, border: `1px solid ${biasColor}40` }}>
+                {trend.biasLabel}
+            </div>
+        </div>
+    );
+}
+
+// --- SMC Panel ---
+
+function SMCPanel({ smc, fmtPrice }: { smc: SMCAnalysis; fmtPrice: (v: number) => string }) {
+    const hasData = smc.markers.length > 0 || smc.orderBlocks.length > 0 || smc.fvgs.length > 0;
+    if (!hasData) return null;
+
+    return (
+        <div className="sa-entry-section glass-panel">
+            <h3 className="sa-section-title">
+                <Compass size={16} />
+                Smart Money Concepts
+            </h3>
+
+            {smc.markers.length > 0 && (
+                <div className="smc-section">
+                    <div className="sa-group-label">Market Structure</div>
+                    <div className="smc-marker-list">
+                        {smc.markers.map((m, i) => (
+                            <div key={i} className="smc-marker-item">
+                                <span className={`smc-marker-badge ${m.type.includes('BULL') ? 'bull' : 'bear'}`}>
+                                    {m.type}
+                                </span>
+                                <span className="ft-sub">{m.barsAgo === 0 ? '현재 봉' : `${m.barsAgo}봉 전`}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {smc.orderBlocks.length > 0 && (
+                <div className="smc-section">
+                    <div className="sa-group-label">Order Block</div>
+                    {smc.orderBlocks.slice(0, 3).map((ob, i) => (
+                        <div key={i} className="smc-zone-item">
+                            <span className="smc-zone-label">OB #{i + 1}</span>
+                            <span className="smc-zone-prices">
+                                {fmtPrice(ob.bottom)} ~ {fmtPrice(ob.top)}
+                                <span className={`smc-relation-badge ${ob.relation.toLowerCase()}`}>{ob.relation}</span>
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {smc.fvgs.length > 0 && (
+                <div className="smc-section">
+                    <div className="sa-group-label">Fair Value Gap</div>
+                    {smc.fvgs.slice(0, 3).map((fvg, i) => (
+                        <div key={i} className="smc-zone-item">
+                            <span className="smc-zone-label">{fvg.type} FVG</span>
+                            <span className="smc-zone-prices">
+                                {fmtPrice(fvg.bottom)} ~ {fmtPrice(fvg.top)}
+                                <span className={`smc-relation-badge ${fvg.relation.toLowerCase()}`}>{fvg.relation}</span>
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            <div className={`smc-bias-badge ${smc.smcBias.toLowerCase()}`}>
+                SMC: {smc.smcLabel}
+            </div>
+        </div>
+    );
+}
+
 // --- Main Component ---
 
-export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelectTicker }: SignalAnalysisProps) {
+export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelectTicker, refetch }: SignalAnalysisProps) {
     const isIndex = ticker.startsWith('^');
     const current = data.length > 0 ? data[data.length - 1] : null;
     const previous = data.length > 1 ? data[data.length - 2] : null;
+
+    // On-demand technical analysis state
+    const [techAnalysis, setTechAnalysis] = useState<FuturesAnalysis | null>(null);
+    const [atrEntry, setAtrEntry] = useState<ATREntryCalc | null>(null);
+    const [isAnalyzed, setIsAnalyzed] = useState(false);
+
+    // Clear analysis when ticker changes
+    useEffect(() => {
+        setTechAnalysis(null);
+        setAtrEntry(null);
+        setIsAnalyzed(false);
+    }, [ticker]);
+
+    const handleAnalyze = () => {
+        const result = analyzeFutures(data);
+        const atr = computeATREntry(data);
+        setTechAnalysis(result);
+        setAtrEntry(atr);
+        setIsAnalyzed(true);
+    };
+
+    const handleRefreshAnalyze = () => {
+        setTechAnalysis(null);
+        setAtrEntry(null);
+        setIsAnalyzed(false);
+        if (refetch) refetch();
+    };
 
     // Price info
     const priceChange = current && previous
@@ -514,18 +666,14 @@ export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelec
         : 0;
     const fmtPrice = (v: number) => `${currencySymbol}${v.toLocaleString(undefined, { maximumFractionDigits: isKorean ? 0 : 2 })}`;
 
-    // Stock analysis
+    // Stock analysis (auto-computed for non-index tickers)
     const volumeMA = computeVolumeMA(data, 20);
     const analysis = !isIndex && current && previous
-        ? analyzeEntrySignals(current, previous, volumeMA)
+        ? analyzeEntrySignals(current, previous, volumeMA, data)
         : null;
     const exitLevels = !isIndex && current && previous && current.close
-        ? calculateExitLevels(current.close, current, previous)
+        ? calculateExitLevels(current.close, current, previous, data)
         : null;
-
-    // Futures analysis for indices
-    const futuresAnalysis = isIndex ? analyzeFutures(data) : null;
-    const atrEntry = isIndex ? computeATREntry(data) : null;
 
     const verdictStyle = analysis ? VERDICT_STYLE[analysis.verdict] : null;
 
@@ -543,12 +691,78 @@ export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelec
                 </div>
             )}
 
-            {/* Futures Analysis for Index tickers */}
-            {isIndex && futuresAnalysis && (
-                <FuturesPanel analysis={futuresAnalysis} fmtPrice={fmtPrice} atrEntry={atrEntry} ticker={ticker} onSelectTicker={onSelectTicker} />
+            {/* Index Quick Select */}
+            {isIndex && onSelectTicker && (
+                <div className="index-quick-btns">
+                    {INDEX_BUTTONS.map(idx => (
+                        <button
+                            key={idx.symbol}
+                            className={`index-btn ${ticker === idx.symbol ? 'active' : ''}`}
+                            onClick={() => onSelectTicker(idx.symbol)}
+                        >
+                            {idx.label}
+                        </button>
+                    ))}
+                </div>
             )}
 
-            {/* Stock Signal Analysis */}
+            {/* Technical Analysis Trigger */}
+            <div className="sa-analyze-section glass-panel">
+                <div className="sa-analyze-header">
+                    <h3 className="sa-section-title">
+                        <Activity size={16} />
+                        Technical Analysis
+                    </h3>
+                    {isAnalyzed && (
+                        <span className="sa-analyze-badge">Analyzed</span>
+                    )}
+                </div>
+                <div className="sa-analyze-actions">
+                    <button
+                        className={`sa-analyze-btn ${isAnalyzed ? 'analyzed' : ''}`}
+                        onClick={handleAnalyze}
+                    >
+                        <BarChart2 size={16} />
+                        {isAnalyzed ? 'Re-analyze' : 'Analyze'}
+                    </button>
+                    {refetch && (
+                        <button
+                            className="sa-refresh-btn"
+                            onClick={handleRefreshAnalyze}
+                            title="Refresh data from server"
+                        >
+                            <RefreshCw size={14} />
+                        </button>
+                    )}
+                </div>
+                {!isAnalyzed && (
+                    <p className="sa-analyze-hint">
+                        Trend, Momentum, Volatility, Key Levels 분석을 실행합니다.
+                    </p>
+                )}
+            </div>
+
+            {/* On-demand: ATR Entry Calculator */}
+            {isAnalyzed && atrEntry && (
+                <ATREntryPanel calc={atrEntry} fmtPrice={fmtPrice} />
+            )}
+
+            {/* On-demand: Technical Analysis Panels */}
+            {isAnalyzed && techAnalysis && (
+                <TechAnalysisPanels analysis={techAnalysis} fmtPrice={fmtPrice} />
+            )}
+
+            {/* Trend Overview (auto-computed for stocks) */}
+            {!isIndex && analysis?.trendFilter && (
+                <TrendOverviewPanel trend={analysis.trendFilter} />
+            )}
+
+            {/* SMC Panel (auto-computed for stocks) */}
+            {!isIndex && analysis?.smcAnalysis && (
+                <SMCPanel smc={analysis.smcAnalysis} fmtPrice={fmtPrice} />
+            )}
+
+            {/* Stock Signal Analysis (auto-computed, enhanced) */}
             {!isIndex && analysis && (
                 <div className="sa-entry-section glass-panel">
                     <h3 className="sa-section-title">
@@ -556,11 +770,14 @@ export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelec
                         Entry Signal Analysis
                     </h3>
 
+                    {/* Confidence Score */}
+                    <ConfidenceBar score={analysis.confidenceScore} label={analysis.confidenceLabel} />
+
                     {/* Strength + Verdict */}
                     <div className="sa-verdict-area">
                         <div className="sa-strength-row">
                             <span className="sa-label">Signal Strength</span>
-                            <StrengthBar strength={analysis.strength} />
+                            <StrengthBar strength={analysis.strength} max={8} />
                         </div>
                         {verdictStyle && (
                             <div className={`sa-verdict ${verdictStyle.className}`}>
@@ -582,15 +799,15 @@ export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelec
                         {analysis.confirmations.map(s => <SignalItem key={s.id} check={s} />)}
                     </div>
 
-                    {/* Risk Gate */}
+                    {/* Risk Gates */}
                     <div className="sa-signal-group">
-                        <div className="sa-group-label">Risk Gate</div>
+                        <div className="sa-group-label">Risk Gates</div>
                         {analysis.riskGates.map(s => <SignalItem key={s.id} check={s} />)}
                     </div>
                 </div>
             )}
 
-            {/* Exit Reference */}
+            {/* Enhanced Exit Reference */}
             {!isIndex && exitLevels && current?.close && (
                 <div className="sa-exit-section glass-panel">
                     <h3 className="sa-section-title">
@@ -598,23 +815,76 @@ export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelec
                         Exit Reference
                     </h3>
                     <div className="exit-levels">
-                        <div className="exit-item">
-                            <span className="exit-label exit-loss">ES1 손절 -3%</span>
-                            <span className="exit-value">{fmtPrice(exitLevels.stopLoss)}</span>
+                        {/* Fixed Exits */}
+                        <div className="exit-group">
+                            <div className="exit-group-title">고정 청산</div>
+                            <div className="exit-item">
+                                <span className="exit-label exit-loss">ES1 손절 -3%</span>
+                                <span className="exit-value">{fmtPrice(exitLevels.stopLoss)}</span>
+                            </div>
+                            <div className="exit-item">
+                                <span className="exit-label exit-profit">ES2 익절 +7%</span>
+                                <span className="exit-value">{fmtPrice(exitLevels.takeProfit)}</span>
+                            </div>
                         </div>
-                        <div className="exit-item">
-                            <span className="exit-label exit-profit">ES2 익절 +7%</span>
-                            <span className="exit-value">{fmtPrice(exitLevels.takeProfit)}</span>
+
+                        {/* ATR Dynamic Exits */}
+                        {exitLevels.atrValue != null && (
+                            <div className="exit-group">
+                                <div className="exit-group-title">ATR 동적 청산 ({exitLevels.dynamicMultiplier}x ATR)</div>
+                                {exitLevels.atrStopLoss != null && (
+                                    <div className="exit-item">
+                                        <span className="exit-label exit-loss">ATR 손절</span>
+                                        <span className="exit-value">{fmtPrice(exitLevels.atrStopLoss)}</span>
+                                    </div>
+                                )}
+                                {exitLevels.atrTakeProfit != null && (
+                                    <div className="exit-item">
+                                        <span className="exit-label exit-profit">ATR 익절 (2x)</span>
+                                        <span className="exit-value">{fmtPrice(exitLevels.atrTakeProfit)}</span>
+                                    </div>
+                                )}
+                                {exitLevels.trailingStop != null && (
+                                    <div className="exit-item">
+                                        <span className="exit-label">ES3 트레일링 (1.5x)</span>
+                                        <span className="exit-value">{fmtPrice(exitLevels.trailingStop)}</span>
+                                    </div>
+                                )}
+                                {exitLevels.chandelierExit != null && (
+                                    <div className="exit-item">
+                                        <span className="exit-label">샹들리에 (3x)</span>
+                                        <span className="exit-value">{fmtPrice(exitLevels.chandelierExit)}</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Effective Levels */}
+                        <div className="exit-group">
+                            <div className="exit-group-title">적용 청산가</div>
+                            <div className="exit-item exit-effective-highlight">
+                                <span className="exit-label exit-effective-label">적용 손절</span>
+                                <span className="exit-value">{fmtPrice(exitLevels.effectiveStopLoss)}</span>
+                            </div>
+                            <div className="exit-item exit-effective-highlight">
+                                <span className="exit-label exit-effective-label">적용 익절</span>
+                                <span className="exit-value">{fmtPrice(exitLevels.effectiveTakeProfit)}</span>
+                            </div>
                         </div>
-                        <div className="exit-item">
-                            <span className="exit-label">ES4 데드크로스</span>
-                            <span className={`exit-value ${exitLevels.deadCrossActive ? 'exit-loss' : ''}`}>
-                                {exitLevels.deadCrossActive ? '발생 중' : '미발생'}
-                            </span>
-                        </div>
-                        <div className="exit-item">
-                            <span className="exit-label">ES5 보유한도</span>
-                            <span className="exit-value">{exitLevels.maxHoldingDays}일</span>
+
+                        {/* Other Exit Conditions */}
+                        <div className="exit-group">
+                            <div className="exit-group-title">기타 청산 조건</div>
+                            <div className="exit-item">
+                                <span className="exit-label">ES4 데드크로스</span>
+                                <span className={`exit-value ${exitLevels.deadCrossActive ? 'exit-loss' : ''}`}>
+                                    {exitLevels.deadCrossActive ? '발생 중' : '미발생'}
+                                </span>
+                            </div>
+                            <div className="exit-item">
+                                <span className="exit-label">ES5 보유한도</span>
+                                <span className="exit-value">{exitLevels.maxHoldingDays}일</span>
+                            </div>
                         </div>
                     </div>
                 </div>

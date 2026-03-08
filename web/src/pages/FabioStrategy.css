@@ -1,0 +1,1045 @@
+/* Fabio Strategy Page Styles */
+
+.fb-page {
+  min-height: 100vh;
+  background: #060910;
+  color: #dfe3ed;
+  font-family: 'DM Sans','Manrope',-apple-system,sans-serif;
+}
+
+/* ── Header ── */
+.fb-header {
+  background: linear-gradient(180deg, #0b0f18, #060910);
+  border-bottom: 1px solid #1c2336;
+  padding: 14px 18px;
+}
+.fb-header-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.fb-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.fb-logo-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #ff6b35, #c2185b);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  font-weight: 900;
+  color: #fff;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+.fb-logo-title {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.fb-logo-sub {
+  font-size: 8px;
+  color: #6b7594;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  letter-spacing: 0.06em;
+}
+.fb-back-btn {
+  font-size: 11px;
+  color: #6b7594;
+  text-decoration: none;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  padding: 4px 10px;
+  border: 1px solid #1c2336;
+  border-radius: 5px;
+  transition: all 0.15s;
+}
+.fb-back-btn:hover {
+  color: #3b82f6;
+  border-color: #3b82f6;
+}
+
+/* Asset btns */
+.fb-asset-btns { display: flex; gap: 6px; }
+.fb-asset-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.fb-asset-btn.active {
+  border: 1px solid #3b82f6;
+  background: rgba(59,130,246,0.13);
+  color: #3b82f6;
+}
+.fb-asset-btn:not(.active) {
+  border: 1px solid #1c2336;
+  background: #101520;
+  color: #6b7594;
+}
+
+/* Verdict */
+.fb-verdict {
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  letter-spacing: 0.04em;
+}
+.fb-verdict-grade {
+  font-size: 16px;
+  font-weight: 900;
+}
+
+/* Body */
+.fb-body {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 18px 18px 40px;
+}
+.fb-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.fb-sidebar { width: 260px; flex-shrink: 0; }
+.fb-main { flex: 1; min-width: 300px; }
+
+/* Box */
+.fb-box {
+  background: linear-gradient(145deg, #101520, #161c2a);
+  border: 1px solid #1c2336;
+  border-radius: 10px;
+  padding: 18px;
+  margin-bottom: 14px;
+}
+
+/* Section header */
+.fb-sec {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #1c2336;
+}
+.fb-sec-icon { font-size: 15px; }
+.fb-sec-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #dfe3ed;
+}
+
+/* Pill */
+.fb-pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  letter-spacing: 0.04em;
+}
+
+/* Metric */
+.fb-met { flex: 1; min-width: 80px; }
+.fb-met.big { min-width: 110px; }
+.fb-met-label {
+  font-size: 9px;
+  color: #3e4868;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 4px;
+}
+.fb-met-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  line-height: 1.15;
+}
+.fb-met-value.big { font-size: 24px; }
+.fb-met-sub {
+  font-size: 9.5px;
+  color: #6b7594;
+  margin-top: 3px;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+
+/* Input */
+.fb-input-group { margin-bottom: 10px; }
+.fb-input-label {
+  display: block;
+  font-size: 9px;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  color: #6b7594;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 3px;
+}
+.fb-input-row { display: flex; gap: 5px; align-items: center; }
+.fb-input {
+  width: 100%;
+  padding: 5px 8px;
+  background: #060910;
+  border: 1px solid #1c2336;
+  border-radius: 5px;
+  color: #dfe3ed;
+  font-size: 12px;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+.fb-input:focus { border-color: #3b82f6; }
+.fb-input-unit {
+  font-size: 9px;
+  color: #3e4868;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  white-space: nowrap;
+}
+.fb-input-help {
+  font-size: 8px;
+  color: #3e4868;
+  margin-top: 1px;
+  display: block;
+}
+
+/* Textarea */
+.fb-textarea {
+  width: 100%;
+  padding: 6px 8px;
+  background: #060910;
+  border: 1px solid rgba(59,130,246,0.25);
+  border-radius: 6px;
+  color: #dfe3ed;
+  font-size: 10px;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  outline: none;
+  resize: vertical;
+  line-height: 1.5;
+  box-sizing: border-box;
+}
+.fb-textarea:focus { border-color: #3b82f6; }
+.fb-link-btn {
+  font-size: 9px;
+  color: #3b82f6;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  text-decoration: underline;
+}
+
+/* ── AMT Steps ── */
+.fb-amt-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fb-amt-step {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+.fb-amt-step.pass {
+  background: rgba(0,230,118,0.03);
+  border: 1px solid rgba(0,230,118,0.12);
+}
+.fb-amt-step.fail {
+  background: rgba(255,23,68,0.02);
+  border: 1px solid rgba(255,23,68,0.10);
+}
+.fb-amt-step-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  flex-shrink: 0;
+}
+.fb-amt-step-body { flex: 1; }
+.fb-amt-step-title {
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.fb-amt-step-detail {
+  font-size: 10px;
+  color: #6b7594;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  margin-bottom: 6px;
+}
+.fb-amt-bar {
+  height: 4px;
+  background: #060910;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.fb-amt-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s;
+}
+
+/* Model banner */
+.fb-model-banner {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: rgba(59,130,246,0.05);
+  border: 1px solid rgba(59,130,246,0.20);
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ── Triple-A ── */
+.fb-triple-a {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.fb-triple-a-card {
+  flex: 1;
+  min-width: 140px;
+  padding: 12px;
+  background: #060910;
+  border: 1px solid #1c2336;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+.fb-triple-a-card.active {
+  border-color: rgba(0,230,118,0.25);
+  background: rgba(0,230,118,0.03);
+}
+.fb-triple-a-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.fb-triple-a-icon { font-size: 16px; }
+.fb-triple-a-label {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+.fb-triple-a-sub {
+  font-size: 9px;
+  color: #6b7594;
+}
+.fb-triple-a-bar {
+  height: 5px;
+  background: #161c2a;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.fb-triple-a-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s;
+}
+.fb-triple-a-score {
+  font-size: 10px;
+  color: #6b7594;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+.fb-full-alignment {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(0,230,118,0.06);
+  border: 1px solid rgba(0,230,118,0.20);
+  border-radius: 7px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #00e676;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+
+/* ── Grade ── */
+.fb-grade-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.fb-grade-circle {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 3px solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 900;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  flex-shrink: 0;
+}
+.fb-confluence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.fb-confluence-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  background: rgba(255,23,68,0.02);
+  border: 1px solid rgba(255,23,68,0.08);
+}
+.fb-confluence-item.met {
+  background: rgba(0,230,118,0.02);
+  border-color: rgba(0,230,118,0.10);
+}
+.fb-confluence-check {
+  font-size: 12px;
+  font-weight: 700;
+  width: 18px;
+  text-align: center;
+}
+.fb-confluence-label {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+.fb-confluence-detail {
+  font-size: 9px;
+  color: #6b7594;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+.fb-grade-position {
+  margin-top: 14px;
+  padding: 14px;
+  background: #060910;
+  border-radius: 8px;
+  text-align: center;
+}
+.fb-grade-contracts {
+  font-size: 40px;
+  font-weight: 800;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+
+/* ── Checklist ── */
+.fb-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fb-check-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid #1c2336;
+  transition: all 0.15s;
+}
+.fb-check-item.manual { cursor: pointer; }
+.fb-check-item.manual:hover { background: rgba(59,130,246,0.04); }
+.fb-check-item.done { background: rgba(0,230,118,0.03); border-color: rgba(0,230,118,0.12); }
+.fb-check-item.auto { opacity: 0.9; }
+.fb-check-num {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #161c2a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: #6b7594;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  flex-shrink: 0;
+}
+.fb-check-box {
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid #1c2336;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.fb-check-label {
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fb-check-auto {
+  font-size: 7.5px;
+  color: #3b82f6;
+  background: rgba(59,130,246,0.12);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  letter-spacing: 0.06em;
+}
+.fb-check-detail {
+  font-size: 9px;
+  color: #6b7594;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+.fb-ready-banner {
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(0,230,118,0.06);
+  border: 1px solid rgba(0,230,118,0.25);
+  border-radius: 7px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #00e676;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+
+/* ── Verify (실행확인) ── */
+.fb-check-group {
+  display: flex;
+  flex-direction: column;
+}
+.fb-verify-btn {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid rgba(59,130,246,0.30);
+  background: rgba(59,130,246,0.06);
+  color: #3b82f6;
+  white-space: nowrap;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.fb-verify-btn:hover {
+  background: rgba(59,130,246,0.14);
+  border-color: #3b82f6;
+}
+.fb-verify-btn.active {
+  background: rgba(59,130,246,0.14);
+  border-color: #3b82f6;
+  box-shadow: 0 0 6px rgba(59,130,246,0.15);
+}
+.fb-verify-btn.all-done {
+  border-color: rgba(0,230,118,0.35);
+  background: rgba(0,230,118,0.08);
+  color: #00e676;
+}
+.fb-verify-count {
+  font-size: 8px;
+  opacity: 0.7;
+}
+.fb-verify-panel {
+  margin: 0 0 4px 27px;
+  padding: 10px 12px;
+  background: #060910;
+  border: 1px solid rgba(59,130,246,0.18);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  animation: fb-verify-slide 0.15s ease-out;
+}
+@keyframes fb-verify-slide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fb-verify-title {
+  font-size: 9px;
+  font-weight: 700;
+  color: #3b82f6;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.fb-verify-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.12s;
+  margin-bottom: 3px;
+}
+.fb-verify-item:hover {
+  background: rgba(59,130,246,0.04);
+}
+.fb-verify-item.done {
+  background: rgba(0,230,118,0.03);
+}
+.fb-verify-check {
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid #1c2336;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  transition: all 0.12s;
+}
+.fb-verify-content {
+  flex: 1;
+}
+.fb-verify-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #dfe3ed;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  margin-bottom: 2px;
+}
+.fb-verify-hint {
+  font-size: 9px;
+  color: #6b7594;
+  line-height: 1.5;
+}
+.fb-verify-complete-hint {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(0,230,118,0.05);
+  border: 1px solid rgba(0,230,118,0.15);
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 600;
+  color: #00e676;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  text-align: center;
+}
+
+/* ── Auto-verify styles ── */
+.fb-verify-auto-badge {
+  display: inline-block;
+  margin-left: 3px;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-size: 7px;
+  font-weight: 700;
+  background: rgba(0,229,255,0.15);
+  color: #00e5ff;
+  letter-spacing: 0.04em;
+}
+.fb-verify-title-auto {
+  margin-left: 8px;
+  font-size: 8px;
+  font-weight: 600;
+  color: #00e5ff;
+  background: rgba(0,229,255,0.10);
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+}
+.fb-verify-item.auto-verified {
+  background: rgba(0,229,255,0.03);
+  cursor: default;
+}
+.fb-verify-item.auto-verified:hover {
+  background: rgba(0,229,255,0.05);
+}
+.fb-verify-auto-tag {
+  font-size: 7px;
+  color: #00e5ff;
+  background: rgba(0,229,255,0.15);
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  letter-spacing: 0.06em;
+  margin-left: 5px;
+  font-weight: 700;
+}
+.fb-verify-auto-detail {
+  font-size: 9px;
+  color: #00e5ff;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+
+/* ── Session Tracker ── */
+.fb-session-stats {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.fb-stop-banner {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: rgba(255,23,68,0.08);
+  border: 1px solid rgba(255,23,68,0.25);
+  border-radius: 7px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #ff1744;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+.fb-loss-bar {
+  height: 5px;
+  background: #060910;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.fb-loss-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+/* Buttons */
+.fb-trade-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+.fb-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid #1c2336;
+}
+.fb-btn-primary {
+  background: rgba(59,130,246,0.12);
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+.fb-btn-primary:hover { background: rgba(59,130,246,0.22); }
+.fb-btn-ghost {
+  background: transparent;
+  color: #6b7594;
+}
+.fb-btn-ghost:hover { background: rgba(255,255,255,0.04); }
+.fb-btn-active {
+  background: rgba(59,130,246,0.08);
+  border-color: #3b82f6;
+}
+
+/* Trade form */
+.fb-trade-form {
+  margin-top: 10px;
+  padding: 12px;
+  background: #060910;
+  border-radius: 8px;
+  border: 1px solid #273048;
+}
+.fb-trade-form-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+/* Trade history */
+.fb-trade-history {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.fb-trade-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: #060910;
+  border-radius: 5px;
+  font-size: 10px;
+}
+
+/* ── Reference grid ── */
+.fb-ref-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.fb-ref-card {
+  padding: 10px 12px;
+  background: #060910;
+  border-radius: 6px;
+}
+.fb-ref-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: #3b82f6;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+  margin-bottom: 5px;
+}
+.fb-ref-rule {
+  font-size: 9px;
+  color: #6b7594;
+  line-height: 1.5;
+}
+
+/* Footer */
+.fb-footer {
+  border-top: 1px solid #1c2336;
+  padding: 12px 18px;
+  text-align: center;
+  font-size: 9px;
+  color: #3e4868;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+
+/* ── Backtest Panel ── */
+.fb-bt-config {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.fb-bt-summary {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 14px;
+  background: #060910;
+  border-radius: 8px;
+}
+.fb-bt-details {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.fb-bt-equity {
+  margin-top: 12px;
+  padding: 10px;
+  background: #060910;
+  border-radius: 8px;
+}
+.fb-bt-dist {
+  display: flex;
+  gap: 14px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+.fb-bt-dist-col {
+  flex: 1;
+  min-width: 160px;
+}
+.fb-bt-dist-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.fb-bt-dist-bar {
+  flex: 1;
+  height: 6px;
+  background: #161c2a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.fb-bt-log {
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: 10px;
+  font-family: 'IBM Plex Mono','Fira Code',monospace;
+}
+.fb-bt-log-header {
+  display: grid;
+  grid-template-columns: 40px 30px 70px 70px 60px 40px 55px;
+  gap: 4px;
+  padding: 4px 6px;
+  color: #3e4868;
+  font-size: 8px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid #1c2336;
+  position: sticky;
+  top: 0;
+  background: linear-gradient(145deg, #101520, #161c2a);
+}
+.fb-bt-log-row {
+  display: grid;
+  grid-template-columns: 40px 30px 70px 70px 60px 40px 55px;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid #1c233620;
+  color: #6b7594;
+}
+.fb-bt-log-row:hover {
+  background: rgba(59,130,246,0.04);
+}
+
+/* ── Multi-Strategy Panel ── */
+.fb-regime-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+.fb-regime-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+.fb-regime-bar-segment {
+  height: 100%;
+  transition: width 0.3s;
+}
+.fb-strategy-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 10px 0;
+}
+.fb-strategy-card {
+  background: #0b0f18;
+  border: 1px solid #1c2336;
+  border-radius: 8px;
+  padding: 12px;
+  transition: border-color 0.2s;
+}
+.fb-strategy-card.recommended {
+  border-color: #3b82f680;
+  box-shadow: 0 0 8px #3b82f620;
+}
+.fb-strategy-card-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fb-strategy-signal-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.fb-strategy-detail {
+  font-size: 11px;
+  color: #6b7594;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+.fb-strategy-detail strong {
+  color: #dfe3ed;
+}
+.fb-ms-recommend {
+  background: #3b82f610;
+  border: 1px solid #3b82f630;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  margin: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fb-ms-backtest-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin: 8px 0;
+}
+.fb-ms-backtest-table th,
+.fb-ms-backtest-table td {
+  padding: 6px 8px;
+  text-align: right;
+  border-bottom: 1px solid #1c233650;
+}
+.fb-ms-backtest-table th {
+  color: #6b7594;
+  font-weight: 500;
+  text-align: right;
+}
+.fb-ms-backtest-table th:first-child,
+.fb-ms-backtest-table td:first-child {
+  text-align: left;
+}
+.fb-ms-backtest-table tr.best-row {
+  background: #3b82f608;
+}
+.fb-ms-regime-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin: 8px 0;
+}
+.fb-ms-regime-table th,
+.fb-ms-regime-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid #1c233640;
+  text-align: right;
+}
+.fb-ms-regime-table th {
+  color: #6b7594;
+  font-weight: 500;
+}
+.fb-ms-regime-table th:first-child,
+.fb-ms-regime-table td:first-child {
+  text-align: left;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .fb-sidebar { width: 100%; }
+  .fb-layout { flex-direction: column; }
+  .fb-verdict { font-size: 10px; }
+  .fb-triple-a { flex-direction: column; }
+  .fb-strategy-cards { grid-template-columns: 1fr; }
+}

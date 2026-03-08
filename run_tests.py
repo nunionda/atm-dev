@@ -17,7 +17,7 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "ats"))
 
 import numpy as np
 import pandas as pd
@@ -299,9 +299,10 @@ def test_suite_strategy():
 
     def test_stop_loss_es1():
         pos = MockPosition()
+        # entry=70000, price=66000 → -5.7% → ES1 -5% 트리거
         prices = {
-            "005930": PriceData("005930", "삼성전자", 67000, 68000, 68500,
-                                66500, 69000, 20000000, -2.9, datetime.now().isoformat()),
+            "005930": PriceData("005930", "삼성전자", 66000, 66500, 67000,
+                                65500, 69000, 20000000, -5.7, datetime.now().isoformat()),
         }
         exits = strategy.scan_exit_signals([pos], {"005930": pd.DataFrame()}, prices)
         assert len(exits) == 1
@@ -310,16 +311,18 @@ def test_suite_strategy():
 
     def test_take_profit_es2():
         pos = MockPosition()
+        # entry=70000, price=85000 → +21.4% → ES2 +20% 트리거
         prices = {
-            "005930": PriceData("005930", "삼성전자", 75000, 74000, 75500,
-                                73500, 74000, 18000000, 1.35, datetime.now().isoformat()),
+            "005930": PriceData("005930", "삼성전자", 85000, 84000, 85500,
+                                83500, 84000, 18000000, 21.4, datetime.now().isoformat()),
         }
         exits = strategy.scan_exit_signals([pos], {"005930": pd.DataFrame()}, prices)
         assert len(exits) == 1
         assert exits[0].exit_type == "ES2"
 
     def test_max_holding_es5():
-        pos = MockPosition(holding_days=11)
+        # max_holding_days=40 (BULL), holding_days=41 → ES5 트리거
+        pos = MockPosition(holding_days=41)
         prices = {
             "005930": PriceData("005930", "삼성전자", 71000, 70500, 71500,
                                 70000, 70800, 12000000, 0.28, datetime.now().isoformat()),
@@ -345,9 +348,9 @@ def test_suite_strategy():
     run_test("TC-STR-005: 짧은 DataFrame 처리", test_short_df)
     run_test("TC-STR-006: 진입 시그널 리스트 반환", test_entry_returns_list)
     run_test("TC-STR-007: 데이터 부족 시 시그널 없음", test_no_signal_insufficient_data)
-    run_test("TC-STR-008: ES1 손절 시그널 (-3%↓)", test_stop_loss_es1)
-    run_test("TC-STR-009: ES2 익절 시그널 (+7%↑)", test_take_profit_es2)
-    run_test("TC-STR-010: ES5 보유기간 초과 (>10일)", test_max_holding_es5)
+    run_test("TC-STR-008: ES1 손절 시그널 (-5%↓)", test_stop_loss_es1)
+    run_test("TC-STR-009: ES2 익절 시그널 (+20%↑)", test_take_profit_es2)
+    run_test("TC-STR-010: ES5 보유기간 초과 (>40일)", test_max_holding_es5)
     run_test("TC-STR-011: HOLD (청산조건 없음)", test_hold_no_exit)
 
 
@@ -363,8 +366,8 @@ def test_suite_risk_manager():
     from common.types import Signal, Portfolio
 
     config = ATSConfig(
-        portfolio=PortfolioConfig(max_positions=10, max_weight_per_stock=0.15, min_cash_ratio=0.20),
-        risk=RiskConfig(daily_loss_limit=-0.03, mdd_limit=-0.10, max_order_amount=3_000_000),
+        portfolio=PortfolioConfig(max_positions=10, max_weight_per_stock=0.15, min_cash_ratio=0.30),
+        risk=RiskConfig(daily_loss_limit=-0.05, mdd_limit=-0.15, max_order_amount=3_000_000),
     )
     rm = RiskManager(config)
 
@@ -410,16 +413,19 @@ def test_suite_risk_manager():
         assert rm.check_daily_loss_limit(Portfolio(total_capital=10_000_000, daily_pnl=50000)) is False
 
     def test_daily_loss_at_limit():
-        assert rm.check_daily_loss_limit(Portfolio(total_capital=10_000_000, daily_pnl=-300_000)) is True
-
-    def test_daily_loss_exceeded():
+        # BR-R01: -5% → 10M × -5% = -500K
         assert rm.check_daily_loss_limit(Portfolio(total_capital=10_000_000, daily_pnl=-500_000)) is True
 
+    def test_daily_loss_exceeded():
+        # -8% > -5% → 매매 중단
+        assert rm.check_daily_loss_limit(Portfolio(total_capital=10_000_000, daily_pnl=-800_000)) is True
+
     def test_mdd_within():
-        assert rm.check_mdd_limit(Portfolio(mdd=-0.05)) is False
+        assert rm.check_mdd_limit(Portfolio(mdd=-0.10)) is False
 
     def test_mdd_at_limit():
-        assert rm.check_mdd_limit(Portfolio(mdd=-0.10)) is True
+        # BR-R02: MDD -15% → 시스템 정지
+        assert rm.check_mdd_limit(Portfolio(mdd=-0.15)) is True
 
     def test_buy_qty_normal():
         qty = rm.calculate_buy_quantity(72000.0, pf())
@@ -445,10 +451,10 @@ def test_suite_risk_manager():
     run_test("TC-RSK-005: RG4 BB 상단 정확히 도달", test_rg4_exact_boundary)
     run_test("TC-RSK-006: RG4 BB 상단 미만 통과", test_rg4_just_below)
     run_test("TC-RSK-007: 일일손실 한도 미달", test_daily_loss_no)
-    run_test("TC-RSK-008: 일일손실 -3% 도달", test_daily_loss_at_limit)
-    run_test("TC-RSK-009: 일일손실 -3% 초과", test_daily_loss_exceeded)
+    run_test("TC-RSK-008: 일일손실 -5% 도달 (BR-R01)", test_daily_loss_at_limit)
+    run_test("TC-RSK-009: 일일손실 -5% 초과", test_daily_loss_exceeded)
     run_test("TC-RSK-010: MDD 한도 내", test_mdd_within)
-    run_test("TC-RSK-011: MDD -10% 도달", test_mdd_at_limit)
+    run_test("TC-RSK-011: MDD -15% 도달 (BR-R02)", test_mdd_at_limit)
     run_test("TC-RSK-012: 매수수량 정상계산 (20주)", test_buy_qty_normal)
     run_test("TC-RSK-013: 현금부족 시 0주", test_buy_qty_no_cash)
     run_test("TC-RSK-014: 현재가 0 시 0주", test_buy_qty_zero_price)

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { FileText, ArrowUpRight, ArrowDownRight } from 'lucide-react';
-import type { Order } from '../../lib/api';
-import { fetchOrders } from '../../lib/api';
+import type { Order, MarketId } from '../../lib/api';
+import { fetchOrders, getMarketConfig } from '../../lib/api';
 import { useSSE } from '../../hooks/useSSE';
 import './OrderLog.css';
 
@@ -13,19 +13,26 @@ const ORDER_STATUS_STYLE: Record<string, { label: string; color: string }> = {
     REJECTED: { label: '거부', color: '#ef4444' },
 };
 
-export function OrderLog() {
+interface Props {
+    market: MarketId;
+}
+
+export function OrderLog({ market }: Props) {
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
-    const sseData = useSSE<Order[]>('orders', fetchOrders);
+    const sseData = useSSE<Order[]>(`${market}:orders`, () => fetchOrders(market));
 
     useEffect(() => {
-        fetchOrders()
+        setLoading(true);
+        setOrders([]);
+        fetchOrders(market)
             .then(data => setOrders(data))
             .catch(() => {})
             .finally(() => setLoading(false));
-    }, []);
+    }, [market]);
 
     const displayOrders = sseData || orders;
+    const sym = getMarketConfig(market).currencySymbol;
 
     if (loading && !sseData) {
         return (
@@ -84,9 +91,9 @@ export function OrderLog() {
                                     <td className="type-cell">
                                         {order.order_type === 'LIMIT' ? '지정가' : '시장가'}
                                     </td>
-                                    <td className="num">₩{order.price.toLocaleString()}</td>
+                                    <td className="num">{sym}{order.price.toLocaleString()}</td>
                                     <td className="num">
-                                        {order.filled_price ? `₩${order.filled_price.toLocaleString()}` : '—'}
+                                        {order.filled_price ? `${sym}${order.filled_price.toLocaleString()}` : '—'}
                                     </td>
                                     <td className="num">
                                         {order.filled_quantity}/{order.quantity}

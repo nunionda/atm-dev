@@ -1,5 +1,8 @@
-import { useState, useReducer, useMemo } from 'react';
+import { useState, useReducer, useMemo, useCallback } from 'react';
 import { useAnalyticsData } from '../hooks/useAnalyticsData';
+import { usePolling } from '../hooks/usePolling';
+import { fetchAnalyticsData, type AnalyticsResponse } from '../lib/api';
+import { PollingControl } from '../components/PollingControl';
 import { TechnicalChart } from '../components/dashboard/TechnicalChart';
 import { ChartToolbar } from '../components/dashboard/ChartToolbar';
 import { TickerSearch } from '../components/dashboard/TickerSearch';
@@ -80,7 +83,17 @@ export function Dashboard() {
 
     // 4H fix: fetch 1h data when 4h is selected
     const fetchInterval = interval === '4h' ? '1h' : interval;
-    const { data, loading, error } = useAnalyticsData(ticker, period, fetchInterval);
+    const { data: initialData, loading, error, refetch } = useAnalyticsData(ticker, period, fetchInterval);
+
+    // Real-time polling
+    const pollingFetchFn = useCallback(
+      () => fetchAnalyticsData(ticker, period, fetchInterval),
+      [ticker, period, fetchInterval],
+    );
+    const polling = usePolling<AnalyticsResponse>(pollingFetchFn, { interval: 30000, enabled: false });
+
+    // Merge: polling data takes priority when available
+    const data = polling.data ?? initialData;
 
     // Data pipeline: raw → 4H aggregate → Heikin-Ashi
     // Guard: skip processing if data interval doesn't match current interval (stale data during switch)
@@ -162,11 +175,24 @@ export function Dashboard() {
                     <p className="page-subtitle">Real-time quantitative analysis and technical indicators.</p>
                 </div>
 
-                <TickerSearch
-                    onSelect={handleSelect}
-                    loading={loading}
-                    initialValue="005930"
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+                    <TickerSearch
+                        onSelect={handleSelect}
+                        loading={loading}
+                        initialValue="005930"
+                    />
+                    <PollingControl
+                        enabled={polling.enabled}
+                        onToggle={polling.setEnabled}
+                        interval={polling.interval}
+                        onIntervalChange={polling.setInterval}
+                        status={polling.status}
+                        lastUpdated={polling.lastUpdated}
+                        consecutiveErrors={polling.consecutiveErrors}
+                        onRefresh={() => { polling.fetchNow(); refetch(); }}
+                        compact
+                    />
+                </div>
             </div>
 
             {loading && !error && (
@@ -263,6 +289,7 @@ export function Dashboard() {
                             currencySymbol={currencySymbol}
                             isKorean={isKorean}
                             onSelectTicker={setTicker}
+                            refetch={refetch}
                         />
                     </div>
                 </div>

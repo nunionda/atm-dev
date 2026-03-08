@@ -1,0 +1,217 @@
+/* ── Glossary Components — Dark Theme ────────────────────────────── */
+
+/* ── Tooltip ── */
+.glossary-tooltip-wrap {
+  position: relative;
+  display: inline;
+}
+
+.glossary-tooltip-content {
+  position: absolute;
+  z-index: 200;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+
+  max-width: 280px;
+  min-width: 160px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #060910;
+  border: 1px solid #273048;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+
+  font-family: 'DM Sans', 'Manrope', -apple-system, sans-serif;
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: #dfe3ed;
+  white-space: pre-line;
+  text-align: left;
+}
+
+/* Arrow */
+.glossary-tooltip-content::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #273048;
+}
+
+/* Show on hover */
+.glossary-tooltip-wrap:hover .glossary-tooltip-content {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Bottom variant (for sidebar elements) */
+.glossary-tooltip-content.bottom {
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+.glossary-tooltip-content.bottom::after {
+  top: auto;
+  bottom: 100%;
+  border-top-color: transparent;
+  border-bottom-color: #273048;
+}
+
+/* Tooltip sub-sections */
+.glossary-tooltip-formula {
+  margin-top: 5px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: rgba(59, 130, 246, 0.08);
+  font-family: 'IBM Plex Mono', 'Fira Code', monospace;
+  font-size: 9.5px;
+  color: #4fc3f7;
+}
+
+.glossary-tooltip-tip {
+  margin-top: 5px;
+  padding-top: 4px;
+  border-top: 1px solid #1c2336;
+  font-size: 9.5px;
+  color: #ffab40;
+}
+
+/* ── Term (inline dotted-underline) ── */
+.glossary-term {
+  border-bottom: 1px dotted #6b7594;
+  cursor: help;
+  text-decoration: none;
+  color: inherit;
+}
+
+.glossary-term:hover {
+  border-bottom-color: #3b82f6;
+  color: #dfe3ed;
+}
+
+/* ── InfoCard ── */
+.glossary-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'DM Sans', sans-serif;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  vertical-align: middle;
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.glossary-info-btn:hover {
+  background: rgba(59, 130, 246, 0.25);
+  transform: scale(1.1);
+}
+
+.glossary-info-btn.active {
+  background: #3b82f6;
+  color: #060910;
+}
+
+/* Panel */
+.glossary-info-panel {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.3s ease, opacity 0.2s ease, margin 0.3s ease, padding 0.3s ease;
+  margin: 0;
+  padding: 0 14px;
+  border-radius: 6px;
+  background: rgba(11, 15, 24, 0.95);
+  border: 1px solid transparent;
+}
+
+.glossary-info-panel.open {
+  max-height: 400px;
+  opacity: 1;
+  margin: 10px 0 6px;
+  padding: 14px;
+  border-color: #1c2336;
+}
+
+.glossary-info-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.glossary-info-panel-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #dfe3ed;
+  font-family: 'DM Sans', 'Manrope', sans-serif;
+}
+
+.glossary-info-panel-title .icon {
+  margin-right: 6px;
+}
+
+.glossary-info-panel-close {
+  background: none;
+  border: none;
+  color: #6b7594;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.1s;
+}
+
+.glossary-info-panel-close:hover {
+  background: rgba(107, 117, 148, 0.15);
+  color: #dfe3ed;
+}
+
+.glossary-info-panel-body {
+  font-size: 11px;
+  line-height: 1.65;
+  color: #b8bdd0;
+  white-space: pre-line;
+  font-family: 'DM Sans', 'Manrope', sans-serif;
+}
+
+.glossary-info-panel-tip {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 5px;
+  background: rgba(255, 171, 64, 0.06);
+  border-left: 3px solid #ffab40;
+  font-size: 10.5px;
+  color: #ffab40;
+  line-height: 1.5;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .glossary-tooltip-content {
+    max-width: 220px;
+    font-size: 10px;
+  }
+
+  .glossary-info-panel.open {
+    padding: 10px;
+  }
+
+  .glossary-info-panel-body {
+    font-size: 10.5px;
+  }
+}

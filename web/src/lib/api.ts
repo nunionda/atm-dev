@@ -58,6 +58,71 @@ export async function fetchAnalyticsData(ticker: string, period: string = 'ytd',
     }
 }
 
+// --- Quote (lightweight polling endpoint) ---
+
+export interface QuoteCandle {
+    datetime: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+}
+
+export interface QuoteLatest {
+    price: number;
+    change: number;
+    change_pct: number;
+    high: number;
+    low: number;
+    volume: number;
+}
+
+export interface QuoteResponse {
+    ticker: string;
+    updated_at: string;
+    cached: boolean;
+    candles: QuoteCandle[];
+    latest: QuoteLatest;
+}
+
+export async function fetchQuote(ticker: string, count: number = 5): Promise<QuoteResponse> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+        const response = await fetch(
+            `${API_BASE_URL}/quote/${ticker}?count=${count}`,
+            { signal: controller.signal },
+        );
+        clearTimeout(timeout);
+        if (!response.ok) {
+            throw new Error(`Quote fetch failed for ${ticker}. Status: ${response.status}`);
+        }
+        return response.json();
+    } catch (error) {
+        clearTimeout(timeout);
+        throw error;
+    }
+}
+
+// --- Multi-Timeframe Data ---
+
+/**
+ * 멀티타임프레임 데이터 조회
+ * HTF: 1H (period='1mo'), LTF: 5min (period='5d')
+ * yfinance 제한: 5m → 최대 60일, 1h → 최대 730일
+ */
+export async function fetchMTFData(ticker: string): Promise<{
+    htf: AnalyticsResponse;
+    ltf: AnalyticsResponse;
+}> {
+    const [htf, ltf] = await Promise.all([
+        fetchAnalyticsData(ticker, '1mo', '1h'),
+        fetchAnalyticsData(ticker, '5d', '5m'),
+    ]);
+    return { htf, ltf };
+}
+
 // --- Ticker Search ---
 
 export interface SearchResult {
@@ -108,23 +173,57 @@ export interface MarketOverview {
 
 export async function fetchMarketOverview(): Promise<MarketOverview | null> {
     try {
-        const response = await fetch(`${API_BASE_URL}/market-overview`);
-        if (!response.ok) return null;
-        return await response.json();
-    } catch {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+        const response = await fetch(`${API_BASE_URL}/market-overview`, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (!response.ok) {
+            console.error(`[API] market-overview HTTP ${response.status}`);
+            return null;
+        }
+        const data = await response.json();
+        console.log(`[API] market-overview loaded: ${data.indices?.length} indices`);
+        return data;
+    } catch (error) {
+        console.error('[API] market-overview fetch failed:', error);
         return null;
     }
+}
+
+// --- Multi-Market ---
+
+export type MarketId = 'kospi' | 'sp500' | 'ndx';
+
+export interface MarketConfig {
+    id: MarketId;
+    label: string;
+    currency: string;
+    currencySymbol: string;
+    flag: string;
+}
+
+export const MARKETS: MarketConfig[] = [
+    { id: 'sp500', label: 'S&P 500', currency: 'USD', currencySymbol: '$', flag: '🇺🇸' },
+    { id: 'ndx', label: 'NASDAQ 100', currency: 'USD', currencySymbol: '$', flag: '🇺🇸' },
+    { id: 'kospi', label: 'KOSPI 200', currency: 'KRW', currencySymbol: '₩', flag: '🇰🇷' },
+];
+
+export function getMarketConfig(id: MarketId): MarketConfig {
+    return MARKETS.find(m => m.id === id) ?? MARKETS[0];
 }
 
 // --- System State ---
 
 export type SystemStatus = 'INIT' | 'READY' | 'RUNNING' | 'STOPPING' | 'STOPPED' | 'ERROR';
 
+export type MarketRegime = 'BULL' | 'BEAR' | 'NEUTRAL';
+
 export interface SystemState {
     status: SystemStatus;
     mode: 'PAPER' | 'LIVE';
     started_at: string | null;
     market_phase: 'PRE_MARKET' | 'OPEN' | 'CLOSED';
+    market_regime?: MarketRegime;
     next_scan_at: string | null;
     total_equity: number;
     cash: number;
@@ -133,6 +232,10 @@ export interface SystemState {
     daily_pnl_pct: number;
     position_count: number;
     max_positions: number;
+    market_id?: string;
+    currency?: string;
+    currency_symbol?: string;
+    market_label?: string;
 }
 
 // --- Positions ---
@@ -270,48 +373,202 @@ async function fetchOrMock<T>(url: string, mockFn: () => T): Promise<T> {
     return response.json();
 }
 
-export async function fetchSystemState(): Promise<SystemState> {
+export async function fetchSystemState(market: MarketId = 'kospi'): Promise<SystemState> {
     if (USE_MOCK) { const { mockSystemState } = await import('./mock'); return mockSystemState(); }
-    return fetchOrMock('/system/state', () => null as never);
+    return fetchOrMock(`/system/state?market=${market}`, () => null as never);
 }
 
-export async function fetchPositions(): Promise<Position[]> {
+export async function fetchPositions(market: MarketId = 'kospi'): Promise<Position[]> {
     if (USE_MOCK) { const { mockPositions } = await import('./mock'); return mockPositions(); }
-    return fetchOrMock('/positions', () => null as never);
+    return fetchOrMock(`/positions?market=${market}`, () => null as never);
 }
 
-export async function fetchOrders(): Promise<Order[]> {
+export async function fetchOrders(market: MarketId = 'kospi'): Promise<Order[]> {
     if (USE_MOCK) { const { mockOrders } = await import('./mock'); return mockOrders(); }
-    return fetchOrMock('/orders', () => null as never);
+    return fetchOrMock(`/orders?market=${market}`, () => null as never);
 }
 
-export async function fetchSignals(): Promise<Signal[]> {
+export async function fetchSignals(market: MarketId = 'kospi'): Promise<Signal[]> {
     if (USE_MOCK) { const { mockSignals } = await import('./mock'); return mockSignals(); }
-    return fetchOrMock('/signals/today', () => null as never);
+    return fetchOrMock(`/signals/today?market=${market}`, () => null as never);
 }
 
-export async function fetchRiskMetrics(): Promise<RiskMetrics> {
+export async function fetchRiskMetrics(market: MarketId = 'kospi'): Promise<RiskMetrics> {
     if (USE_MOCK) { const { mockRiskMetrics } = await import('./mock'); return mockRiskMetrics(); }
-    return fetchOrMock('/risk/metrics', () => null as never);
+    return fetchOrMock(`/risk/metrics?market=${market}`, () => null as never);
 }
 
-export async function fetchRiskEvents(): Promise<RiskEvent[]> {
+export async function fetchRiskEvents(market: MarketId = 'kospi'): Promise<RiskEvent[]> {
     if (USE_MOCK) { const { mockRiskEvents } = await import('./mock'); return mockRiskEvents(); }
-    return fetchOrMock('/risk/events', () => null as never);
+    return fetchOrMock(`/risk/events?market=${market}`, () => null as never);
 }
 
-export async function fetchPerformanceSummary(): Promise<PerformanceSummary> {
+export async function fetchPerformanceSummary(market: MarketId = 'kospi'): Promise<PerformanceSummary> {
     if (USE_MOCK) { const { mockPerformanceSummary } = await import('./mock'); return mockPerformanceSummary(); }
-    return fetchOrMock('/performance/summary', () => null as never);
+    return fetchOrMock(`/performance/summary?market=${market}`, () => null as never);
 }
 
-export async function fetchEquityCurve(): Promise<EquityPoint[]> {
+export async function fetchEquityCurve(market: MarketId = 'kospi'): Promise<EquityPoint[]> {
     if (USE_MOCK) { const { mockEquityCurve } = await import('./mock'); return mockEquityCurve(); }
-    return fetchOrMock('/performance/equity', () => null as never);
+    return fetchOrMock(`/performance/equity?market=${market}`, () => null as never);
 }
 
-export async function fetchTradeHistory(): Promise<TradeRecord[]> {
+export async function fetchTradeHistory(market: MarketId = 'kospi'): Promise<TradeRecord[]> {
     if (USE_MOCK) { const { mockTradeHistory } = await import('./mock'); return mockTradeHistory(); }
-    return fetchOrMock('/trades', () => null as never);
+    return fetchOrMock(`/trades?market=${market}`, () => null as never);
+}
+
+// --- Rebalance Types ---
+
+export interface RebalanceRecommendation {
+    rank: number;
+    code: string;
+    name: string;
+    sector: string;
+    score: number;
+    price: number;
+    return_6m?: string;
+    signal?: string;
+    pnl_pct?: number;
+    days_held?: number;
+    reason?: string;
+    action: 'BUY' | 'HOLD' | 'SELL';
+}
+
+export interface RebalanceResult {
+    market: string;
+    scan_date: string | null;
+    total_scanned: number;
+    passed_prefilter: number;
+    buy: RebalanceRecommendation[];
+    hold: RebalanceRecommendation[];
+    sell: RebalanceRecommendation[];
+}
+
+export interface RebalanceStatus {
+    market: string;
+    last_scan_date: string | null;
+    next_scan_date: string | null;
+    current_watchlist_count: number;
+    is_scanning: boolean;
+}
+
+// --- Rebalance API Functions ---
+
+export async function triggerRebalanceScan(market: MarketId): Promise<RebalanceResult> {
+    const response = await fetch(`${API_BASE_URL}/rebalance/scan?market=${market}`, { method: 'POST' });
+    if (!response.ok) throw new Error(`Scan failed: ${response.status}`);
+    return response.json();
+}
+
+export async function fetchRebalanceRecommendations(market: MarketId): Promise<RebalanceResult> {
+    return fetchOrMock(`/rebalance/recommendations?market=${market}`, () => ({
+        market,
+        scan_date: null,
+        total_scanned: 0,
+        passed_prefilter: 0,
+        buy: [],
+        hold: [],
+        sell: [],
+    }));
+}
+
+export async function fetchRebalanceStatus(market: MarketId): Promise<RebalanceStatus> {
+    return fetchOrMock(`/rebalance/status?market=${market}`, () => ({
+        market,
+        last_scan_date: null,
+        next_scan_date: null,
+        current_watchlist_count: 0,
+        is_scanning: false,
+    }));
+}
+
+// --- Universe Backtest Types ---
+
+export interface BacktestMetrics {
+    total_return: number;
+    cagr: number;
+    sharpe_ratio: number;
+    sortino_ratio: number;
+    calmar_ratio: number;
+    max_drawdown: number;
+    max_drawdown_date: string;
+    total_trades: number;
+    win_rate: number;
+    profit_factor: number;
+    avg_pnl_pct: number;
+    avg_holding_days: number;
+    final_value: number;
+    avg_win_pct: number;
+    avg_loss_pct: number;
+    best_trade_pct: number;
+    worst_trade_pct: number;
+    max_consecutive_wins: number;
+    max_consecutive_losses: number;
+    total_rebalances: number;
+    avg_turnover_pct: number;
+    time_in_bull_pct: number;
+    time_in_bear_pct: number;
+    time_in_neutral_pct: number;
+}
+
+export interface UniverseBacktestResult {
+    market: string;
+    strategy: string;  // "momentum" | "smc"
+    start_date: string;
+    end_date: string;
+    metrics: BacktestMetrics;
+    equity_curve: EquityPoint[];
+    trades: TradeRecord[];
+    phase_stats: Record<string, number>;
+    monthly_returns: Record<string, number>;
+}
+
+export interface BacktestStatus {
+    market: string;
+    is_running: boolean;
+    has_result: boolean;
+    start_date: string | null;
+    end_date: string | null;
+}
+
+// --- Universe Backtest API Functions ---
+
+export async function triggerUniverseBacktest(
+    market: MarketId,
+    startDate: string,
+    endDate: string,
+    strategy: string = "momentum",
+): Promise<UniverseBacktestResult> {
+    const response = await fetch(
+        `${API_BASE_URL}/rebalance/backtest?market=${market}&start_date=${startDate}&end_date=${endDate}&strategy=${strategy}`,
+        { method: 'POST' },
+    );
+    if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`Backtest failed (${response.status}): ${detail}`);
+    }
+    return response.json();
+}
+
+export async function fetchBacktestResult(market: MarketId): Promise<UniverseBacktestResult | null> {
+    try {
+        const response = await fetch(`${API_BASE_URL}/rebalance/backtest/result?market=${market}`);
+        if (response.status === 404) return null;
+        if (!response.ok) return null;
+        return response.json();
+    } catch {
+        return null;
+    }
+}
+
+export async function fetchBacktestStatus(market: MarketId): Promise<BacktestStatus> {
+    return fetchOrMock(`/rebalance/backtest/status?market=${market}`, () => ({
+        market,
+        is_running: false,
+        has_result: false,
+        start_date: null,
+        end_date: null,
+    }));
 }
 

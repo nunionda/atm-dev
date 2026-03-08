@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { IChartApi, ISeriesApi, SeriesType, Time } from 'lightweight-charts';
 import type {
     Drawing, TrendLineDrawing, HorizontalLineDrawing, FibonacciDrawing,
-    PendingDrawing, DrawingPoint,
+    PendingDrawing,
 } from '../../lib/drawingTypes';
 import { FIB_LEVELS, FIB_COLORS } from '../../lib/drawingTypes';
 import './DrawingOverlay.css';

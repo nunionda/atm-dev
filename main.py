@@ -7,6 +7,7 @@ Usage:
     python main.py start            장중 매매 시작
     python main.py status           시스템 상태 확인
     python main.py init-db          DB 초기화
+    python main.py api              분석 API 서버 실행 (FastAPI)
     python main.py backtest         백테스트 실행
         --start 2024-01-01          시작일 (필수)
         --end   2024-12-31          종료일 (필수)
@@ -21,8 +22,8 @@ from __future__ import annotations
 import sys
 import os
 
-# 프로젝트 루트를 Python path에 추가
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# ats/ 디렉토리를 Python path에 추가 (모든 모듈은 ats/ 하위에 위치)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "ats"))
 
 from core.main_loop import MainLoop
 from core.scheduler import Scheduler
@@ -227,6 +228,13 @@ def cmd_backtest():
         result.export_equity_csv(args.export_equity)
 
 
+def cmd_api():
+    """FastAPI 기반의 분석 API 서버를 실행한다."""
+    import uvicorn
+    print("🚀 Starting ATS Analytics API Server on http://0.0.0.0:8000")
+    uvicorn.run("api.app:app", host="0.0.0.0", port=8000, reload=True, reload_dirs=["api", "analytics"])
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -239,6 +247,7 @@ def main():
         "init-db": cmd_init_db,
         "status": cmd_status,
         "backtest": cmd_backtest,
+        "api": cmd_api,
     }
 
     if command in commands:

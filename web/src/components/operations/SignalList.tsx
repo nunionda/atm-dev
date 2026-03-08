@@ -1,23 +1,30 @@
 import { useState, useEffect } from 'react';
 import { Zap, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
-import type { Signal } from '../../lib/api';
-import { fetchSignals } from '../../lib/api';
+import type { Signal, MarketId } from '../../lib/api';
+import { fetchSignals, getMarketConfig } from '../../lib/api';
 import { useSSE } from '../../hooks/useSSE';
 import './SignalList.css';
 
-export function SignalList() {
+interface Props {
+    market: MarketId;
+}
+
+export function SignalList({ market }: Props) {
     const [signals, setSignals] = useState<Signal[]>([]);
     const [loading, setLoading] = useState(true);
-    const sseData = useSSE<Signal[]>('signals', fetchSignals);
+    const sseData = useSSE<Signal[]>(`${market}:signals`, () => fetchSignals(market));
 
     useEffect(() => {
-        fetchSignals()
+        setLoading(true);
+        setSignals([]);
+        fetchSignals(market)
             .then(data => setSignals(data))
             .catch(() => {})
             .finally(() => setLoading(false));
-    }, []);
+    }, [market]);
 
     const displaySignals = sseData || signals;
+    const sym = getMarketConfig(market).currencySymbol;
 
     if (loading && !sseData) {
         return (
@@ -55,7 +62,7 @@ export function SignalList() {
                                         강도 {sig.strength}
                                     </span>
                                 </div>
-                                <div className="signal-price">₩{sig.price.toLocaleString()}</div>
+                                <div className="signal-price">{sym}{sig.price.toLocaleString()}</div>
                                 <div className="signal-reason">{sig.reason}</div>
                                 <div className="signal-time">
                                     {new Date(sig.detected_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
@@ -78,7 +85,7 @@ export function SignalList() {
                                         강도 {sig.strength}
                                     </span>
                                 </div>
-                                <div className="signal-price">₩{sig.price.toLocaleString()}</div>
+                                <div className="signal-price">{sym}{sig.price.toLocaleString()}</div>
                                 <div className="signal-reason">{sig.reason}</div>
                                 <div className="signal-time">
                                     {new Date(sig.detected_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}

@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LineChart, BookOpen, Radio, Shield, BarChart3, ChevronRight } from 'lucide-react';
+import { LineChart, BookOpen, Radio, Shield, BarChart3, ChevronRight, Activity, Calculator, RefreshCw } from 'lucide-react';
 import './Navbar.css';
 
 export function Navbar() {
@@ -33,6 +33,13 @@ export function Navbar() {
                         <span>Operations</span>
                     </Link>
                     <Link
+                        to="/rebalance"
+                        className={`nav-link ${isActive('/rebalance') ? 'active' : ''}`}
+                    >
+                        <RefreshCw size={18} />
+                        <span>Rebalance</span>
+                    </Link>
+                    <Link
                         to="/risk"
                         className={`nav-link ${isActive('/risk') ? 'active' : ''}`}
                     >
@@ -45,6 +52,20 @@ export function Navbar() {
                     >
                         <BarChart3 size={18} />
                         <span>Performance</span>
+                    </Link>
+                    <Link
+                        to="/scalp-analyzer"
+                        className={`nav-link ${isActive('/scalp-analyzer') ? 'active' : ''}`}
+                    >
+                        <Activity size={18} />
+                        <span>Futures</span>
+                    </Link>
+                    <Link
+                        to="/option-calculator"
+                        className={`nav-link ${isActive('/option-calculator') ? 'active' : ''}`}
+                    >
+                        <Calculator size={18} />
+                        <span>Options</span>
                     </Link>
                     <Link
                         to="/theory"

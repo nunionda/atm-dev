@@ -91,5 +91,23 @@
     font-variant-numeric: tabular-nums;
 }
 
+.regime-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 14px;
+    border: 1px solid;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+
+.regime-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+}
+
 .text-success { color: #22c55e !important; }
 .text-error { color: #ef4444 !important; }

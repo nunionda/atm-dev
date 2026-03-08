@@ -6,6 +6,10 @@ import { Dashboard } from './pages/Dashboard';
 import { Operations } from './pages/Operations';
 import { Risk } from './pages/Risk';
 import { Performance } from './pages/Performance';
+import { ScalpAnalyzer } from './pages/ScalpAnalyzer';
+import { FabioStrategy } from './pages/FabioStrategy';
+import { OptionCalculator } from './pages/OptionCalculator';
+import { Rebalance } from './pages/Rebalance';
 
 function App() {
   return (
@@ -16,8 +20,12 @@ function App() {
         <Route path="/theory/*" element={<Theory />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/operations" element={<Operations />} />
+        <Route path="/rebalance" element={<Rebalance />} />
         <Route path="/risk" element={<Risk />} />
         <Route path="/performance" element={<Performance />} />
+        <Route path="/scalp-analyzer" element={<ScalpAnalyzer />} />
+        <Route path="/scalp-analyzer/fabio" element={<FabioStrategy />} />
+        <Route path="/option-calculator" element={<OptionCalculator />} />
       </Routes>
     </Router>
   );

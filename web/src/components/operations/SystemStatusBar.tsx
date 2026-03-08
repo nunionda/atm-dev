@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Activity, Clock, Wallet, BarChart3 } from 'lucide-react';
-import type { SystemState } from '../../lib/api';
-import { fetchSystemState } from '../../lib/api';
+import type { SystemState, MarketId } from '../../lib/api';
+import { fetchSystemState, getMarketConfig } from '../../lib/api';
 import { useSSE } from '../../hooks/useSSE';
 import { ConnectionIndicator } from './ConnectionIndicator';
 import './SystemStatusBar.css';
@@ -30,18 +30,32 @@ const PHASE_LABELS: Record<string, string> = {
     CLOSED: '장후',
 };
 
-export function SystemStatusBar() {
+const REGIME_CONFIG: Record<string, { label: string; color: string }> = {
+    BULL:    { label: '강세장', color: '#22c55e' },
+    NEUTRAL: { label: '중립',   color: '#eab308' },
+    BEAR:    { label: '약세장', color: '#ef4444' },
+};
+
+interface Props {
+    market: MarketId;
+}
+
+export function SystemStatusBar({ market }: Props) {
     const [state, setState] = useState<SystemState | null>(null);
-    const sseData = useSSE<SystemState>('system_state', fetchSystemState);
+    const sseData = useSSE<SystemState>(`${market}:system_state`, () => fetchSystemState(market));
 
     useEffect(() => {
-        fetchSystemState().then(setState).catch(() => {});
-    }, []);
+        setState(null);
+        fetchSystemState(market).then(setState).catch(() => {});
+    }, [market]);
 
     const displayState = sseData || state;
     if (!displayState) return null;
 
     const statusColor = STATUS_COLORS[displayState.status] || '#6b7280';
+    const sym = getMarketConfig(market).currencySymbol;
+    const regime = displayState.market_regime || 'NEUTRAL';
+    const regimeStyle = REGIME_CONFIG[regime] || REGIME_CONFIG.NEUTRAL;
 
     return (
         <div className="system-status-bar glass-panel">
@@ -49,6 +63,11 @@ export function SystemStatusBar() {
                 <div className="status-badge" style={{ borderColor: statusColor }}>
                     <span className="status-dot" style={{ backgroundColor: statusColor }} />
                     <span className="status-label">{STATUS_LABELS[displayState.status]}</span>
+                </div>
+                <span className="status-divider" />
+                <div className="regime-badge" style={{ borderColor: regimeStyle.color, color: regimeStyle.color }}>
+                    <span className="regime-dot" style={{ backgroundColor: regimeStyle.color }} />
+                    {regimeStyle.label}
                 </div>
                 <span className="status-divider" />
                 <div className="status-item">
@@ -66,13 +85,13 @@ export function SystemStatusBar() {
                 <div className="status-metric">
                     <Wallet size={14} />
                     <span className="metric-label">현금</span>
-                    <span className="metric-value">₩{displayState.cash.toLocaleString()}</span>
+                    <span className="metric-value">{sym}{displayState.cash.toLocaleString()}</span>
                 </div>
                 <span className="status-divider" />
                 <div className="status-metric">
                     <BarChart3 size={14} />
                     <span className="metric-label">총자산</span>
-                    <span className="metric-value">₩{displayState.total_equity.toLocaleString()}</span>
+                    <span className="metric-value">{sym}{displayState.total_equity.toLocaleString()}</span>
                 </div>
                 <span className="status-divider" />
                 <div className="status-metric">

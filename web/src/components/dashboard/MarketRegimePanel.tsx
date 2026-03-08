@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Globe, TrendingUp, TrendingDown, Activity, Shield } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Globe, TrendingUp, TrendingDown, Activity, Shield, RefreshCw } from 'lucide-react';
 import { fetchMarketOverview, type MarketOverview, type MarketIndex } from '../../lib/api';
 import './MarketRegimePanel.css';
 
@@ -41,22 +41,57 @@ function findIndex(indices: MarketIndex[], symbol: string): MarketIndex | undefi
 export function MarketRegimePanel({ onSelectIndex }: MarketRegimePanelProps) {
     const [data, setData] = useState<MarketOverview | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
 
-    useEffect(() => {
-        let mounted = true;
-        async function load() {
-            const result = await fetchMarketOverview();
-            if (mounted) { setData(result); setLoading(false); }
+    const load = useCallback(async () => {
+        setLoading(true);
+        setError(false);
+        const result = await fetchMarketOverview();
+        if (result) {
+            setData(result);
+        } else {
+            setError(true);
         }
-        load();
-        const interval = setInterval(load, 5 * 60 * 1000);
-        return () => { mounted = false; clearInterval(interval); };
+        setLoading(false);
     }, []);
 
-    if (loading) {
+    useEffect(() => {
+        load();
+        const interval = setInterval(load, 5 * 60 * 1000);
+        return () => clearInterval(interval);
+    }, [load]);
+
+    if (loading && !data) {
         return (
             <div className="regime-panel glass-panel">
-                <div className="regime-loading">시장 데이터 로딩 중...</div>
+                <div className="regime-loading">
+                    <RefreshCw size={14} className="animate-spin" style={{ display: 'inline-block', marginRight: 6 }} />
+                    시장 데이터 로딩 중...
+                </div>
+            </div>
+        );
+    }
+    if (error && !data) {
+        return (
+            <div className="regime-panel glass-panel">
+                <div className="regime-loading">
+                    시장 데이터를 불러올 수 없습니다.
+                    <button
+                        onClick={load}
+                        style={{
+                            marginLeft: 8,
+                            padding: '3px 10px',
+                            borderRadius: 6,
+                            border: '1px solid rgba(255,255,255,0.15)',
+                            background: 'rgba(255,255,255,0.05)',
+                            color: 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            fontSize: '0.8rem',
+                        }}
+                    >
+                        재시도
+                    </button>
+                </div>
             </div>
         );
     }

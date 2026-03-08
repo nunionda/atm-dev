@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, Clock, ShieldAlert } from 'lucide-react';
-import type { Position } from '../../lib/api';
-import { fetchPositions } from '../../lib/api';
+import type { Position, MarketId } from '../../lib/api';
+import { fetchPositions, getMarketConfig } from '../../lib/api';
 import { useSSE } from '../../hooks/useSSE';
 import './PositionTable.css';
 
@@ -12,19 +12,26 @@ const STATUS_BADGE: Record<string, { label: string; color: string }> = {
     CLOSED: { label: '청산', color: '#6b7280' },
 };
 
-export function PositionTable() {
+interface Props {
+    market: MarketId;
+}
+
+export function PositionTable({ market }: Props) {
     const [positions, setPositions] = useState<Position[]>([]);
     const [loading, setLoading] = useState(true);
-    const sseData = useSSE<Position[]>('positions', fetchPositions);
+    const sseData = useSSE<Position[]>(`${market}:positions`, () => fetchPositions(market));
 
     useEffect(() => {
-        fetchPositions()
+        setLoading(true);
+        setPositions([]);
+        fetchPositions(market)
             .then(data => setPositions(data))
             .catch(() => {})
             .finally(() => setLoading(false));
-    }, []);
+    }, [market]);
 
     const displayPositions = sseData || positions;
+    const sym = getMarketConfig(market).currencySymbol;
 
     if (loading && !sseData) {
         return (
@@ -46,7 +53,7 @@ export function PositionTable() {
                     <span className="count-badge">{displayPositions.length}</span>
                 </h3>
                 <div className={`total-pnl ${totalPnl >= 0 ? 'positive' : 'negative'}`}>
-                    합계 {totalPnl >= 0 ? '+' : ''}₩{totalPnl.toLocaleString()}
+                    합계 {totalPnl >= 0 ? '+' : ''}{sym}{totalPnl.toLocaleString()}
                 </div>
             </div>
             <div className="table-scroll">
@@ -85,8 +92,8 @@ export function PositionTable() {
                                         <span className="stock-code">{pos.stock_code}</span>
                                     </td>
                                     <td className="num">{pos.quantity.toLocaleString()}</td>
-                                    <td className="num">₩{pos.entry_price.toLocaleString()}</td>
-                                    <td className="num">₩{pos.current_price.toLocaleString()}</td>
+                                    <td className="num">{sym}{pos.entry_price.toLocaleString()}</td>
+                                    <td className="num">{sym}{pos.current_price.toLocaleString()}</td>
                                     <td className={`num ${isProfit ? 'text-profit' : 'text-loss'}`}>
                                         <span className="pnl-cell">
                                             {isProfit ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
@@ -94,10 +101,10 @@ export function PositionTable() {
                                         </span>
                                     </td>
                                     <td className={`num ${isProfit ? 'text-profit' : 'text-loss'}`}>
-                                        {isProfit ? '+' : ''}₩{pos.pnl.toLocaleString()}
+                                        {isProfit ? '+' : ''}{sym}{pos.pnl.toLocaleString()}
                                     </td>
-                                    <td className="num stop-price">₩{pos.stop_loss.toLocaleString()}</td>
-                                    <td className="num tp-price">₩{pos.take_profit.toLocaleString()}</td>
+                                    <td className="num stop-price">{sym}{pos.stop_loss.toLocaleString()}</td>
+                                    <td className="num tp-price">{sym}{pos.take_profit.toLocaleString()}</td>
                                     <td className={`num ${holdingWarn ? 'holding-warn' : ''}`}>
                                         {pos.days_held}/{pos.max_holding_days}일
                                     </td>

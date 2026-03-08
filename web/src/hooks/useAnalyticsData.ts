@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { fetchAnalyticsData, type AnalyticsResponse } from '../lib/api';
 
 export function useAnalyticsData(ticker: string, period: string = 'ytd', interval: string = '1d') {
     const [data, setData] = useState<AnalyticsResponse | null>(null);
     const [loading, setLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
+    const [fetchKey, setFetchKey] = useState(0);
 
     useEffect(() => {
         let mounted = true;
@@ -31,7 +32,9 @@ export function useAnalyticsData(ticker: string, period: string = 'ytd', interva
         return () => {
             mounted = false;
         };
-    }, [ticker, period, interval]);
+    }, [ticker, period, interval, fetchKey]);
 
-    return { data, loading, error };
+    const refetch = useCallback(() => setFetchKey(k => k + 1), []);
+
+    return { data, loading, error, refetch };
 }

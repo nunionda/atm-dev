@@ -56,6 +56,17 @@ export function TickerSearch({ onSelect, loading = false, initialValue = '' }: T
 
     // Keyboard navigation
     const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (activeIndex >= 0 && activeIndex < results.length) {
+                selectItem(results[activeIndex]);
+            } else if (results.length > 0) {
+                selectItem(results[0]);
+            } else if (query.trim()) {
+                resolveAndSelect(query.trim());
+            }
+            return;
+        }
         if (!isOpen) return;
 
         switch (e.key) {
@@ -66,16 +77,6 @@ export function TickerSearch({ onSelect, loading = false, initialValue = '' }: T
             case 'ArrowUp':
                 e.preventDefault();
                 setActiveIndex(prev => Math.max(prev - 1, 0));
-                break;
-            case 'Enter':
-                e.preventDefault();
-                if (activeIndex >= 0 && activeIndex < results.length) {
-                    selectItem(results[activeIndex]);
-                } else if (query.trim()) {
-                    // Submit raw query
-                    onSelect(query.trim());
-                    setIsOpen(false);
-                }
                 break;
             case 'Escape':
                 setIsOpen(false);
@@ -89,11 +90,28 @@ export function TickerSearch({ onSelect, loading = false, initialValue = '' }: T
         onSelect(item.ticker, item.name_kr, item.name_en);
     };
 
+    // Resolve raw text → first search result, fallback to raw ticker
+    const resolveAndSelect = async (raw: string) => {
+        // If dropdown has results, use the first one
+        if (results.length > 0) {
+            selectItem(results[0]);
+            return;
+        }
+        // Otherwise search first, then select
+        const res = await searchTickers(raw);
+        if (res.length > 0) {
+            selectItem(res[0]);
+        } else {
+            // Last resort: use raw as ticker (for direct codes like "AAPL", "005930.KS")
+            onSelect(raw);
+            setIsOpen(false);
+        }
+    };
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (query.trim()) {
-            onSelect(query.trim());
-            setIsOpen(false);
+            resolveAndSelect(query.trim());
         }
     };
 

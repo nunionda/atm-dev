@@ -49,10 +49,12 @@ function connect() {
         scheduleReconnect();
     };
 
-    // 각 이벤트 타입에 대한 리스너 등록
+    // 각 이벤트 타입에 대한 리스너 등록 (마켓별 접두사)
+    const BASE_EVENTS = ['system_state', 'positions', 'signals', 'orders', 'risk_metrics', 'risk_events'];
+    const MARKET_IDS = ['kospi', 'sp500', 'ndx'];
     const eventTypes = [
-        'system_state', 'positions', 'signals',
-        'orders', 'risk_metrics', 'risk_events', 'heartbeat',
+        'heartbeat',
+        ...MARKET_IDS.flatMap(m => BASE_EVENTS.map(e => `${m}:${e}`)),
     ];
     for (const type of eventTypes) {
         es.addEventListener(type, (event: MessageEvent) => {

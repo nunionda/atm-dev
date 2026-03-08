@@ -34,8 +34,8 @@ strategy:
 
   # RSI (BRD §2.3.2 CF1)
   rsi_period: 14
-  rsi_lower: 30               # 과매도 기준
-  rsi_upper: 70               # 과매수 기준
+  rsi_lower: 52               # CF1 하한 (CLAUDE.md Phase 3)
+  rsi_upper: 78               # CF1 상한 (CLAUDE.md Phase 3)
 
   # 볼린저밴드 (BRD §2.3.3 RG4)
   bb_period: 20
@@ -46,19 +46,19 @@ strategy:
   volume_multiplier: 1.5      # 평균 대비 배수
 
 exit:
-  stop_loss_pct: -0.03        # 손절 -3% (BR-S01 불변)
-  take_profit_pct: 0.07       # 익절 +7%
-  trailing_stop_pct: -0.03    # 트레일링 스탑 -3%
-  max_holding_days: 10        # 최대 보유일
+  stop_loss_pct: -0.05        # ES1 손절 -5% (CLAUDE.md Phase 5)
+  take_profit_pct: 0.20       # 익절 +20% (BULL 기준, 체제별 동적)
+  trailing_stop_pct: -0.04    # 트레일링 스탑 기본 floor -4% (Progressive ATR)
+  max_holding_days: 40        # 최대 보유일 BULL (체제별: 40/25/15)
 
 portfolio:
   max_positions: 10           # 최대 보유 종목수 (BR-P01)
   max_weight_per_stock: 0.15  # 종목당 최대 비중 15% (BR-P02)
-  min_cash_ratio: 0.20        # 최소 현금 비율 20% (BR-P03)
+  min_cash_ratio: 0.30        # 최소 현금 비율 30% (BR-P03)
 
 risk:
-  daily_loss_limit: -0.03     # 일일 손실 한도 -3% (BR-R01)
-  mdd_limit: -0.10            # MDD 한도 -10% (BR-R02)
+  daily_loss_limit: -0.05     # 일일 손실 한도 -5% (BR-R01)
+  mdd_limit: -0.15            # MDD 한도 -15% (BR-R02)
   max_order_amount: 3000000   # 1회 최대 주문금액 (BR-R04)
 
 order:
