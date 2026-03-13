@@ -21,8 +21,8 @@ venv/
 *.swp
 *.swo
 
-# Claude Code
-.claude/
+# Claude Code (로컬 전용 설정만 제외)
+.claude/settings.local.json
 
 # Node
 node_modules/
