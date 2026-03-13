@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { AlertTriangle, Info, XOctagon, ShieldOff } from 'lucide-react';
-import type { RiskEvent } from '../../lib/api';
+import { useState, useEffect, useCallback } from 'react';
+import { AlertTriangle, Info, XOctagon, ShieldOff, RefreshCw } from 'lucide-react';
+import type { RiskEvent, MarketId } from '../../lib/api';
 import { fetchRiskEvents } from '../../lib/api';
 import { useSSE } from '../../hooks/useSSE';
 import './RiskEventLog.css';
@@ -19,25 +19,49 @@ const EVENT_COLOR: Record<string, string> = {
     HALT: '#dc2626',
 };
 
-export function RiskEventLog() {
+interface RiskEventLogProps {
+    market?: MarketId;
+    maxItems?: number;
+}
+
+export function RiskEventLog({ market, maxItems }: RiskEventLogProps = {}) {
     const [events, setEvents] = useState<RiskEvent[]>([]);
     const [loading, setLoading] = useState(true);
-    const sseData = useSSE<RiskEvent[]>('risk_events', fetchRiskEvents);
+    const [error, setError] = useState(false);
+    const eventType = market ? `${market}:risk_events` : 'risk_events';
+    const sseData = useSSE<RiskEvent[]>(eventType, () => fetchRiskEvents(market));
 
-    useEffect(() => {
-        fetchRiskEvents()
+    const loadData = useCallback(() => {
+        setLoading(true);
+        setError(false);
+        fetchRiskEvents(market)
             .then(data => setEvents(data))
-            .catch(() => {})
+            .catch(() => setError(true))
             .finally(() => setLoading(false));
-    }, []);
+    }, [market]);
 
-    const displayEvents = sseData || events;
+    useEffect(() => { loadData(); }, [loadData]);
+
+    const allEvents = sseData || events;
+    const displayEvents = maxItems ? allEvents.slice(-maxItems) : allEvents;
 
     if (loading && !sseData) {
         return (
             <div className="risk-event-log">
                 <h3 className="section-title">리스크 이벤트</h3>
                 <div className="loading-placeholder">로딩 중...</div>
+            </div>
+        );
+    }
+
+    if (error && !sseData && displayEvents.length === 0) {
+        return (
+            <div className="risk-event-log">
+                <h3 className="section-title">리스크 이벤트</h3>
+                <div className="error-placeholder">
+                    서버 연결 실패
+                    <button className="retry-btn" onClick={loadData}><RefreshCw size={12} /> 재시도</button>
+                </div>
             </div>
         );
     }

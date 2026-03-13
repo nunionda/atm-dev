@@ -36,13 +36,13 @@ export function PollingControl({
   status, lastUpdated, consecutiveErrors, onRefresh,
   compact = false,
 }: PollingControlProps) {
-  // 마지막 업데이트 시간 실시간 표시
+  // 마지막 업데이트 시간 실시간 표시 (only tick when polling is active)
   const [, tick] = useState(0);
   useEffect(() => {
-    if (!lastUpdated) return;
+    if (!lastUpdated || !enabled) return;
     const id = setInterval(() => tick(v => v + 1), 1000);
     return () => clearInterval(id);
-  }, [lastUpdated]);
+  }, [lastUpdated, enabled]);
 
   const statusColor =
     status === 'polling' ? K.grn :

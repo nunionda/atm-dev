@@ -1,0 +1,201 @@
+/* ═══════════════════════════════════════════
+   StrategyWeightPanel — 전략 배분 상세 사이드바
+   ═══════════════════════════════════════════ */
+
+.swp-container {
+    padding: 14px 16px;
+    margin-bottom: 12px;
+}
+
+.swp-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    color: var(--text-primary);
+    user-select: none;
+}
+
+.swp-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.swp-market-badge {
+    margin-left: auto;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.swp-header svg:last-child {
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+/* ── Body ── */
+.swp-body {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* ── Section Label ── */
+.swp-section-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+    display: block;
+}
+
+/* ── Trend Section ── */
+.swp-trend-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.swp-trend-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 5px;
+    border: 1px solid;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+/* ── Signals ── */
+.swp-signals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.swp-signal-chip {
+    font-size: 0.64rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* ── Components Grid ── */
+.swp-components {
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.swp-comp-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.swp-comp-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.swp-comp-key {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.swp-comp-val {
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.swp-comp-val.bull { color: #22c55e; }
+.swp-comp-val.bear { color: #ef4444; }
+.swp-comp-val.mixed { color: #eab308; }
+
+/* Momentum bar (inline) */
+.swp-comp-mom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    max-width: 140px;
+}
+
+.swp-comp-mom-bar {
+    flex: 1;
+    height: 5px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.swp-comp-mom-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+
+.swp-comp-mom-val {
+    font-size: 0.66rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    min-width: 28px;
+    text-align: right;
+}
+
+/* ── Strategy Weights ── */
+.swp-weights {
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.swp-weight-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 5px;
+}
+
+.swp-weight-name {
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    width: 85px;
+    flex-shrink: 0;
+    font-weight: 500;
+}
+
+.swp-weight-bar {
+    flex: 1;
+    height: 7px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.swp-weight-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #60a5fa);
+    border-radius: 4px;
+    transition: width 0.5s ease;
+}
+
+.swp-weight-pct {
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    min-width: 32px;
+    text-align: right;
+}

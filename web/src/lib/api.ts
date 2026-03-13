@@ -41,19 +41,29 @@ export interface AnalyticsResponse {
 
 const API_BASE_URL = 'http://localhost:8000/api/v1';
 
-export async function fetchAnalyticsData(ticker: string, period: string = 'ytd', interval: string = '1d'): Promise<AnalyticsResponse> {
-    console.log(`[API] Fetching data for ${ticker}, period: ${period}, interval: ${interval}`);
+export async function fetchAnalyticsData(
+    ticker: string,
+    period: string = 'ytd',
+    interval: string = '1d',
+    signal?: AbortSignal,
+): Promise<AnalyticsResponse> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    // Allow external abort (e.g., from useAnalyticsData cleanup)
+    if (signal) signal.addEventListener('abort', () => controller.abort());
+
     try {
-        const response = await fetch(`${API_BASE_URL}/analyze/${ticker}?period=${period}&interval=${interval}`);
+        const response = await fetch(
+            `${API_BASE_URL}/analyze/${encodeURIComponent(ticker)}?period=${period}&interval=${interval}`,
+            { signal: controller.signal },
+        );
+        clearTimeout(timeout);
         if (!response.ok) {
-            console.error(`[API] HTTP error! status: ${response.status}`);
             throw new Error(`Failed to fetch analytics for ${ticker}. Status: ${response.status}`);
         }
-        const data = await response.json();
-        console.log(`[API] Successfully parsed JSON for ${ticker}`);
-        return data;
+        return await response.json();
     } catch (error) {
-        console.error(`[API] Fetch failed for ${ticker}:`, error);
+        clearTimeout(timeout);
         throw error;
     }
 }
@@ -171,10 +181,12 @@ export interface MarketOverview {
     updated_at: string;
 }
 
-export async function fetchMarketOverview(): Promise<MarketOverview | null> {
+export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketOverview | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    if (signal) signal.addEventListener('abort', () => controller.abort());
+
     try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 30000);
         const response = await fetch(`${API_BASE_URL}/market-overview`, { signal: controller.signal });
         clearTimeout(timeout);
         if (!response.ok) {
@@ -184,7 +196,10 @@ export async function fetchMarketOverview(): Promise<MarketOverview | null> {
         const data = await response.json();
         console.log(`[API] market-overview loaded: ${data.indices?.length} indices`);
         return data;
-    } catch (error) {
+    } catch (error: any) {
+        clearTimeout(timeout);
+        // Silently handle abort (React Strict Mode, component unmount, etc.)
+        if (error?.name === 'AbortError') return null;
         console.error('[API] market-overview fetch failed:', error);
         return null;
     }
@@ -216,14 +231,14 @@ export function getMarketConfig(id: MarketId): MarketConfig {
 
 export type SystemStatus = 'INIT' | 'READY' | 'RUNNING' | 'STOPPING' | 'STOPPED' | 'ERROR';
 
-export type MarketRegime = 'BULL' | 'BEAR' | 'NEUTRAL';
+export type SystemMarketRegime = 'BULL' | 'BEAR' | 'NEUTRAL';
 
 export interface SystemState {
     status: SystemStatus;
     mode: 'PAPER' | 'LIVE';
     started_at: string | null;
     market_phase: 'PRE_MARKET' | 'OPEN' | 'CLOSED';
-    market_regime?: MarketRegime;
+    market_regime?: SystemMarketRegime;
     next_scan_at: string | null;
     total_equity: number;
     cash: number;
@@ -368,9 +383,15 @@ const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
 
 async function fetchOrMock<T>(url: string, mockFn: () => T): Promise<T> {
     if (USE_MOCK) return mockFn();
-    const response = await fetch(`${API_BASE_URL}${url}`);
-    if (!response.ok) throw new Error(`API error: ${response.status}`);
-    return response.json();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    try {
+        const response = await fetch(`${API_BASE_URL}${url}`, { signal: controller.signal });
+        if (!response.ok) throw new Error(`API error: ${response.status}`);
+        return response.json();
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 export async function fetchSystemState(market: MarketId = 'kospi'): Promise<SystemState> {
@@ -416,6 +437,294 @@ export async function fetchEquityCurve(market: MarketId = 'kospi'): Promise<Equi
 export async function fetchTradeHistory(market: MarketId = 'kospi'): Promise<TradeRecord[]> {
     if (USE_MOCK) { const { mockTradeHistory } = await import('./mock'); return mockTradeHistory(); }
     return fetchOrMock(`/trades?market=${market}`, () => null as never);
+}
+
+// --- Market Intelligence Types ---
+
+export type IndexTrend = 'STRONG_BULL' | 'BULL' | 'NEUTRAL' | 'BEAR' | 'CRISIS';
+export type MAAlignment = 'ALIGNED_BULL' | 'MIXED' | 'ALIGNED_BEAR';
+export type VolatilityState = 'LOW' | 'NORMAL' | 'HIGH' | 'EXTREME';
+
+export interface IndexTrendData {
+    trend: IndexTrend;
+    ma_alignment: MAAlignment;
+    momentum_score: number;
+    volatility_state: VolatilityState;
+    signals: string[];
+    rsi?: number;
+    adx?: number;
+    macd_value?: number;
+    macd_signal?: number;
+}
+
+export interface TrendChangeEntry {
+    timestamp: string;
+    from_trend: IndexTrend | null;
+    to_trend: IndexTrend;
+    from_weights: Record<string, number>;
+    to_weights: Record<string, number>;
+    trigger_signals: string[];
+}
+
+export interface MarketIntelligenceData {
+    index_trend: IndexTrendData;
+    strategy_weights: Record<string, number>;
+    vix_ema20: number;
+    market_regime: string;
+    trend_history: TrendChangeEntry[];
+}
+
+export type MarketIntelligenceResponse = Record<MarketId, MarketIntelligenceData | null>;
+
+// --- Force Liquidate ---
+
+export interface ForceLiquidateResult {
+    status: string;
+    market: string;
+    positions_closed: number;
+    details: {
+        stock_code: string;
+        stock_name: string;
+        quantity: number;
+        sell_price: number;
+        entry_price: number;
+    }[];
+}
+
+export async function forceLiquidateAll(market: MarketId): Promise<ForceLiquidateResult> {
+    const res = await fetch(`${API_BASE_URL}/sim/force-liquidate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market }),
+    });
+    if (!res.ok) throw new Error(`Force liquidate failed: ${res.status}`);
+    return res.json();
+}
+
+// --- Performance Comparison (Live vs Backtest) ---
+
+export interface ComparisonMetrics {
+    total_return_pct: number;
+    sharpe_ratio: number;
+    max_drawdown_pct: number;
+    win_rate: number;
+    profit_factor: number;
+}
+
+export interface PerformanceComparison {
+    market: string;
+    live: ComparisonMetrics;
+    backtest: ComparisonMetrics | null;
+    deltas: ComparisonMetrics | null;
+    has_backtest: boolean;
+}
+
+export async function fetchPerformanceComparison(market: MarketId): Promise<PerformanceComparison> {
+    return fetchOrMock(`/performance/vs-backtest?market=${market}`, () => ({
+        market,
+        live: { total_return_pct: 0, sharpe_ratio: 0, max_drawdown_pct: 0, win_rate: 0, profit_factor: 0 },
+        backtest: null,
+        deltas: null,
+        has_backtest: false,
+    }));
+}
+
+export async function fetchMarketIntelligence(): Promise<MarketIntelligenceResponse> {
+    return fetchOrMock('/market-intelligence', () => ({
+        sp500: null, ndx: null, kospi: null,
+    }));
+}
+
+// --- Simulation Control Types ---
+
+export type StrategyMode = 'momentum' | 'smc' | 'breakout_retest' | 'mean_reversion' | 'arbitrage' | 'multi';
+
+export interface ReplayStatus {
+    active: boolean;
+    current_date: string;
+    progress_pct: number;
+    total_days: number;
+    speed: number;
+    paused: boolean;
+    completed: boolean;
+    start_date?: string;
+    end_date?: string;
+}
+
+export interface ReplayProgress {
+    current_date: string;
+    progress_pct: number;
+    day_index: number;
+    total_days: number;
+    speed: number;
+    paused: boolean;
+    completed?: boolean;
+    status?: string;
+    error?: string;
+}
+
+export interface SimControllerStatus {
+    mode: string;
+    markets: Record<string, {
+        is_running: boolean;
+        strategy_mode: StrategyMode;
+        total_equity: number;
+        cash: number;
+        position_count: number;
+        replay?: ReplayStatus;
+    }>;
+    available_markets: string[];
+    available_strategies: StrategyMode[];
+}
+
+export interface SimControlResult {
+    status: string;
+    market?: string;
+    strategy?: string;
+    initial_capital?: number;
+    detail?: string;
+    total_days?: number;
+    start_date?: string;
+    end_date?: string;
+}
+
+export async function fetchSimControllerStatus(): Promise<SimControllerStatus> {
+    const res = await fetch(`${API_BASE_URL}/sim/status`);
+    if (!res.ok) throw new Error(`Failed: ${res.status}`);
+    return res.json();
+}
+
+export async function simStart(
+    market: MarketId,
+    strategy?: StrategyMode,
+    replayOptions?: {
+        startDate?: string;   // YYYYMMDD
+        endDate?: string;     // YYYYMMDD
+        replaySpeed?: number; // 1.0=1초/일
+    },
+): Promise<SimControlResult> {
+    const body: Record<string, unknown> = { market, strategy_mode: strategy };
+    if (replayOptions?.startDate) body.start_date = replayOptions.startDate;
+    if (replayOptions?.endDate) body.end_date = replayOptions.endDate;
+    if (replayOptions?.replaySpeed != null) body.replay_speed = replayOptions.replaySpeed;
+    const res = await fetch(`${API_BASE_URL}/sim/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    return res.json();
+}
+
+export async function simStop(market: MarketId): Promise<SimControlResult> {
+    const res = await fetch(`${API_BASE_URL}/sim/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market }),
+    });
+    return res.json();
+}
+
+export async function simReset(market: MarketId, strategy?: StrategyMode): Promise<SimControlResult> {
+    const res = await fetch(`${API_BASE_URL}/sim/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market, strategy_mode: strategy }),
+    });
+    return res.json();
+}
+
+// --- Replay Control ---
+
+export async function replayPause(market: MarketId): Promise<SimControlResult> {
+    const res = await fetch(`${API_BASE_URL}/sim/replay/pause`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market }),
+    });
+    return res.json();
+}
+
+export async function replayResume(market: MarketId): Promise<SimControlResult> {
+    const res = await fetch(`${API_BASE_URL}/sim/replay/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market }),
+    });
+    return res.json();
+}
+
+export async function replaySetSpeed(market: MarketId, speed: number): Promise<SimControlResult> {
+    const res = await fetch(`${API_BASE_URL}/sim/replay/speed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market, speed }),
+    });
+    return res.json();
+}
+
+// --- Replay Results ---
+
+export interface ReplayResultSummary {
+    result_id: string;
+    market: string;
+    strategy: string;
+    start_date: string;
+    end_date: string;
+    initial_capital: number;
+    final_equity: number;
+    total_return_pct: number;
+    sharpe_ratio: number;
+    max_drawdown_pct: number;
+    total_trades: number;
+    win_rate: number;
+    profit_factor: number;
+    created_at: string;
+}
+
+export interface ReplayResultFull extends ReplayResultSummary {
+    equity_curve: { date: string; equity: number; drawdown_pct: number }[];
+    trades: {
+        id: string; stock_code: string; stock_name: string;
+        entry_date: string; exit_date: string; entry_price: number;
+        exit_price: number; quantity: number; pnl: number;
+        pnl_pct: number; exit_reason: string; holding_days: number;
+    }[];
+    metrics: Record<string, number>;
+}
+
+export async function saveReplayResult(market: MarketId): Promise<{ status: string; result_id: string }> {
+    const res = await fetch(`${API_BASE_URL}/replay/results/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ market }),
+    });
+    if (!res.ok) throw new Error(`Failed: ${res.status}`);
+    return res.json();
+}
+
+export async function listReplayResults(
+    market?: MarketId,
+    limit: number = 20,
+): Promise<{ results: ReplayResultSummary[]; count: number }> {
+    const params = new URLSearchParams();
+    if (market) params.set('market', market);
+    params.set('limit', String(limit));
+    const res = await fetch(`${API_BASE_URL}/replay/results?${params}`);
+    if (!res.ok) throw new Error(`Failed: ${res.status}`);
+    return res.json();
+}
+
+export async function getReplayResult(resultId: string): Promise<ReplayResultFull> {
+    const res = await fetch(`${API_BASE_URL}/replay/results/${resultId}`);
+    if (!res.ok) throw new Error(`Failed: ${res.status}`);
+    return res.json();
+}
+
+export async function deleteReplayResult(resultId: string): Promise<void> {
+    const res = await fetch(`${API_BASE_URL}/replay/results/${resultId}`, {
+        method: 'DELETE',
+    });
+    if (!res.ok) throw new Error(`Failed: ${res.status}`);
 }
 
 // --- Rebalance Types ---
@@ -514,7 +823,7 @@ export interface BacktestMetrics {
 
 export interface UniverseBacktestResult {
     market: string;
-    strategy: string;  // "momentum" | "smc"
+    strategy: string;  // "momentum" | "smc" | "breakout_retest"
     start_date: string;
     end_date: string;
     metrics: BacktestMetrics;

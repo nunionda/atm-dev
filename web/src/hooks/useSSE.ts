@@ -50,7 +50,7 @@ function connect() {
     };
 
     // 각 이벤트 타입에 대한 리스너 등록 (마켓별 접두사)
-    const BASE_EVENTS = ['system_state', 'positions', 'signals', 'orders', 'risk_metrics', 'risk_events'];
+    const BASE_EVENTS = ['system_state', 'positions', 'signals', 'orders', 'risk_metrics', 'risk_events', 'replay_progress', 'equity_curve', 'performance'];
     const MARKET_IDS = ['kospi', 'sp500', 'ndx'];
     const eventTypes = [
         'heartbeat',
@@ -130,6 +130,9 @@ export function useSSE<T>(
     fallbackRef.current = fallbackFetch;
 
     useEffect(() => {
+        // 이벤트 타입 변경 시 이전 마켓의 stale 데이터 초기화
+        setData(null);
+
         if (USE_MOCK) return;
 
         // ref count 관리: 첫 구독 시 connect
@@ -149,25 +152,32 @@ export function useSSE<T>(
         };
     }, [eventType]);
 
-    // 폴백: SSE 연결 실패 시 30초 REST 폴링
+    // 폴백: SSE 연결 실패 또는 지연 시 REST 폴링
     useEffect(() => {
         if (USE_MOCK) return;
         if (!fallbackRef.current) return;
 
         let interval: ReturnType<typeof setInterval> | null = null;
+        let initialTimer: ReturnType<typeof setTimeout> | null = null;
         let cancelled = false;
+        let initialFetched = false;
+
+        const doFetch = () => {
+            if (!cancelled && fallbackRef.current) {
+                fallbackRef.current().then(d => { if (!cancelled) setData(d); }).catch(() => {});
+            }
+        };
+
+        const startPolling = () => {
+            if (!interval && !cancelled) {
+                doFetch();
+                interval = setInterval(doFetch, 30_000);
+            }
+        };
 
         const statusHandler = (status: SSEStatus) => {
             if (status === 'error' || status === 'disconnected') {
-                if (!interval && fallbackRef.current) {
-                    const doFetch = () => {
-                        if (!cancelled && fallbackRef.current) {
-                            fallbackRef.current().then(d => { if (!cancelled) setData(d); }).catch(() => {});
-                        }
-                    };
-                    doFetch();
-                    interval = setInterval(doFetch, 30_000);
-                }
+                startPolling();
             } else if (status === 'connected') {
                 if (interval) {
                     clearInterval(interval);
@@ -180,10 +190,21 @@ export function useSSE<T>(
         // 현재 상태 체크
         statusHandler(currentStatus);
 
+        // SSE가 3초 내 연결되지 않으면 1회 REST 폴백 실행
+        if (currentStatus !== 'connected' && !initialFetched) {
+            initialTimer = setTimeout(() => {
+                if (!cancelled && currentStatus !== 'connected' && !initialFetched) {
+                    initialFetched = true;
+                    doFetch();
+                }
+            }, 3000);
+        }
+
         return () => {
             cancelled = true;
             statusListeners.delete(statusHandler);
             if (interval) clearInterval(interval);
+            if (initialTimer) clearTimeout(initialTimer);
         };
     }, [eventType]);
 

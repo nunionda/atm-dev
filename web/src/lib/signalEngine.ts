@@ -372,13 +372,13 @@ export function analyzeEntrySignals(
         }
         ps4Passed = recentMarkers.length > 0;
         ps4Detail = ps4Passed
-            ? `SMC 강세: ${recentMarkers.join(', ')}`
+            ? `Smart Money Concept 강세: ${recentMarkers.join(', ')}`
             : '최근 5봉 내 BOS_BULL/CHOCH_BULL 없음';
     }
 
     primarySignals.push({
         id: 'PS4',
-        label: 'SMC 강세 시그널',
+        label: 'Smart Money Concept 강세 시그널',
         passed: ps4Passed,
         detail: ps4Detail,
     });

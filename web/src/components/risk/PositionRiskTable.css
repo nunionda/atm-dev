@@ -1,0 +1,157 @@
+.pos-risk-wrapper {
+    margin-bottom: 16px;
+}
+
+.pos-risk-wrapper .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px 0;
+}
+
+.pos-risk-wrapper .section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.pos-risk-empty {
+    padding: 32px 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.pos-risk-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+}
+
+.pos-risk-table thead th {
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 500;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    white-space: nowrap;
+}
+
+.pos-risk-table tbody td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    vertical-align: middle;
+}
+
+.pos-risk-table th.num,
+.pos-risk-table td.num {
+    text-align: right;
+}
+
+.pos-risk-table .stock-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.pos-risk-table .stock-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 0.78rem;
+}
+
+.pos-risk-table .stock-code {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+}
+
+.pos-risk-table .pnl-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+.pos-risk-table .text-profit {
+    color: #22c55e;
+}
+
+.pos-risk-table .text-loss {
+    color: #ef4444;
+}
+
+.pos-risk-table tr.risk-high {
+    background: rgba(239, 68, 68, 0.04);
+}
+
+.holding-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    align-items: flex-end;
+    font-variant-numeric: tabular-nums;
+}
+
+.holding-bar {
+    width: 48px;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.holding-fill {
+    height: 100%;
+    background: #3b82f6;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+.holding-fill.warn {
+    background: #eab308;
+}
+
+.holding-warn {
+    color: #eab308;
+}
+
+.risk-icon-high {
+    color: #ef4444;
+}
+
+.risk-icon-medium {
+    color: #eab308;
+}
+
+.count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.08);
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+}
+
+.table-scroll {
+    overflow-x: auto;
+}
+
+/* --- Clickable row for cross-page navigation --- */
+.pos-risk-table tr.clickable-row {
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.pos-risk-table tr.clickable-row:hover {
+    background: rgba(59, 130, 246, 0.08);
+}

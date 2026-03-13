@@ -1,0 +1,146 @@
+/* ═══════════════════════════════════════════
+   IndexTrendTimeline — 추세 변경 이력
+   ═══════════════════════════════════════════ */
+
+.itt-container {
+    padding: 14px 16px;
+}
+
+.itt-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+}
+
+.itt-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.itt-count {
+    margin-left: auto;
+    font-size: 0.66rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.06);
+    padding: 1px 8px;
+    border-radius: 10px;
+}
+
+.itt-empty {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 16px 0;
+}
+
+/* ── Scroll area ── */
+.itt-scroll {
+    max-height: 220px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.itt-scroll::-webkit-scrollbar {
+    width: 3px;
+}
+
+.itt-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}
+
+/* ── Entry ── */
+.itt-entry {
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.itt-entry + .itt-entry {
+    border-top-color: rgba(255, 255, 255, 0.03);
+}
+
+.itt-entry-time {
+    font-size: 0.64rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Trend badges row ── */
+.itt-entry-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.itt-badge {
+    display: inline-flex;
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+.itt-badge--none {
+    background: rgba(148, 163, 184, 0.10);
+    border-color: rgba(148, 163, 184, 0.2);
+    color: #94a3b8;
+}
+
+.itt-arrow {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+/* ── Trigger signals ── */
+.itt-entry-signals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+}
+
+.itt-signal-chip {
+    font-size: 0.58rem;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* ── Weight changes ── */
+.itt-entry-weights {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.6rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.itt-weight-old {
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+
+.itt-weight-arrow {
+    color: var(--text-muted);
+    font-size: 0.55rem;
+}
+
+.itt-weight-new {
+    color: var(--text-secondary);
+    font-weight: 600;
+}

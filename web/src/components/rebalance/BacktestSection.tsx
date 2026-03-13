@@ -23,6 +23,12 @@ const EXIT_LABELS: Record<string, string> = {
     'ES_SMC ATR SL': 'ATR 손절',
     'ES_SMC ATR TP': 'ATR 익절',
     'ES_CHOCH 추세반전': 'CHoCH 반전',
+    'ES_BRT ATR SL (1.5x)': 'BRT SL',
+    'ES_BRT ATR TP (3.0x)': 'BRT TP',
+    'ES_ZONE_BREAK 존 무효화': 'Zone Break',
+    'ES_ARB ATR SL': 'ARB SL',
+    'ES_ARB Z-Score TP': 'Z-Score TP',
+    'ES_ARB Corr Decay': 'Corr Decay',
 };
 
 function getExitBadgeClass(reason: string): string {
@@ -30,6 +36,7 @@ function getExitBadgeClass(reason: string): string {
     if (reason.includes('익절') || reason.includes('TP') || reason.startsWith('ES2')) return 'exit-profit';
     if (reason.includes('리밸런스') || reason.startsWith('ES7')) return 'exit-rebal';
     if (reason.includes('CHOCH') || reason.includes('추세반전')) return 'exit-choch';
+    if (reason.includes('ZONE_BREAK') || reason.includes('존 무효화')) return 'exit-stop';
     return 'exit-other';
 }
 
@@ -50,13 +57,14 @@ export function BacktestSection({ activeMarket }: BacktestSectionProps) {
     const [isExpanded, setIsExpanded] = useState(true);
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
-    const [strategy, setStrategy] = useState<'momentum' | 'smc'>('momentum');
+    const [strategy, setStrategy] = useState<'momentum' | 'smc' | 'breakout_retest' | 'mean_reversion' | 'arbitrage'>('momentum');
     const [isRunning, setIsRunning] = useState(false);
     const [result, setResult] = useState<UniverseBacktestResult | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [elapsedSec, setElapsedSec] = useState(0);
     const [showAllTrades, setShowAllTrades] = useState(false);
     const [showAdvanced, setShowAdvanced] = useState(false);
+    const [tradeFilter, setTradeFilter] = useState('');
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const marketConfig = getMarketConfig(activeMarket);
@@ -128,9 +136,18 @@ export function BacktestSection({ activeMarket }: BacktestSectionProps) {
 
     const m = result?.metrics;
     const trades = result?.trades ?? [];
-    const displayTrades = showAllTrades ? trades : trades.slice(-20);
+    const filteredTrades = tradeFilter
+        ? trades.filter(t =>
+            t.stock_name.toLowerCase().includes(tradeFilter.toLowerCase()) ||
+            t.stock_code.toLowerCase().includes(tradeFilter.toLowerCase())
+        )
+        : trades;
+    const displayTrades = showAllTrades ? filteredTrades : filteredTrades.slice(-20);
     const ps = result?.phase_stats;
     const isSmc = result?.strategy === 'smc';
+    const isBrt = result?.strategy === 'breakout_retest';
+    const isMr = result?.strategy === 'mean_reversion';
+    const isArb = result?.strategy === 'arbitrage';
 
     return (
         <div className="backtest-section">
@@ -144,7 +161,16 @@ export function BacktestSection({ activeMarket }: BacktestSectionProps) {
                     {m && (
                         <>
                             {isSmc && (
-                                <span className="backtest-pill strategy-smc">SMC</span>
+                                <span className="backtest-pill strategy-smc">Smart Money Concept</span>
+                            )}
+                            {isBrt && (
+                                <span className="backtest-pill strategy-smc">BRT</span>
+                            )}
+                            {isMr && (
+                                <span className="backtest-pill strategy-smc">Mean Reversion</span>
+                            )}
+                            {isArb && (
+                                <span className="backtest-pill strategy-smc">Arbitrage</span>
                             )}
                             <span className={`backtest-pill ${m.total_return >= 0 ? 'positive' : 'negative'}`}>
                                 {m.total_return >= 0 ? '+' : ''}{m.total_return.toFixed(1)}% / {m.total_trades} trades
@@ -172,7 +198,28 @@ export function BacktestSection({ activeMarket }: BacktestSectionProps) {
                                 onClick={() => setStrategy('smc')}
                                 disabled={isRunning}
                             >
-                                SMC
+                                Smart Money Concept
+                            </button>
+                            <button
+                                className={`strategy-btn ${strategy === 'breakout_retest' ? 'active' : ''}`}
+                                onClick={() => setStrategy('breakout_retest')}
+                                disabled={isRunning}
+                            >
+                                BRT
+                            </button>
+                            <button
+                                className={`strategy-btn ${strategy === 'mean_reversion' ? 'active' : ''}`}
+                                onClick={() => setStrategy('mean_reversion')}
+                                disabled={isRunning}
+                            >
+                                Mean Reversion
+                            </button>
+                            <button
+                                className={`strategy-btn ${strategy === 'arbitrage' ? 'active' : ''}`}
+                                onClick={() => setStrategy('arbitrage')}
+                                disabled={isRunning}
+                            >
+                                Arbitrage
                             </button>
                         </div>
                         <div className="backtest-presets">
@@ -306,6 +353,16 @@ export function BacktestSection({ activeMarket }: BacktestSectionProps) {
                                                         {ps.es_smc_sl > 0 && <div className="exit-row"><span className="exit-label">ATR Stop Loss</span><span className="exit-count">{ps.es_smc_sl}</span></div>}
                                                         {ps.es_smc_tp > 0 && <div className="exit-row"><span className="exit-label">ATR Take Profit</span><span className="exit-count">{ps.es_smc_tp}</span></div>}
                                                         {ps.es_choch_exit > 0 && <div className="exit-row"><span className="exit-label">CHoCH Exit</span><span className="exit-count">{ps.es_choch_exit}</span></div>}
+                                                        {ps.es_brt_sl > 0 && <div className="exit-row"><span className="exit-label">BRT ATR SL</span><span className="exit-count">{ps.es_brt_sl}</span></div>}
+                                                        {ps.es_brt_tp > 0 && <div className="exit-row"><span className="exit-label">BRT ATR TP</span><span className="exit-count">{ps.es_brt_tp}</span></div>}
+                                                        {ps.es_zone_break > 0 && <div className="exit-row"><span className="exit-label">Zone Break</span><span className="exit-count">{ps.es_zone_break}</span></div>}
+                                                        {ps.es_mr_sl > 0 && <div className="exit-row"><span className="exit-label">MR ATR SL</span><span className="exit-count">{ps.es_mr_sl}</span></div>}
+                                                        {ps.es_mr_tp > 0 && <div className="exit-row"><span className="exit-label">MR TP (MA20/RSI)</span><span className="exit-count">{ps.es_mr_tp}</span></div>}
+                                                        {ps.es_mr_bb > 0 && <div className="exit-row"><span className="exit-label">MR BB Mid</span><span className="exit-count">{ps.es_mr_bb}</span></div>}
+                                                        {ps.es_mr_ob > 0 && <div className="exit-row"><span className="exit-label">MR Overbought</span><span className="exit-count">{ps.es_mr_ob}</span></div>}
+                                                        {ps.es_arb_sl > 0 && <div className="exit-row"><span className="exit-label">ARB ATR SL</span><span className="exit-count">{ps.es_arb_sl}</span></div>}
+                                                        {ps.es_arb_tp > 0 && <div className="exit-row"><span className="exit-label">ARB Z-Score TP</span><span className="exit-count">{ps.es_arb_tp}</span></div>}
+                                                        {ps.es_arb_corr > 0 && <div className="exit-row"><span className="exit-label">ARB Corr Decay</span><span className="exit-count">{ps.es_arb_corr}</span></div>}
                                                     </div>
                                                 </div>
                                                 <div className="backtest-adv-group">
@@ -318,13 +375,54 @@ export function BacktestSection({ activeMarket }: BacktestSectionProps) {
                                                 </div>
                                                 {isSmc && (
                                                     <div className="backtest-adv-group">
-                                                        <h4>SMC Scoring</h4>
+                                                        <h4>Smart Money Concept Scoring</h4>
                                                         <div className="backtest-exit-list">
-                                                            <div className="exit-row"><span className="exit-label">SMC Entries</span><span className="exit-count">{ps.smc_entries}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">Smart Money Concept Entries</span><span className="exit-count">{ps.smc_entries}</span></div>
                                                             <div className="exit-row"><span className="exit-label">Avg Score</span><span className="exit-count">{ps.smc_avg_score?.toFixed(1)}</span></div>
                                                             <div className="exit-row"><span className="exit-label">ATR Stop Loss</span><span className="exit-count">{ps.es_smc_sl}</span></div>
                                                             <div className="exit-row"><span className="exit-label">ATR Take Profit</span><span className="exit-count">{ps.es_smc_tp}</span></div>
                                                             <div className="exit-row"><span className="exit-label">CHoCH Exit</span><span className="exit-count">{ps.es_choch_exit}</span></div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {isBrt && (
+                                                    <div className="backtest-adv-group">
+                                                        <h4>BRT Pipeline</h4>
+                                                        <div className="backtest-exit-list">
+                                                            <div className="exit-row"><span className="exit-label">Breakouts Detected</span><span className="exit-count">{ps.brt_breakouts_detected}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">Fakeout Blocked</span><span className="exit-count">{ps.brt_fakeout_blocked}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">Retest Entries</span><span className="exit-count">{ps.brt_retests_entered}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">Retests Expired</span><span className="exit-count">{ps.brt_retests_expired}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">Zone Break Exit</span><span className="exit-count">{ps.es_zone_break}</span></div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {isMr && (
+                                                    <div className="backtest-adv-group">
+                                                        <h4>Mean Reversion Scoring</h4>
+                                                        <div className="backtest-exit-list">
+                                                            <div className="exit-row"><span className="exit-label">MR Entries</span><span className="exit-count">{ps.mr_entries}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">Avg Score</span><span className="exit-count">{ps.mr_entries > 0 ? (ps.mr_total_score / ps.mr_entries).toFixed(1) : '—'}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">MR ATR SL</span><span className="exit-count">{ps.es_mr_sl}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">MR TP (MA20/RSI)</span><span className="exit-count">{ps.es_mr_tp}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">MR BB Mid</span><span className="exit-count">{ps.es_mr_bb}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">MR Overbought</span><span className="exit-count">{ps.es_mr_ob}</span></div>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {isArb && (
+                                                    <div className="backtest-adv-group">
+                                                        <h4>Arbitrage Pairs Trading</h4>
+                                                        <div className="backtest-exit-list">
+                                                            <div className="exit-row"><span className="exit-label">Pairs Scanned</span><span className="exit-count">{ps.arb_pairs_scanned}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">Spreads Detected</span><span className="exit-count">{ps.arb_spreads_detected}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">Corr Rejects</span><span className="exit-count">{ps.arb_correlation_rejects}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">Long Entries</span><span className="exit-count">{ps.arb_entries}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">Short Entries</span><span className="exit-count">{ps.arb_short_entries}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">Avg Score</span><span className="exit-count">{ps.arb_entries > 0 ? (ps.arb_total_score / ps.arb_entries).toFixed(1) : '—'}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">ARB ATR SL</span><span className="exit-count">{ps.es_arb_sl}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">ARB Z-Score TP</span><span className="exit-count">{ps.es_arb_tp}</span></div>
+                                                            <div className="exit-row"><span className="exit-label">ARB Corr Decay</span><span className="exit-count">{ps.es_arb_corr}</span></div>
                                                         </div>
                                                     </div>
                                                 )}
@@ -368,7 +466,14 @@ export function BacktestSection({ activeMarket }: BacktestSectionProps) {
                             {trades.length > 0 && (
                                 <div className="backtest-trades-section">
                                     <div className="backtest-trades-header">
-                                        <span>Trade Log ({trades.length})</span>
+                                        <span>Trade Log ({tradeFilter ? `${filteredTrades.length}/${trades.length}` : trades.length})</span>
+                                        <input
+                                            type="text"
+                                            className="backtest-trade-filter"
+                                            placeholder="Filter by name or code..."
+                                            value={tradeFilter}
+                                            onChange={e => setTradeFilter(e.target.value)}
+                                        />
                                     </div>
                                     <div className="backtest-trades-table-wrapper">
                                         <table className="rec-data-table">
@@ -410,12 +515,12 @@ export function BacktestSection({ activeMarket }: BacktestSectionProps) {
                                             </tbody>
                                         </table>
                                     </div>
-                                    {trades.length > 20 && (
+                                    {filteredTrades.length > 20 && (
                                         <button
                                             className="backtest-show-all-btn"
                                             onClick={() => setShowAllTrades(!showAllTrades)}
                                         >
-                                            {showAllTrades ? 'Show Recent 20' : `Show All ${trades.length} Trades`}
+                                            {showAllTrades ? 'Show Recent 20' : `Show All ${filteredTrades.length} Trades`}
                                         </button>
                                     )}
                                 </div>

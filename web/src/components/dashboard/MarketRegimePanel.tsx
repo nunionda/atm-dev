@@ -43,10 +43,11 @@ export function MarketRegimePanel({ onSelectIndex }: MarketRegimePanelProps) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
 
-    const load = useCallback(async () => {
+    const load = useCallback(async (signal?: AbortSignal) => {
         setLoading(true);
         setError(false);
-        const result = await fetchMarketOverview();
+        const result = await fetchMarketOverview(signal);
+        if (signal?.aborted) return;
         if (result) {
             setData(result);
         } else {
@@ -56,9 +57,10 @@ export function MarketRegimePanel({ onSelectIndex }: MarketRegimePanelProps) {
     }, []);
 
     useEffect(() => {
-        load();
-        const interval = setInterval(load, 5 * 60 * 1000);
-        return () => clearInterval(interval);
+        const controller = new AbortController();
+        load(controller.signal);
+        const interval = setInterval(() => load(), 5 * 60 * 1000);
+        return () => { controller.abort(); clearInterval(interval); };
     }, [load]);
 
     if (loading && !data) {
@@ -77,7 +79,7 @@ export function MarketRegimePanel({ onSelectIndex }: MarketRegimePanelProps) {
                 <div className="regime-loading">
                     시장 데이터를 불러올 수 없습니다.
                     <button
-                        onClick={load}
+                        onClick={() => load()}
                         style={{
                             marginLeft: 8,
                             padding: '3px 10px',

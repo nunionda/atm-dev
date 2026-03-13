@@ -33,12 +33,17 @@ function toChartTime(datetime: string): Time {
     return d as Time;
 }
 
-// --- Sort helper (reused everywhere) ---
-function sortByTime<T extends { time: Time }>(arr: T[]): T[] {
-    return arr.sort((a, b) => {
-        if (typeof a.time === 'number' && typeof b.time === 'number') return a.time - b.time;
-        return new Date(a.time as string).getTime() - new Date(b.time as string).getTime();
-    });
+// --- Lightweight dedup for pre-sorted data (O(n), no sort needed since Dashboard pre-sorts) ---
+function dedupByTime<T extends { time: Time }>(arr: T[]): T[] {
+    if (arr.length <= 1) return arr;
+    const result: T[] = [];
+    for (let i = 0; i < arr.length; i++) {
+        const key = String(arr[i].time);
+        // Keep last occurrence: if next item has same time, skip this one
+        if (i < arr.length - 1 && key === String(arr[i + 1].time)) continue;
+        result.push(arr[i]);
+    }
+    return result;
 }
 
 export function TechnicalChart({
@@ -65,6 +70,7 @@ export function TechnicalChart({
     const chartApiRef = useRef<IChartApi | null>(null);
     const mainSeriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
     const parseTimeRef = useRef<((datetime: string) => Time) | null>(null);
+    const barIndexMapRef = useRef<Map<string, number>>(new Map());
 
     // OHLCV overlay state (throttled)
     const [crosshairData, setCrosshairData] = useState<CrosshairData | null>(null);
@@ -137,25 +143,28 @@ export function TechnicalChart({
         };
         parseTimeRef.current = parseTime;
 
-        // Build lookup map
+        // Build lookup maps (data arrives pre-sorted from Dashboard)
         const dataMap = new Map<string, AnalyticsData>();
-        data.forEach(item => {
+        const barIndexMap = new Map<string, number>();
+        data.forEach((item, i) => {
             const t = parseTime(item.datetime);
             dataMap.set(String(t), item);
+            barIndexMap.set(item.datetime, i);
         });
         dataMapRef.current = dataMap;
+        barIndexMapRef.current = barIndexMap;
 
-        // === Chart Data ===
-        const chartData = sortByTime(data.map(item => ({
+        // === Chart Data (pre-sorted, just dedup) ===
+        const chartData = dedupByTime(data.map(item => ({
             time: parseTime(item.datetime),
             open: item.open,
             high: item.high,
             low: item.low,
             close: item.close,
-        })).filter(d => d.time && !isNaN(d.close)));
+        })).filter(d => d.time && d.open != null && d.high != null && d.low != null && d.close != null && !isNaN(d.close)));
 
         // === Volume Data ===
-        const volumeData = sortByTime(data.map(item => ({
+        const volumeData = dedupByTime(data.map(item => ({
             time: parseTime(item.datetime),
             value: item.volume ?? 0,
             color: item.close >= item.open
@@ -164,11 +173,11 @@ export function TechnicalChart({
         })).filter(d => d.time && d.value > 0));
 
         // === Bollinger Bands ===
-        const bbUpper = sortByTime(data
+        const bbUpper = dedupByTime(data
             .filter(item => item.bb_hband != null)
             .map(item => ({ time: parseTime(item.datetime), value: item.bb_hband! })));
 
-        const bbLower = sortByTime(data
+        const bbLower = dedupByTime(data
             .filter(item => item.bb_lband != null)
             .map(item => ({ time: parseTime(item.datetime), value: item.bb_lband! })));
 
@@ -224,7 +233,7 @@ export function TechnicalChart({
                 crosshairMarkerVisible: true,
                 lastValueVisible: true,
             });
-            mainSeries.setData(sortByTime(chartData.map(d => ({ time: d.time, value: d.close }))));
+            mainSeries.setData(dedupByTime(chartData.map(d => ({ time: d.time, value: d.close }))));
         } else if (chartType === 'area') {
             mainSeries = chart.addAreaSeries({
                 topColor: 'rgba(41, 98, 255, 0.4)',
@@ -232,7 +241,7 @@ export function TechnicalChart({
                 lineColor: '#2962ff',
                 lineWidth: 2,
             });
-            mainSeries.setData(sortByTime(chartData.map(d => ({ time: d.time, value: d.close }))));
+            mainSeries.setData(dedupByTime(chartData.map(d => ({ time: d.time, value: d.close }))));
         } else {
             // candlestick or heikin-ashi (HA data is pre-computed in Dashboard)
             mainSeries = chart.addCandlestickSeries({
@@ -337,7 +346,7 @@ export function TechnicalChart({
                 const config = MA_CONFIG[key];
                 if (!config) return;
 
-                const maData = sortByTime(data
+                const maData = dedupByTime(data
                     .filter(item => (item as any)[config.field] != null)
                     .map(item => ({
                         time: parseTime(item.datetime),
@@ -393,7 +402,7 @@ export function TechnicalChart({
             const rsiSeries = rsiChart.addLineSeries({ color: '#a855f7', lineWidth: 2 });
             rsiSeries.createPriceLine({ price: 70, color: 'rgba(239, 68, 68, 0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'OB' });
             rsiSeries.createPriceLine({ price: 30, color: 'rgba(34, 197, 94, 0.4)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'OS' });
-            const rsiData = sortByTime(data
+            const rsiData = dedupByTime(data
                 .filter(d => d.rsi_14 !== null)
                 .map(d => ({ time: parseTime(d.datetime), value: d.rsi_14! })));
             rsiSeries.setData(rsiData);
@@ -425,9 +434,9 @@ export function TechnicalChart({
                 }
             });
 
-            macdLine.setData(sortByTime(mData));
-            signalLine.setData(sortByTime(sData));
-            histSeries.setData(sortByTime(hData));
+            macdLine.setData(dedupByTime(mData));
+            signalLine.setData(dedupByTime(sData));
+            histSeries.setData(dedupByTime(hData));
         }
 
         // === ADX Subchart ===
@@ -453,21 +462,26 @@ export function TechnicalChart({
                 if (d.plus_di !== null) pData.push({ time: t, value: d.plus_di });
                 if (d.minus_di !== null) mDiData.push({ time: t, value: d.minus_di });
             });
-            adxSeries.setData(sortByTime(aData));
-            plusDi.setData(sortByTime(pData));
-            minusDi.setData(sortByTime(mDiData));
+            adxSeries.setData(dedupByTime(aData));
+            plusDi.setData(dedupByTime(pData));
+            minusDi.setData(dedupByTime(mDiData));
         }
 
-        // === Time Scale Sync ===
+        // === Time Scale Sync (with cascade guard) ===
+        let syncing = false;
         chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-            if (range) subcharts.forEach(c => c.timeScale().setVisibleRange(range));
+            if (syncing || !range) return;
+            syncing = true;
+            subcharts.forEach(c => c.timeScale().setVisibleRange(range));
+            syncing = false;
         });
         subcharts.forEach(srcChart => {
             srcChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
-                if (range) {
-                    chart.timeScale().setVisibleRange(range);
-                    subcharts.forEach(t => { if (t !== srcChart) t.timeScale().setVisibleRange(range); });
-                }
+                if (syncing || !range) return;
+                syncing = true;
+                chart.timeScale().setVisibleRange(range);
+                subcharts.forEach(t => { if (t !== srcChart) t.timeScale().setVisibleRange(range); });
+                syncing = false;
             });
         });
 
@@ -517,7 +531,7 @@ export function TechnicalChart({
                     const x = chart.timeScale().timeToCoordinate(time);
                     const y = mainSeries.priceToCoordinate(matched.close);
                     if (x !== null && y !== null) {
-                        const barIndex = data.findIndex(d => d.datetime === matched.datetime);
+                        const barIndex = barIndexMapRef.current.get(matched.datetime) ?? -1;
                         setMeasureState(prev => ({
                             ...prev,
                             target: {
@@ -603,7 +617,7 @@ export function TechnicalChart({
             const y = mainSeries.priceToCoordinate(matched.close);
             if (x === null || y === null) return;
 
-            const barIndex = data.findIndex(d => d.datetime === matched.datetime);
+            const barIndex = barIndexMapRef.current.get(matched.datetime) ?? -1;
             const pt: MeasurePoint = { x: x as number, y: y as number, price: matched.close, time: matched.datetime, barIndex };
 
             setMeasureState(prev => {
@@ -638,10 +652,12 @@ export function TechnicalChart({
         return () => {
             window.removeEventListener('resize', handleResize);
             cancelAnimationFrame(rafRef.current);
-            chart.remove();
-            subcharts.forEach(c => c.remove());
+            // Remove charts (this also cleans up internal subscriptions)
+            try { chart.remove(); } catch (_) { /* already removed */ }
+            subcharts.forEach(c => { try { c.remove(); } catch (_) { /* already removed */ } });
             chartApiRef.current = null;
             mainSeriesRef.current = null;
+            barIndexMapRef.current = new Map();
         };
     }, [data, height, ticker, interval, activeSubcharts, chartType, activeOverlays, showSR, visibleBars, handleCrosshairData]);
 

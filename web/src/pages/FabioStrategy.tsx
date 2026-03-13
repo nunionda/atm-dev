@@ -823,7 +823,7 @@ export function FabioStrategy() {
                   {slTicks > 0 && (
                     <div style={{
                       display: 'flex', gap: 8, fontSize: 10, fontFamily: F.mono, marginBottom: 8,
-                      padding: '6px 8px', background: `${K.bg}cc`, borderRadius: 6, border: `1px solid ${K.brd}`,
+                      padding: '6px 8px', background: `${K.bg0}cc`, borderRadius: 6, border: `1px solid ${K.brd}`,
                     }}>
                       <span style={{ color: K.dim }}>추천</span>
                       <span style={{ color: K.red }}>SL {slTicks}t</span>

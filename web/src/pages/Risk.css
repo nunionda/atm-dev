@@ -5,6 +5,11 @@
 
 .risk-header {
     margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
 }
 
 .risk-header .page-title {
@@ -19,6 +24,54 @@
     color: var(--text-muted);
 }
 
+/* Market Tabs */
+.market-tabs {
+    display: flex;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 4px;
+}
+
+.market-tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.market-tab-btn:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-secondary);
+}
+
+.market-tab-btn.active {
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #60a5fa;
+    font-weight: 600;
+}
+
+.market-flag {
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.market-label {
+    letter-spacing: 0.02em;
+}
+
+/* Halt Banner */
 .halt-banner {
     display: flex;
     align-items: center;
@@ -41,25 +94,30 @@
     opacity: 0.8;
 }
 
-.risk-grid {
+/* Top Grid: Gauges (left) + Gates + Counters (right) */
+.risk-top-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    grid-template-rows: auto auto;
     gap: 16px;
+    margin-bottom: 16px;
 }
 
 .risk-gauges {
     padding: 20px;
 }
 
+.risk-right-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
 .risk-counters {
     padding: 20px;
 }
 
-.risk-events {
-    grid-column: 1 / -1;
-}
-
+/* Counters */
 .counter-grid {
     display: flex;
     flex-direction: column;
@@ -110,11 +168,177 @@
     color: var(--text-muted);
 }
 
+/* Full-width sections */
+.risk-events {
+    margin-bottom: 16px;
+}
+
+/* ===== Emergency Controls ===== */
+.emergency-actions {
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    border: 1px solid rgba(239, 68, 68, 0.15);
+}
+
+.emergency-actions .section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 12px;
+}
+
+.emergency-btn-group {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.emergency-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1px solid;
+}
+
+.emergency-btn.pause-btn {
+    color: #eab308;
+    background: rgba(234, 179, 8, 0.08);
+    border-color: rgba(234, 179, 8, 0.3);
+}
+
+.emergency-btn.pause-btn:hover {
+    background: rgba(234, 179, 8, 0.15);
+    border-color: rgba(234, 179, 8, 0.5);
+}
+
+.emergency-btn.liquidate-btn {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.08);
+    border-color: rgba(239, 68, 68, 0.3);
+}
+
+.emergency-btn.liquidate-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+.emergency-btn.ops-btn {
+    color: #60a5fa;
+    background: rgba(59, 130, 246, 0.08);
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+.emergency-btn.ops-btn:hover {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
+.emergency-result {
+    margin-top: 10px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+}
+
+/* ===== Confirmation Modal ===== */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    max-width: 420px;
+    width: 90%;
+    padding: 24px;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.modal-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #ef4444;
+    margin: 0 0 16px;
+}
+
+.modal-message {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin: 0 0 20px;
+}
+
+.modal-message strong {
+    color: var(--text-primary);
+}
+
+.modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.modal-cancel {
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.modal-cancel:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.modal-confirm-danger {
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #fff;
+    background: #dc2626;
+    border: 1px solid #ef4444;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.modal-confirm-danger:hover {
+    background: #b91c1c;
+}
+
+.modal-confirm-danger:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 @media (max-width: 768px) {
-    .risk-grid {
+    .risk-top-grid {
         grid-template-columns: 1fr;
     }
-    .risk-events {
-        grid-column: 1;
+    .emergency-btn-group {
+        flex-direction: column;
     }
 }

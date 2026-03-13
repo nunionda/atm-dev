@@ -4,6 +4,7 @@ import './TradeLogTable.css';
 
 interface TradeLogTableProps {
     trades: TradeRecord[];
+    currencySymbol?: string;
 }
 
 const EXIT_LABELS: Record<string, string> = {
@@ -14,7 +15,7 @@ const EXIT_LABELS: Record<string, string> = {
     'ES5 보유기간 초과 10일': '기간초과',
 };
 
-export function TradeLogTable({ trades }: TradeLogTableProps) {
+export function TradeLogTable({ trades, currencySymbol = '₩' }: TradeLogTableProps) {
     return (
         <div className="trade-log-wrapper glass-panel">
             <h3 className="section-title">거래 내역</h3>
@@ -46,8 +47,8 @@ export function TradeLogTable({ trades }: TradeLogTableProps) {
                                     </td>
                                     <td className="date-cell">{trade.entry_date}</td>
                                     <td className="date-cell">{trade.exit_date}</td>
-                                    <td className="num">₩{trade.entry_price.toLocaleString()}</td>
-                                    <td className="num">₩{trade.exit_price.toLocaleString()}</td>
+                                    <td className="num">{currencySymbol}{trade.entry_price.toLocaleString()}</td>
+                                    <td className="num">{currencySymbol}{trade.exit_price.toLocaleString()}</td>
                                     <td className="num">{trade.quantity}</td>
                                     <td className={`num ${isWin ? 'text-profit' : 'text-loss'}`}>
                                         <span className="pnl-cell">
@@ -56,7 +57,7 @@ export function TradeLogTable({ trades }: TradeLogTableProps) {
                                         </span>
                                     </td>
                                     <td className={`num ${isWin ? 'text-profit' : 'text-loss'}`}>
-                                        {isWin ? '+' : ''}₩{trade.pnl.toLocaleString()}
+                                        {isWin ? '+' : ''}{currencySymbol}{trade.pnl.toLocaleString()}
                                     </td>
                                     <td>
                                         <span className={`exit-badge ${isWin ? 'win' : 'loss'}`}>

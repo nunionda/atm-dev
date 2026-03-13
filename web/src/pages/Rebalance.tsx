@@ -3,7 +3,7 @@ import { RebalanceHeader } from '../components/rebalance/RebalanceHeader';
 import { RecommendationTable } from '../components/rebalance/RecommendationTable';
 import { ScanSummary } from '../components/rebalance/ScanSummary';
 import { BacktestSection } from '../components/rebalance/BacktestSection';
-import type { MarketId, RebalanceResult, RebalanceStatus } from '../lib/api';
+import type { RebalanceResult, RebalanceStatus } from '../lib/api';
 import {
     MARKETS,
     getMarketConfig,
@@ -11,10 +11,11 @@ import {
     fetchRebalanceRecommendations,
     fetchRebalanceStatus,
 } from '../lib/api';
+import { useAppState } from '../contexts/AppStateContext';
 import './Rebalance.css';
 
 export function Rebalance() {
-    const [activeMarket, setActiveMarket] = useState<MarketId>('sp500');
+    const { activeMarket, setActiveMarket } = useAppState();
     const [result, setResult] = useState<RebalanceResult | null>(null);
     const [status, setStatus] = useState<RebalanceStatus | null>(null);
     const [isScanning, setIsScanning] = useState(false);

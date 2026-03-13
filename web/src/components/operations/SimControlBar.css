@@ -1,0 +1,387 @@
+.sim-control-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    gap: 12px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+    position: relative;
+    z-index: 20;
+}
+
+.sim-control-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.sim-control-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.sim-control-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.sim-icon {
+    color: #eab308;
+}
+
+/* Mode toggle */
+.sim-mode-toggle {
+    display: flex;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.mode-toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.mode-toggle-btn:hover:not(:disabled) {
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.mode-toggle-btn.active {
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+}
+
+.mode-toggle-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Engine status badge */
+.sim-engine-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border: 1px solid;
+}
+
+.sim-engine-status.running {
+    background: rgba(34, 197, 94, 0.1);
+    border-color: rgba(34, 197, 94, 0.3);
+    color: #22c55e;
+}
+
+.sim-engine-status.stopped {
+    background: rgba(107, 114, 128, 0.1);
+    border-color: rgba(107, 114, 128, 0.3);
+    color: #9ca3af;
+}
+
+.sim-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.sim-engine-status.running .sim-status-dot {
+    animation: pulse-dot 2s infinite;
+}
+
+/* Strategy selector */
+.strategy-selector-wrap {
+    position: relative;
+}
+
+.strategy-selector-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.strategy-selector-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.15);
+}
+
+.strategy-selector-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.strategy-current {
+    font-weight: 600;
+    color: #60a5fa;
+}
+
+.strategy-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 50;
+    min-width: 200px;
+    background: #1c1c2e;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.strategy-option {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.1s;
+}
+
+.strategy-option:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.strategy-option.active {
+    background: rgba(59, 130, 246, 0.12);
+}
+
+.strategy-name {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.strategy-option.active .strategy-name {
+    color: #60a5fa;
+}
+
+.strategy-desc {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+
+/* Sim metrics */
+.sim-metric {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.75rem;
+}
+
+.sim-metric-label {
+    color: var(--text-muted);
+}
+
+.sim-metric-value {
+    color: var(--text-primary);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Action label */
+.sim-action-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* Buttons */
+.sim-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 14px;
+    border: 1px solid;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.sim-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.sim-btn-start {
+    background: rgba(34, 197, 94, 0.12);
+    border-color: rgba(34, 197, 94, 0.3);
+    color: #22c55e;
+}
+
+.sim-btn-start:hover:not(:disabled) {
+    background: rgba(34, 197, 94, 0.2);
+    border-color: rgba(34, 197, 94, 0.5);
+}
+
+.sim-btn-stop {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+.sim-btn-stop:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.18);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+.sim-btn-reset {
+    background: rgba(234, 179, 8, 0.1);
+    border-color: rgba(234, 179, 8, 0.25);
+    color: #eab308;
+}
+
+.sim-btn-reset:hover:not(:disabled) {
+    background: rgba(234, 179, 8, 0.18);
+    border-color: rgba(234, 179, 8, 0.4);
+}
+
+/* ══════════════════════════════════════════ */
+/* Replay UI                                 */
+/* ══════════════════════════════════════════ */
+
+.replay-config {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.replay-speed-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-muted);
+}
+
+.replay-speed-select {
+    padding: 3px 6px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-primary);
+    font-size: 0.72rem;
+    cursor: pointer;
+    outline: none;
+}
+
+.replay-speed-select option {
+    background: #1c1c2e;
+    color: var(--text-primary);
+}
+
+/* Result save actions */
+.replay-result-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.sim-btn-saved {
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #60a5fa;
+    cursor: default;
+}
+
+/* Replay progress */
+.replay-progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1 1 280px;
+    min-width: 280px;
+}
+
+.replay-current-date {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #60a5fa;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.replay-progress-bar {
+    flex: 1;
+    min-width: 80px;
+    max-width: 200px;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+}
+
+.replay-progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #3b82f6, #60a5fa);
+    transition: width 0.3s ease;
+}
+
+.replay-progress-text {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+    .sim-control-bar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .sim-control-right {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    .replay-config {
+        width: 100%;
+    }
+
+    .replay-progress-wrap {
+        width: 100%;
+    }
+}

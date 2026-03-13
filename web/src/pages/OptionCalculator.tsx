@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { usePolling } from '../hooks/usePolling';
 import { PollingControl } from '../components/PollingControl';
 import { fetchQuote, type QuoteResponse } from '../lib/api';
@@ -104,8 +104,6 @@ export function OptionCalculator() {
   }, [preset, hasSeparateFutures]);
 
   // 현물/선물 가격 포맷
-  const isKR = preset.startsWith('kospi');
-  const sym = isKR ? '₩' : '$';
   const fmtPrice = (v: number | null, d = 2) =>
     v === null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 
