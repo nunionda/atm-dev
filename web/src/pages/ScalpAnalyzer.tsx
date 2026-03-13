@@ -13,7 +13,7 @@ import { usePolling } from '../hooks/usePolling';
 import { PollingControl } from '../components/PollingControl';
 import { Term, InfoCard } from '../components/glossary/GlossaryComponents';
 import {
-  initSession, transitionPhase, buildScenarios, extractKeyLevels,
+  initSession, buildScenarios, extractKeyLevels,
   checkAlerts, getActiveAlerts, evaluatePosition, suggestExitAction, formatHoldTime,
   PHASE_LABELS, PHASE_COLORS,
   type SessionState, type TradingPhase, type EntryRecord, type KeyLevel,
@@ -1276,7 +1276,7 @@ export function ScalpAnalyzer() {
             {/* ── Composite Trend (SMC + OBV + Volume) ── */}
             {calc.compositeTrend && (
               <div className="scalp-box">
-                <Sec icon="📊" title="복합 추세 판단 (SMC + OBV + Volume)"
+                <Sec icon="📊" title="복합 추세 판단 (Smart Money Concept + OBV + Volume)"
                   tag={calc.compositeTrend.bias}
                   tagC={calc.compositeTrend.bias === 'BULLISH' ? K.grn : calc.compositeTrend.bias === 'BEARISH' ? K.red : K.ylw}
                   infoId="compositeTrend" />
@@ -1296,7 +1296,7 @@ export function ScalpAnalyzer() {
                     return (
                       <div key={key} style={{ display: 'contents' }}>
                         <span style={{ color: K.dim, fontFamily: F.mono }}>
-                          {key === 'smcTrend' ? 'SMC 구조' : key === 'obvMomentum' ? 'OBV 모멘텀' : '거래량 추세'}
+                          {key === 'smcTrend' ? 'Smart Money Concept 구조' : key === 'obvMomentum' ? 'OBV 모멘텀' : '거래량 추세'}
                           <span style={{ opacity: 0.5, marginLeft: 4 }}>({comp.weight}%)</span>
                         </span>
                         <div style={{ height: 6, background: `${K.brd}`, borderRadius: 3, position: 'relative', overflow: 'hidden' }}>
@@ -1328,7 +1328,7 @@ export function ScalpAnalyzer() {
                         ⚠ 추세-방향 충돌: 복합추세 {calc.compositeTrend.bias === 'BEARISH' ? '하락' : '상승'} vs Z-Score {calc.isLong ? '롱' : '숏'}
                       </span>
                       <div style={{ color: K.org, fontSize: 11, marginTop: 4, opacity: 0.8 }}>
-                        평균회귀(Z-Score)는 "가격이 MA 아래 → 매수" 판단, 추세지표(SMC+OBV+Vol)는 "{calc.compositeTrend.bias === 'BEARISH' ? '하락 구조 지속' : '상승 구조 지속'}" 판단. 역추세 진입은 리스크 증가.
+                        평균회귀(Z-Score)는 "가격이 MA 아래 → 매수" 판단, 추세지표(Smart Money Concept+OBV+Vol)는 "{calc.compositeTrend.bias === 'BEARISH' ? '하락 구조 지속' : '상승 구조 지속'}" 판단. 역추세 진입은 리스크 증가.
                       </div>
                     </div>
                   )}

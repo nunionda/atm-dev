@@ -6,6 +6,23 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.signal-groups::-webkit-scrollbar {
+    width: 4px;
+}
+
+.signal-groups::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}
+
+.signal-groups::-webkit-scrollbar-track {
+    background: transparent;
 }
 
 .signal-group-label {

@@ -3,7 +3,7 @@
 ## Project Overview
 
 KOSPI200 / S&P500 / NASDAQ100 멀티마켓 자동매매 시스템.
-모멘텀 스윙 + SMC(Smart Money Concepts) 듀얼 전략 엔진.
+모멘텀 스윙 + SMC(Smart Money Concepts) + Breakout-Retest 트리플 전략 엔진.
 
 - **Backend**: Python 3.11+, FastAPI, SQLite (SQLAlchemy ORM)
 - **Frontend**: React 19 + TypeScript, Vite, lightweight-charts
@@ -42,6 +42,7 @@ Infrastructure infra/broker/, infra/db/, infra/notifier/, infra/logger.py
 | Strategy | `strategy/base.py` | 전략 추상 인터페이스 |
 | Strategy | `strategy/momentum_swing.py` | 모멘텀 스윙 전략 |
 | Strategy | `strategy/smc_strategy.py` | SMC 4-Layer 스코어링 전략 |
+| Strategy | `strategy/breakout_retest.py` | Breakout-Retest 돌파 후 리테스트 진입 전략 |
 | Risk | `risk/risk_manager.py` | 리스크 게이트 (RG1-RG4) |
 | Order | `order/order_executor.py` | 주문 제출/추적 |
 | Position | `position/position_manager.py` | 포지션 라이프사이클 |
@@ -223,6 +224,85 @@ smc_strategy:
   weight_bb: 20              # Layer 2 가중치
   weight_obv: 20             # Layer 3a 가중치
   weight_momentum: 20        # Layer 3b 가중치
+```
+
+---
+
+## Strategy 3: Breakout-Retest (돌파 후 리테스트 진입)
+
+> 참조: `ats/strategy/breakout_retest.py`
+
+### 2-Phase 구조
+
+**Phase A — 돌파 감지**
+- 4-Layer 스코어링 (구조 30 + 변동성 20 + 거래량 25 + 모멘텀 25 = 100점)
+- 6조건 중 4개 이상 충족 필수
+- 3개 페이크아웃 필터 통과 필수
+
+**Phase B — 리테스트 진입**
+- 돌파 후 가격이 돌파 영역(FVG/OB/돌파레벨)으로 되돌아올 때까지 대기
+- 영역 내 지지 확인 (거래량 감소 + 반등 캔들 + RSI 지지) — 3개 중 2개
+- 최대 15봉 이내 리테스트 미발생 시 만료
+
+### State Machine (티커별)
+
+```
+IDLE → WAITING_RETEST → Entry (or EXPIRED → IDLE)
+```
+
+### 4-Layer 스코어링
+
+| Layer | 점수 | 항목 |
+|-------|------|------|
+| L1 구조 (30) | +20 BOS_BULL, +15 CHOCH_BULL, +10 유동성 스윕 |
+| L2 변동성 (20) | +15 BB squeeze (100봉 최저), +8 EMA 이하, +5 ATR 압축 |
+| L3 거래량 (25) | +15 OBV > N봉 최고, +10 OBV EMA5 > EMA20 |
+| L4 모멘텀 (25) | +8 ADX > 25, +7 ADX 3봉 상승, +10 MACD 골든크로스 |
+
+**Threshold**: 총점 ≥ 65
+
+### 6조건 (4/6 이상 필수)
+
+C1: BB Squeeze, C2: Liquidity Sweep, C3: Displacement (body > 1.5×ATR),
+C4: OBV Break, C5: ADX Rising, C6: FVG Formation
+
+### 3 페이크아웃 필터
+
+- ERR01: 저거래량 돌파 (volume < MA20)
+- ERR02: 긴 윗꼬리 (wick/body > 1.0)
+- ERR03: MACD/RSI 다이버전스
+
+### Retest Zone (복합 스코어링)
+
+FVG 40 + OB 35 + 돌파레벨 25 = 100점, threshold ≥ 50
+
+### BRT Exit Rules
+
+| 순위 | ID | 조건 |
+|------|-----|------|
+| 1 | ES1 | -5% 하드 손절 (BR-S01 불변) |
+| 2 | ES_BRT_SL | Entry - ATR × 1.5 |
+| 3 | ES_BRT_TP | Entry + ATR × 3.0 (R:R 2:1) |
+| 4 | ES_CHOCH | 반대 CHoCH 발생 |
+| 5 | ES3 | 트레일링 (ATR × 2.0, +5%에서 활성화) |
+| 6 | ES_ZONE_BREAK | 리테스트 존 하단 이탈 |
+| 7 | ES5 | 최대 보유 30일 |
+
+### BRT Config (`config.yaml` → `breakout_retest`)
+
+```yaml
+breakout_retest:
+  swing_length: 3
+  bb_squeeze_lookback: 100
+  displacement_atr_mult: 1.5
+  breakout_threshold: 65
+  retest_max_bars: 15
+  retest_zone_atr_buffer: 0.3
+  atr_sl_mult: 1.5
+  atr_tp_mult: 3.0
+  trailing_activation_pct: 0.05
+  trailing_atr_mult: 2.0
+  max_holding_days: 30
 ```
 
 ---
@@ -540,6 +620,7 @@ ats/
 ├── api/backtest_routes.py        # 백테스트 라우트
 ├── strategy/momentum_swing.py    # 모멘텀 전략
 ├── strategy/smc_strategy.py      # SMC 전략
+├── strategy/breakout_retest.py   # Breakout-Retest 전략
 ├── simulation/engine.py          # 시뮬레이션 엔진
 ├── backtest/historical_engine.py # 히스토리컬 백테스터
 ├── backtest/metrics.py           # 성과 지표

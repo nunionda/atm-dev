@@ -342,6 +342,30 @@
     padding-top: 8px;
 }
 
+/* ===== View in Operations Button ===== */
+
+.sa-view-ops-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #60a5fa;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    align-self: flex-start;
+}
+
+.sa-view-ops-btn:hover {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.4);
+    color: #93bbfc;
+}
+
 /* ===== Index Quick Select Buttons ===== */
 
 .index-quick-btns {

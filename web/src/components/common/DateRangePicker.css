@@ -1,0 +1,282 @@
+/* ─── DateRangePicker ─── */
+
+.drp-container {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+.drp-container.drp-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+/* ─── Triggers Row ─── */
+
+.drp-triggers {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.drp-trigger-wrap {
+    position: relative;
+}
+
+.drp-separator {
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 0 2px;
+    user-select: none;
+}
+
+/* ─── Trigger Button ─── */
+
+.drp-trigger {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.drp-trigger:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--border-hover);
+}
+
+.drp-trigger-active {
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+.drp-trigger-icon {
+    color: var(--accent-primary);
+    flex-shrink: 0;
+}
+
+.drp-trigger-text {
+    color: var(--text-secondary);
+}
+
+.drp-trigger-active .drp-trigger-text {
+    color: #60a5fa;
+}
+
+/* ─── Popover ─── */
+
+.drp-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 1000;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    padding: 12px;
+    animation: drpFadeIn 0.15s ease-out;
+}
+
+.drp-popover-end {
+    left: auto;
+    right: 0;
+}
+
+@keyframes drpFadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.drp-popover-label {
+    text-align: center;
+    font-size: 11px;
+    color: var(--accent-primary);
+    margin-bottom: 8px;
+    font-weight: 600;
+}
+
+/* ─── Calendar ─── */
+
+.drp-calendar {
+    width: 224px;
+}
+
+/* ─── Calendar Header ─── */
+
+.drp-calendar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    padding: 0 2px;
+}
+
+.drp-month-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.drp-nav-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.drp-nav-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+}
+
+/* ─── Weekday Headers ─── */
+
+.drp-weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    margin-bottom: 4px;
+}
+
+.drp-weekday {
+    text-align: center;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    padding: 4px 0;
+    user-select: none;
+}
+
+/* ─── Day Grid ─── */
+
+.drp-days {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 1px;
+}
+
+.drp-day {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 28px;
+    font-size: 12px;
+    color: var(--text-primary);
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    transition: all 0.1s;
+    user-select: none;
+}
+
+.drp-day:hover:not(.drp-day-disabled):not(.drp-day-empty) {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.drp-day-empty {
+    cursor: default;
+}
+
+.drp-day-disabled {
+    color: var(--text-muted);
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.drp-day-today {
+    position: relative;
+    font-weight: 600;
+}
+
+.drp-day-today::after {
+    content: '';
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+}
+
+/* ─── Selected Date ─── */
+
+.drp-day-selected {
+    background: var(--accent-primary) !important;
+    color: #fff !important;
+    font-weight: 600;
+    border-radius: 4px;
+}
+
+/* ─── Presets ─── */
+
+.drp-presets {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+    justify-content: center;
+}
+
+.drp-preset-btn {
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.drp-preset-btn:hover {
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--accent-primary);
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+/* ─── Mobile ─── */
+
+@media (max-width: 768px) {
+    .drp-popover {
+        left: 0;
+        right: auto;
+        padding: 10px;
+    }
+
+    .drp-popover-end {
+        left: auto;
+        right: 0;
+    }
+
+    .drp-calendar {
+        width: 100%;
+    }
+
+    .drp-days {
+        gap: 0;
+    }
+
+    .drp-day {
+        width: 100%;
+    }
+}

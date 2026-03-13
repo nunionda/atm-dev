@@ -52,9 +52,19 @@ exit:
   max_holding_days: 40        # 최대 보유일 BULL (체제별: 40/25/15)
 
 portfolio:
-  max_positions: 10           # 최대 보유 종목수 (BR-P01)
-  max_weight_per_stock: 0.15  # 종목당 최대 비중 15% (BR-P02)
-  min_cash_ratio: 0.30        # 최소 현금 비율 30% (BR-P03)
+  max_positions: 60           # 최대 보유 종목수 — 전체 tactical
+  max_weight_per_stock: 0.05  # 종목당 최대 비중 5% (60종목 균등 기준)
+  min_cash_ratio: 0.70        # Kelly 30% 투자 → 현금 70% 보유
+
+# ── Tactical 전용 포트폴리오 배분 (Kelly Criterion 기반) ──
+portfolio_allocation:
+  enabled: true
+  kelly_fraction: 0.30        # Kelly 기준 투자 비율 (전체 자본의 30%)
+
+  tactical:                   # 전체 투자금을 tactical 모멘텀 알파에 배분
+    top_n: 60                 # 리밸런싱 상위 종목 수 (60종목 전체)
+    weight: 1.00              # 투자금의 100%
+    rebalance_days: 14        # 리밸런싱 주기 (일)
 
 risk:
   daily_loss_limit: -0.05     # 일일 손실 한도 -5% (BR-R01)
@@ -67,3 +77,188 @@ order:
   sell_timeout_min: 15        # 매도 미체결 → 시장가 전환 (BR-S05)
   max_retry: 3                # 주문 재시도 횟수 (BR-O05)
   retry_interval_sec: 5       # 재시도 간격 (초)
+
+# ── SMC 4-Layer 스코어링 전략 ──
+smc_strategy:
+  swing_length: 3             # Swing Point 프랙탈 길이
+  entry_threshold: 60         # 최소 진입 점수 (0~100)
+  atr_sl_mult: 2.0            # ATR × 배수 = Stop Loss
+  atr_tp_mult: 3.0            # ATR × 배수 = Take Profit
+  choch_exit: true            # CHoCH 발생 시 청산 여부
+  ob_lookback: 20             # Order Block 탐색 범위 (캔들 수)
+  fvg_mitigation: true        # FVG 미티게이션 추적 여부
+  weight_smc: 40              # Layer 1: SMC Bias
+  weight_bb: 20               # Layer 2: BB Squeeze + ATR
+  weight_obv: 20              # Layer 3a: OBV
+  weight_momentum: 20         # Layer 3b: ADX + MACD
+
+# ── Breakout-Retest 전략 (돌파 후 리테스트 진입) ──
+breakout_retest:
+  # Phase A: Breakout Detection
+  swing_length: 3             # Swing Point 프랙탈 길이
+  bb_squeeze_lookback: 100    # BB Width 최저점 탐색 범위
+  bb_squeeze_ema: 50          # BB Width EMA 스무딩
+  displacement_atr_mult: 1.5  # Displacement 캔들 (body > ATR × mult)
+  obv_break_lookback: 20      # OBV 돌파 lookback
+  adx_threshold: 25           # ADX 최소 강도
+  adx_rising_bars: 3          # ADX 연속 상승 봉 수
+
+  # Fakeout Filters
+  min_volume_ratio: 1.0       # Err01: volume < MA20 × ratio → 차단
+  max_wick_body_ratio: 1.0    # Err02: wick / body > ratio → 차단
+  divergence_check: true      # Err03: MACD/RSI 다이버전스 차단
+
+  # Scoring Weights (합계 100)
+  weight_structure: 30        # Layer 1: SMC 구조
+  weight_volatility: 20       # Layer 2: BB/ATR
+  weight_volume: 25           # Layer 3: OBV
+  weight_momentum: 25         # Layer 4: ADX/MACD
+  breakout_threshold: 65      # 돌파 확인 최소 점수
+
+  # Phase B: Retest Entry
+  retest_max_bars: 15         # 리테스트 대기 최대 봉 수
+  retest_zone_atr_buffer: 0.3 # 존 하단 ATR 버퍼
+  retest_volume_decay: 0.8    # 풀백 거래량 < MA20 × decay
+  retest_rsi_floor: 40        # RSI 하한
+  retest_rejection_wick_ratio: 0.5  # 반등 캔들 하단꼬리/몸통
+
+  # Retest Zone Scoring
+  use_fvg_zone: true
+  use_ob_zone: true
+  use_breakout_level: true
+  fvg_zone_weight: 40
+  ob_zone_weight: 35
+  level_zone_weight: 25
+  retest_zone_threshold: 50
+
+  # Exit Rules
+  atr_sl_mult: 1.5            # 타이트 SL (리테스트 진입)
+  atr_tp_mult: 3.0            # R:R 2:1
+  choch_exit: true
+  max_holding_days: 30
+  trailing_activation_pct: 0.05
+  trailing_atr_mult: 2.0
+
+# ── Mean Reversion 전략 (과매도 구간 평균 회귀 진입) ──
+mean_reversion:
+  rsi_oversold: 35              # RSI oversold zone (graduated: <25=strong, <35=moderate, <42=mild)
+  rsi_overbought: 70            # RSI for mean-reversion TP
+  entry_threshold: 50           # 최소 진입 점수 (graduated scoring으로 하향)
+  adx_trending_limit: 30        # ADX > 이 값 = 강한 추세장 (MR 비선호, 25→30 완화)
+  extreme_oversold_rsi: 30      # 극도 과매도 시 ADX 필터 무시 (25→30 완화)
+  atr_sl_mult: 1.5              # ATR × mult for SL
+  volume_spike_mult: 1.5        # 거래량 > MA20 × mult (2.0→1.5 완화)
+  consecutive_down_days: 2      # 최소 연속 하락일 (3→2 완화)
+  max_holding_days: 15          # 최대 보유일 (단기 전략)
+  max_weight_pct: 0.10          # 종목당 최대 비중 10%
+  stochastic_k_period: 14       # Stochastic %K
+  stochastic_d_period: 3        # Stochastic %D
+  # Layer weights (sum = 100)
+  weight_signal: 40             # Layer 1: MR signal
+  weight_volatility: 30         # Layer 2: Vol & volume
+  weight_confirmation: 30       # Layer 3: Confirmation
+
+# ── Statistical Pairs Arbitrage 전략 (Long+Short 양방향) ──
+arbitrage:
+  correlation_lookback: 60        # 상관관계 계산 기간 (일)
+  correlation_min: 0.50           # v4: 0.60→0.50 상관관계 필터 완화 (KOSPI 진입 확대)
+  zscore_lookback: 20             # Z-Score 계산 기간 (일)
+  zscore_entry: 1.5               # v4: 2.0→1.5 진입 Z-Score 완화 (진입 기회 확대)
+  zscore_exit: 0.2                # v2: 0.5→0.2 방향성 Z 청산 (BUG-5)
+  halflife_max: 40                # v2: 20→40 최대 반감기 (BUG-7)
+  entry_threshold: 60             # v4: 70→60 복원 (진입 기회 확대)
+  atr_sl_mult: 2.0                # ATR × 배수 = Stop Loss (ADX < 20)
+  atr_sl_mult_strong: 1.5         # ATR × 배수 (ADX ≥ 20, 강한 추세)
+  adx_dynamic_threshold: 20       # Dynamic ATR 전환 ADX 기준
+  max_holding_days: 20            # 최대 보유일
+  max_pairs: 7                    # v4: 5→7 동시 보유 최대 페어 수 확대
+  max_weight_per_pair: 0.07       # v3: 0.10→0.07 페어당 최대 비중 7%
+  trailing_activation_pct: 0.05   # 트레일링 활성화 5%
+  correlation_decay_exit: 0.35    # v2: 0.20→0.35 상관관계 35% 하락 시 청산 (BUG-4)
+  corr_decay_confirm_days: 2      # v2 신규: 상관관계 붕괴 2일 연속 확인 (BUG-4)
+  pair_cooldown_days: 5           # v4: 10→5 쿨다운 축소 (재진입 기회 확대)
+  cross_sector_pairs: true        # v2 신규: 크로스섹터 페어 허용 (BUG-7)
+  arb_mdd_limit: 0.10             # v3 신규: 차익거래 MDD 한도 -10% (서킷브레이커)
+  arb_mdd_recovery: 0.05          # v4 신규: DD -5% 회복 시 거래 재개
+  arb_mdd_halt_max_days: 20       # v4 신규: MDD 차단 최대 일수 (초과 시 자동 복구)
+  min_hold_days_for_tp: 3         # v3 신규: Z-Score TP 최소 보유일 3일
+  warmup_buffer_days: 5           # v3 신규: 첫 5거래일 진입 금지
+  pair_rediscovery_days: 3        # v4 신규: 페어 재발견 주기 (5→3일)
+  weight_correlation: 40          # Layer 1: 상관관계 품질
+  weight_spread: 35               # Layer 2: 스프레드 이탈도
+  weight_volume: 25               # Layer 3: 거래량 + EV 확인
+
+  # v5: Fixed ETF Pair Mode + Basis Gate
+  use_fixed_pairs: true            # 고정 ETF 페어 모드 (동적 발견 대체)
+  basis_gate_enabled: true         # 콘탱고/백워데이션 게이트 활성화
+  etf_entry_threshold: 50          # ETF 페어용 진입 임계값 (동일지수 ETF는 스코어 낮아도 OK)
+
+  basis_signals:
+    - market: sp500
+      spot_ticker: "SPY"
+      futures_ticker: "ES=F"
+      spot_code: "SPY"
+      futures_code: "ES=F"
+      basis_ma_period: 20
+      basis_zscore_threshold: 1.5
+    - market: ndx
+      spot_ticker: "SPY"
+      futures_ticker: "ES=F"
+      spot_code: "SPY"
+      futures_code: "ES=F"
+      basis_ma_period: 20
+      basis_zscore_threshold: 1.5
+    - market: kospi
+      spot_ticker: "^KS200"
+      futures_ticker: ""
+      spot_code: "^KS200"
+      futures_code: ""
+      basis_ma_period: 20
+      basis_zscore_threshold: 1.5
+      use_premium_estimate: true
+
+  fixed_pairs:
+    # US: S&P 500 동일지수 ETF 페어
+    - market: sp500
+      code_a: "SPY"
+      ticker_a: "SPY"
+      name_a: "SPDR S&P 500"
+      code_b: "IVV"
+      ticker_b: "IVV"
+      name_b: "iShares S&P 500"
+      sector: "SP500_ETF"
+    - market: sp500
+      code_a: "SPY"
+      ticker_a: "SPY"
+      name_a: "SPDR S&P 500"
+      code_b: "VOO"
+      ticker_b: "VOO"
+      name_b: "Vanguard S&P 500"
+      sector: "SP500_ETF"
+    # US: 반도체 테마 ETF 페어
+    - market: sp500
+      code_a: "SMH"
+      ticker_a: "SMH"
+      name_a: "VanEck Semiconductor"
+      code_b: "SOXX"
+      ticker_b: "SOXX"
+      name_b: "iShares Semiconductor"
+      sector: "SEMI_ETF"
+    # US: NASDAQ 동일지수 ETF 페어
+    - market: ndx
+      code_a: "QQQ"
+      ticker_a: "QQQ"
+      name_a: "Invesco QQQ"
+      code_b: "QQQM"
+      ticker_b: "QQQM"
+      name_b: "Invesco Nasdaq 100 Mini"
+      sector: "NDX_ETF"
+    # Korea: KOSPI200 동일지수 ETF 페어
+    - market: kospi
+      code_a: "069500"
+      ticker_a: "069500.KS"
+      name_a: "KODEX 200"
+      code_b: "102110"
+      ticker_b: "102110.KS"
+      name_b: "TIGER 200"
+      sector: "KS200_ETF"

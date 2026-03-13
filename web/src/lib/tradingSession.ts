@@ -11,8 +11,8 @@
  * Phase Flow: PLANNING → WATCHING → ALERT → ENTERED → MANAGING → CLOSED
  */
 
-import type { ScalpResult, ScalpInputs, AutoStats, VolumeSRLevel, OHLC, AssetConfig } from './scalpEngine';
-import { ASSETS, fmt, fmtPct } from './scalpEngine';
+import type { ScalpResult, ScalpInputs, AutoStats, AssetConfig } from './scalpEngine';
+import { fmt } from './scalpEngine';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -165,7 +165,6 @@ export function buildScenarios(
 ): Scenario[] {
   const scenarios: Scenario[] = [];
   const { currentPrice, ma, stdDev, atr } = inputs;
-  const cfg = calc.cfg;
   if (!autoStats || stdDev <= 0 || atr <= 0) return scenarios;
 
   const adaptiveStop = calc.adaptiveStop;

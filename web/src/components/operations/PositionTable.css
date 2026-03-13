@@ -44,6 +44,24 @@
 
 .table-scroll {
     overflow-x: auto;
+    overflow-y: auto;
+    max-height: 400px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.table-scroll::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+}
+
+.table-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}
+
+.table-scroll::-webkit-scrollbar-track {
+    background: transparent;
 }
 
 .position-table {
@@ -62,6 +80,10 @@
     letter-spacing: 0.03em;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
     white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg-secondary);
 }
 
 .position-table th.num {
@@ -132,4 +154,14 @@
     padding: 40px;
     color: var(--text-muted);
     font-size: 0.85rem;
+}
+
+/* --- Highlight animation for cross-page navigation --- */
+.position-table tbody tr.row-highlight {
+    animation: highlight-fade 5s ease-out;
+}
+
+@keyframes highlight-fade {
+    0%, 30% { background: rgba(59, 130, 246, 0.15); }
+    100% { background: transparent; }
 }

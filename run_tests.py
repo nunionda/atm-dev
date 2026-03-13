@@ -462,6 +462,392 @@ def test_suite_risk_manager():
 
 
 # ═══════════════════════════════════════════
+# Test Suite 6: strategy/breakout_retest.py
+# ═══════════════════════════════════════════
+
+def _make_breakout_config():
+    """테스트용 ATSConfig with BreakoutRetestConfig."""
+    from data.config_manager import (
+        ATSConfig, StrategyConfig, ExitConfig, PortfolioConfig,
+        RiskConfig, OrderConfig, SMCStrategyConfig, BreakoutRetestConfig,
+    )
+    config = ATSConfig()
+    config.strategy = StrategyConfig()
+    config.exit = ExitConfig(stop_loss_pct=-0.05)
+    config.smc_strategy = SMCStrategyConfig()
+    config.breakout_retest = BreakoutRetestConfig()
+    return config
+
+
+def _make_ohlcv_df(
+    n: int = 150,
+    base_price: float = 100.0,
+    trend: str = "flat",
+    breakout_at: int = -1,
+    retest_at: int = -1,
+):
+    """
+    테스트용 합성 OHLCV DataFrame 생성.
+    trend: "flat" | "up" | "breakout_retest"
+    breakout_at: 돌파 봉 인덱스 (breakout_retest 모드)
+    retest_at: 리테스트 봉 인덱스 (breakout_retest 모드)
+    """
+    np.random.seed(42)
+    dates = pd.date_range("2024-01-01", periods=n, freq="B")
+    prices = np.full(n, base_price, dtype=float)
+
+    if trend == "flat":
+        noise = np.random.randn(n) * 0.5
+        prices = base_price + np.cumsum(noise * 0.1)
+    elif trend == "up":
+        for i in range(1, n):
+            prices[i] = prices[i - 1] * (1 + np.random.uniform(0.001, 0.005))
+    elif trend == "breakout_retest":
+        # 횡보 → 돌파 → 풀백 → 반등
+        if breakout_at < 0:
+            breakout_at = 120
+        if retest_at < 0:
+            retest_at = 130
+
+        for i in range(1, n):
+            if i < breakout_at:
+                # 횡보: 100 ± 2
+                prices[i] = base_price + np.random.randn() * 1.0
+            elif i == breakout_at:
+                # 돌파: 큰 양봉
+                prices[i] = prices[i - 1] * 1.05
+            elif breakout_at < i < retest_at:
+                # 상승 지속
+                prices[i] = prices[i - 1] * (1 + np.random.uniform(0.002, 0.01))
+            elif i == retest_at:
+                # 풀백: 돌파 레벨 근처로 복귀
+                prices[i] = prices[breakout_at] * 1.01
+            elif i == retest_at + 1:
+                # 반등 캔들 (하단꼬리 길게)
+                prices[i] = prices[i - 1] * 1.02
+            else:
+                prices[i] = prices[i - 1] * (1 + np.random.uniform(0.001, 0.005))
+
+    opens = prices * (1 + np.random.randn(n) * 0.003)
+    highs = np.maximum(prices, opens) * (1 + np.abs(np.random.randn(n)) * 0.005)
+    lows = np.minimum(prices, opens) * (1 - np.abs(np.random.randn(n)) * 0.005)
+
+    # 돌파 봉에 큰 body와 높은 거래량
+    volumes = np.random.randint(100000, 500000, size=n).astype(float)
+    if trend == "breakout_retest" and 0 <= breakout_at < n:
+        # 돌파: 큰 양봉 + 높은 거래량
+        opens[breakout_at] = prices[breakout_at] * 0.97
+        highs[breakout_at] = prices[breakout_at] * 1.01
+        lows[breakout_at] = opens[breakout_at] * 0.99
+        volumes[breakout_at] = 1000000
+
+        # 리테스트: 낮은 거래량 + 하단꼬리
+        if 0 <= retest_at < n:
+            volumes[retest_at] = 100000  # 저거래량 풀백
+
+    df = pd.DataFrame({
+        "date": dates,
+        "open": opens,
+        "high": highs,
+        "low": lows,
+        "close": prices,
+        "volume": volumes,
+    })
+    return df
+
+
+def test_suite_breakout_retest():
+    print("\n📦 [6/6] strategy/breakout_retest.py")
+
+    from strategy.breakout_retest import BreakoutRetestStrategy, BreakoutState
+
+    config = _make_breakout_config()
+
+    # TC-BRT-001: 지표 컬럼 생성 확인
+    def test_indicators_columns():
+        strat = BreakoutRetestStrategy(config)
+        df = _make_ohlcv_df(n=150, trend="up")
+        result = strat.calculate_indicators(df.copy())
+        required_cols = [
+            "ma_short", "ma_long", "macd_line", "macd_signal", "macd_hist",
+            "rsi", "bb_upper", "bb_lower", "bb_width", "volume_ma",
+            "atr", "atr_pct", "adx", "plus_di", "minus_di",
+            "is_swing_high", "is_swing_low", "marker", "ob_top", "ob_bottom",
+            "fvg_top", "fvg_bottom", "fvg_type", "obv", "obv_ema5", "obv_ema20",
+        ]
+        for col in required_cols:
+            assert col in result.columns, f"Missing column: {col}"
+
+    run_test("TC-BRT-001: 지표 컬럼 생성", test_indicators_columns)
+
+    # TC-BRT-002: 4-Layer 스코어링 범위 검증
+    def test_breakout_score_range():
+        strat = BreakoutRetestStrategy(config)
+        df = _make_ohlcv_df(n=150, trend="up")
+        df = strat.calculate_indicators(df.copy())
+        s1 = strat._score_structure(df)
+        s2 = strat._score_volatility_squeeze(df)
+        s3 = strat._score_obv_break(df)
+        s4 = strat._score_momentum_breakout(df)
+        assert 0 <= s1 <= config.breakout_retest.weight_structure, f"L1 out of range: {s1}"
+        assert 0 <= s2 <= config.breakout_retest.weight_volatility, f"L2 out of range: {s2}"
+        assert 0 <= s3 <= config.breakout_retest.weight_volume, f"L3 out of range: {s3}"
+        assert 0 <= s4 <= config.breakout_retest.weight_momentum, f"L4 out of range: {s4}"
+        total = s1 + s2 + s3 + s4
+        assert 0 <= total <= 100, f"Total out of range: {total}"
+
+    run_test("TC-BRT-002: 4-Layer 스코어 범위", test_breakout_score_range)
+
+    # TC-BRT-003: 페이크아웃 필터 — 저거래량 차단
+    def test_fakeout_low_volume():
+        strat = BreakoutRetestStrategy(config)
+        df = _make_ohlcv_df(n=150, trend="up")
+        df = strat.calculate_indicators(df.copy())
+        # 마지막 봉 거래량을 매우 낮게 설정
+        df.iloc[-1, df.columns.get_loc("volume")] = 10
+        df.iloc[-1, df.columns.get_loc("volume_ma")] = 500000
+        passed_filter, reason = strat._apply_fakeout_filters(df)
+        assert not passed_filter, "Low volume should be blocked"
+        assert reason == "ERR01_LOW_VOLUME"
+
+    run_test("TC-BRT-003: 페이크아웃 저거래량 차단", test_fakeout_low_volume)
+
+    # TC-BRT-004: 페이크아웃 필터 — 윅 트랩 차단
+    def test_fakeout_wick_trap():
+        strat = BreakoutRetestStrategy(config)
+        df = _make_ohlcv_df(n=150, trend="up")
+        df = strat.calculate_indicators(df.copy())
+        # 마지막 봉: 긴 윗꼬리 (wick > body)
+        idx = len(df) - 1
+        df.iloc[idx, df.columns.get_loc("open")] = 120.0
+        df.iloc[idx, df.columns.get_loc("close")] = 121.0  # body = 1
+        df.iloc[idx, df.columns.get_loc("high")] = 125.0  # wick = 4 > body 1
+        df.iloc[idx, df.columns.get_loc("volume")] = 500000
+        df.iloc[idx, df.columns.get_loc("volume_ma")] = 300000
+        passed_filter, reason = strat._apply_fakeout_filters(df)
+        assert not passed_filter, "Wick trap should be blocked"
+        assert reason == "ERR02_WICK_TRAP"
+
+    run_test("TC-BRT-004: 페이크아웃 윅 트랩 차단", test_fakeout_wick_trap)
+
+    # TC-BRT-005: 페이크아웃 필터 — 정상 통과
+    def test_fakeout_pass():
+        strat = BreakoutRetestStrategy(config)
+        df = _make_ohlcv_df(n=150, trend="up")
+        df = strat.calculate_indicators(df.copy())
+        # 마지막 봉: 적절한 거래량 + 작은 윅
+        idx = len(df) - 1
+        df.iloc[idx, df.columns.get_loc("volume")] = 500000
+        df.iloc[idx, df.columns.get_loc("volume_ma")] = 300000
+        df.iloc[idx, df.columns.get_loc("open")] = 118.0
+        df.iloc[idx, df.columns.get_loc("close")] = 122.0  # body = 4
+        df.iloc[idx, df.columns.get_loc("high")] = 123.0   # wick = 1 < body 4
+        passed_filter, reason = strat._apply_fakeout_filters(df)
+        assert passed_filter, f"Should pass but blocked: {reason}"
+
+    run_test("TC-BRT-005: 페이크아웃 필터 정상 통과", test_fakeout_pass)
+
+    # TC-BRT-006: State Machine — IDLE → WAITING_RETEST 전이
+    def test_state_transition():
+        state = BreakoutState()
+        assert state.phase == "IDLE"
+        state.phase = "WAITING_RETEST"
+        state.breakout_price = 105.0
+        state.breakout_score = 75
+        assert state.phase == "WAITING_RETEST"
+        assert state.breakout_score == 75
+
+    run_test("TC-BRT-006: State IDLE→WAITING_RETEST", test_state_transition)
+
+    # TC-BRT-007: State Machine — 만료 (max bars 초과 → IDLE)
+    def test_state_expiry():
+        strat = BreakoutRetestStrategy(config)
+        state = BreakoutState(phase="WAITING_RETEST", breakout_score=70)
+        state.bars_since_breakout = config.breakout_retest.retest_max_bars + 1
+        strat._breakout_states["TEST"] = state
+        strat._expire_stale_breakouts()
+        assert state.phase == "IDLE", f"Should expire but phase={state.phase}"
+
+    run_test("TC-BRT-007: State 만료 → IDLE", test_state_expiry)
+
+    # TC-BRT-008: 리테스트 존 캡처
+    def test_retest_zone_capture():
+        strat = BreakoutRetestStrategy(config)
+        df = _make_ohlcv_df(n=150, trend="up")
+        df = strat.calculate_indicators(df.copy())
+        state = strat._capture_retest_zones(df, 120.0, 3.0)
+        assert state.phase == "WAITING_RETEST"
+        assert state.breakout_price == 120.0
+        assert state.breakout_atr == 3.0
+        # 존이 설정되어야 함
+        assert state.zone_top > 0 or state.zone_bottom > 0, "Zone should be set"
+
+    run_test("TC-BRT-008: 리테스트 존 캡처", test_retest_zone_capture)
+
+    # TC-BRT-009: 리테스트 존 스코어링 — 존 내 가격
+    def test_retest_zone_scoring():
+        strat = BreakoutRetestStrategy(config)
+        df = _make_ohlcv_df(n=150, trend="up")
+        df = strat.calculate_indicators(df.copy())
+        state = BreakoutState(
+            phase="WAITING_RETEST",
+            fvg_top=122.0, fvg_bottom=118.0,
+            ob_top=121.0, ob_bottom=117.0,
+            breakout_level=120.0,
+            breakout_atr=3.0,
+        )
+        # 가격이 존 내에 있도록 설정
+        df.iloc[-1, df.columns.get_loc("close")] = 119.0
+        score = strat._score_retest_zone(df, state)
+        assert score > 0, f"Zone score should be positive: {score}"
+
+    run_test("TC-BRT-009: 리테스트 존 스코어링", test_retest_zone_scoring)
+
+    # TC-BRT-010: 리테스트 — 존 하단 이탈 시 진입 거부
+    def test_retest_below_zone():
+        strat = BreakoutRetestStrategy(config)
+        df = _make_ohlcv_df(n=150, trend="flat")
+        df = strat.calculate_indicators(df.copy())
+        state = BreakoutState(
+            phase="WAITING_RETEST",
+            breakout_price=120.0,
+            breakout_score=75,
+            zone_top=120.0,
+            zone_bottom=118.0,
+            breakout_atr=3.0,
+        )
+        # 가격을 존 아래로 설정
+        df.iloc[-1, df.columns.get_loc("close")] = 110.0
+        df.iloc[-1, df.columns.get_loc("low")] = 109.0
+        signal = strat._check_retest("TEST", df, state)
+        assert signal is None, "Should not enter below zone"
+        assert state.phase == "IDLE", "Should reset to IDLE"
+
+    run_test("TC-BRT-010: 존 하단 이탈 → 진입 거부", test_retest_below_zone)
+
+    # TC-BRT-011: Exit ES1 하드 손절 -5%
+    def test_exit_es1_stop():
+        strat = BreakoutRetestStrategy(config)
+        from common.types import PriceData
+
+        class MockPosition:
+            stock_code = "005930"
+            stock_name = "삼성전자"
+            position_id = "pos-001"
+            entry_price = 100.0
+            trailing_high = 100.0
+            holding_days = 1
+
+        pos = MockPosition()
+        current_prices = {
+            "005930": PriceData(
+                stock_code="005930", stock_name="삼성전자",
+                current_price=94.0,  # -6% (below -5% threshold)
+                open_price=100.0, high_price=100.0, low_price=94.0,
+                prev_close=100.0, volume=100000, change_pct=-0.06,
+                timestamp="2024-01-01",
+            )
+        }
+        exits = strat.scan_exit_signals([pos], {}, current_prices)
+        assert len(exits) == 1, f"Expected 1 exit signal, got {len(exits)}"
+        assert exits[0].exit_type == "ES1", f"Expected ES1, got {exits[0].exit_type}"
+
+    run_test("TC-BRT-011: Exit ES1 하드 손절", test_exit_es1_stop)
+
+    # TC-BRT-012: Exit ATR SL (1.5배)
+    def test_exit_atr_sl():
+        strat = BreakoutRetestStrategy(config)
+        from common.types import PriceData
+
+        class MockPosition:
+            stock_code = "005930"
+            stock_name = "삼성전자"
+            position_id = "pos-002"
+            entry_price = 100.0
+            trailing_high = 100.0
+            holding_days = 1
+
+        pos = MockPosition()
+        # ATR = 2.0 → SL = 100 - 2*1.5 = 97.0, Floor = 95.0
+        # Price = 96.5 → below ATR SL but above floor
+        df = _make_ohlcv_df(n=150, trend="flat", base_price=96.5)
+        df = strat.calculate_indicators(df.copy())
+        # Force ATR
+        df.iloc[-1, df.columns.get_loc("atr")] = 2.0
+
+        current_prices = {
+            "005930": PriceData(
+                stock_code="005930", stock_name="삼성전자",
+                current_price=96.5,
+                open_price=97.0, high_price=97.5, low_price=96.0,
+                prev_close=97.0, volume=100000, change_pct=-0.005,
+                timestamp="2024-01-01",
+            )
+        }
+        exits = strat.scan_exit_signals([pos], {"005930": df}, current_prices)
+        assert len(exits) == 1
+        assert exits[0].exit_type == "ES_BRT_SL"
+
+    run_test("TC-BRT-012: Exit ATR SL (1.5배)", test_exit_atr_sl)
+
+    # TC-BRT-013: Exit 보유기간 초과
+    def test_exit_max_holding():
+        strat = BreakoutRetestStrategy(config)
+        from common.types import PriceData
+
+        class MockPosition:
+            stock_code = "005930"
+            stock_name = "삼성전자"
+            position_id = "pos-003"
+            entry_price = 100.0
+            trailing_high = 105.0
+            holding_days = 35  # > max_holding_days 30
+
+        pos = MockPosition()
+        current_prices = {
+            "005930": PriceData(
+                stock_code="005930", stock_name="삼성전자",
+                current_price=103.0,
+                open_price=102.0, high_price=104.0, low_price=101.0,
+                prev_close=102.0, volume=100000, change_pct=0.01,
+                timestamp="2024-01-01",
+            )
+        }
+        exits = strat.scan_exit_signals([pos], {}, current_prices)
+        assert len(exits) == 1, f"Expected 1 exit signal, got {len(exits)}"
+        assert exits[0].exit_type == "ES5", f"Expected ES5, got {exits[0].exit_type}"
+
+    run_test("TC-BRT-013: Exit 보유기간 초과", test_exit_max_holding)
+
+    # TC-BRT-014: 횡보장 → 돌파 미감지
+    def test_no_breakout_flat():
+        strat = BreakoutRetestStrategy(config)
+        df = _make_ohlcv_df(n=150, trend="flat")
+        df = strat.calculate_indicators(df.copy())
+        result = strat._detect_breakout("TEST", df)
+        assert result is None, "Flat market should not detect breakout"
+
+    run_test("TC-BRT-014: 횡보장 돌파 미감지", test_no_breakout_flat)
+
+    # TC-BRT-015: 6조건 — 조건 카운트 검증
+    def test_six_conditions_structure():
+        strat = BreakoutRetestStrategy(config)
+        df = _make_ohlcv_df(n=150, trend="flat")
+        df = strat.calculate_indicators(df.copy())
+        met_enough, met_list = strat._check_six_conditions(df)
+        # 횡보장이므로 많은 조건이 충족되지 않을 것
+        assert isinstance(met_list, list)
+        assert isinstance(met_enough, bool)
+        # 각 조건 이름이 유효한지 확인
+        valid_conditions = {"C1_SQUEEZE", "C2_LIQ_SWEEP", "C3_DISPLACEMENT",
+                           "C4_OBV_BREAK", "C5_ADX_RISING", "C6_FVG"}
+        for c in met_list:
+            assert c in valid_conditions, f"Unknown condition: {c}"
+
+    run_test("TC-BRT-015: 6조건 구조 검증", test_six_conditions_structure)
+
+
+# ═══════════════════════════════════════════
 # 실행
 # ═══════════════════════════════════════════
 
@@ -475,6 +861,7 @@ if __name__ == "__main__":
     test_suite_state_manager()
     test_suite_strategy()
     test_suite_risk_manager()
+    test_suite_breakout_retest()
 
     print("\n" + "=" * 60)
     print(f"결과: ✅ {passed} passed / ❌ {failed} failed / 총 {passed + failed}건")

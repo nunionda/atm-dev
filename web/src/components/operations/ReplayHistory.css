@@ -1,0 +1,203 @@
+/* ─── Replay History ─── */
+
+.replay-history {
+    padding: 14px 16px;
+    margin-top: 8px;
+}
+
+.replay-history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.replay-history-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.replay-history-refresh {
+    padding: 3px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.replay-history-refresh:hover:not(:disabled) {
+    color: var(--text-secondary);
+    border-color: var(--border-hover);
+}
+
+/* ─── Table ─── */
+
+.replay-history-table {
+    width: 100%;
+    max-height: 400px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.replay-history-table::-webkit-scrollbar {
+    width: 4px;
+}
+
+.replay-history-table::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}
+
+.replay-history-table::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.replay-history-thead {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    margin-bottom: 2px;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg-secondary);
+}
+
+.replay-history-thead .rh-col {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.replay-history-row {
+    display: flex;
+    align-items: center;
+    padding: 8px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.replay-history-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.replay-history-row.expanded {
+    background: rgba(59, 130, 246, 0.05);
+}
+
+/* ─── Columns ─── */
+
+.rh-col {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.rh-col-period    { flex: 2.2; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rh-col-strategy  { flex: 0.8; }
+.rh-col-return    { flex: 1; text-align: right; }
+.rh-col-sharpe    { flex: 0.8; text-align: right; }
+.rh-col-mdd       { flex: 0.9; text-align: right; }
+.rh-col-trades    { flex: 0.6; text-align: right; }
+.rh-col-winrate   { flex: 0.8; text-align: right; }
+.rh-col-date      { flex: 1; text-align: right; }
+.rh-col-actions   { flex: 0.6; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+
+.rh-col.positive { color: #22c55e; font-weight: 600; }
+.rh-col.negative { color: #ef4444; }
+
+/* Strategy badge */
+.rh-strategy-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(139, 92, 246, 0.12);
+    color: #a78bfa;
+    font-size: 0.68rem;
+    font-weight: 600;
+}
+
+/* Actions */
+.rh-delete-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.rh-delete-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+}
+
+.rh-expand-icon {
+    color: var(--text-muted);
+}
+
+/* ─── Detail (expanded) ─── */
+
+.replay-history-detail {
+    padding: 10px 8px 10px 24px;
+    margin-bottom: 4px;
+    border-left: 2px solid rgba(59, 130, 246, 0.3);
+    margin-left: 8px;
+}
+
+.rh-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+
+.rh-detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.rh-detail-label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.rh-detail-value {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ─── Mobile ─── */
+
+@media (max-width: 768px) {
+    .rh-col-sharpe,
+    .rh-col-mdd,
+    .rh-col-winrate,
+    .rh-col-date {
+        display: none;
+    }
+
+    .rh-detail-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}

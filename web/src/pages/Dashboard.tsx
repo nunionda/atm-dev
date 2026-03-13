@@ -9,6 +9,7 @@ import { TickerSearch } from '../components/dashboard/TickerSearch';
 import { MarketRegimePanel } from '../components/dashboard/MarketRegimePanel';
 import { SignalAnalysis } from '../components/dashboard/SignalAnalysis';
 import { AlertCircle } from 'lucide-react';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import { aggregate4HCandles, computeHeikinAshi, type ChartType, type OverlayState } from '../lib/chartUtils';
 import type { DrawingToolType, Drawing } from '../lib/drawingTypes';
 import './Dashboard.css';
@@ -74,8 +75,8 @@ function chartReducer(state: ChartState, action: ChartAction): ChartState {
 }
 
 export function Dashboard() {
-    const [ticker, setTicker] = useState('005930.KS');
-    const [stockName, setStockName] = useState({ nameKr: '삼성전자', nameEn: 'Samsung Electronics' });
+    const [ticker, setTicker] = useState('^KS200');
+    const [stockName, setStockName] = useState({ nameKr: 'KOSPI 200', nameEn: 'KOSPI 200 Index' });
     const [period, setPeriod] = useState('2y');
     const [interval, setInterval] = useState('1d');
     const [visibleBars, setVisibleBars] = useState(130);
@@ -90,7 +91,7 @@ export function Dashboard() {
       () => fetchAnalyticsData(ticker, period, fetchInterval),
       [ticker, period, fetchInterval],
     );
-    const polling = usePolling<AnalyticsResponse>(pollingFetchFn, { interval: 30000, enabled: false });
+    const polling = usePolling<AnalyticsResponse>(pollingFetchFn, { interval: 30000, enabled: true });
 
     // Merge: polling data takes priority when available
     const data = polling.data ?? initialData;
@@ -104,7 +105,8 @@ export function Dashboard() {
         let processed = data.data;
         if (interval === '4h') processed = aggregate4HCandles(processed);
         if (chartState.chartType === 'heikin-ashi') processed = computeHeikinAshi(processed);
-        return processed;
+        // Pre-sort by datetime so TechnicalChart can skip redundant sorts
+        return [...processed].sort((a, b) => a.datetime.localeCompare(b.datetime));
     }, [data, interval, chartState.chartType]);
 
     const handleSelect = (newTicker: string, nameKr?: string, nameEn?: string) => {
@@ -179,7 +181,7 @@ export function Dashboard() {
                     <TickerSearch
                         onSelect={handleSelect}
                         loading={loading}
-                        initialValue="005930"
+                        initialValue="^KS200"
                     />
                     <PollingControl
                         enabled={polling.enabled}
@@ -212,6 +214,7 @@ export function Dashboard() {
             {!loading && !error && data && (
                 <div className="dashboard-grid">
                     {/* Main Chart Area */}
+                    <ErrorBoundary>
                     <div className="chart-section glass-panel">
                         {(stockName.nameKr || stockName.nameEn) && (
                             <div className="stock-info">
@@ -280,8 +283,10 @@ export function Dashboard() {
                             />
                         </div>
                     </div>
+                    </ErrorBoundary>
 
                     {/* Signal Analysis Sidebar */}
+                    <ErrorBoundary>
                     <div className="metrics-sidebar">
                         <SignalAnalysis
                             data={data.data}
@@ -292,6 +297,7 @@ export function Dashboard() {
                             refetch={refetch}
                         />
                     </div>
+                    </ErrorBoundary>
                 </div>
             )}
         </div>

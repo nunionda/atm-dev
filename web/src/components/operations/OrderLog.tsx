@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { FileText, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { FileText, ArrowUpRight, ArrowDownRight, RefreshCw } from 'lucide-react';
 import type { Order, MarketId } from '../../lib/api';
 import { fetchOrders, getMarketConfig } from '../../lib/api';
 import { useSSE } from '../../hooks/useSSE';
@@ -20,16 +20,20 @@ interface Props {
 export function OrderLog({ market }: Props) {
     const [orders, setOrders] = useState<Order[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
     const sseData = useSSE<Order[]>(`${market}:orders`, () => fetchOrders(market));
 
-    useEffect(() => {
+    const loadData = useCallback(() => {
         setLoading(true);
+        setError(false);
         setOrders([]);
         fetchOrders(market)
             .then(data => setOrders(data))
-            .catch(() => {})
+            .catch(() => setError(true))
             .finally(() => setLoading(false));
     }, [market]);
+
+    useEffect(() => { loadData(); }, [loadData]);
 
     const displayOrders = sseData || orders;
     const sym = getMarketConfig(market).currencySymbol;
@@ -39,6 +43,18 @@ export function OrderLog({ market }: Props) {
             <div className="order-log-wrapper glass-panel">
                 <h3 className="section-title"><FileText size={16} /> 주문 내역</h3>
                 <div className="loading-placeholder">로딩 중...</div>
+            </div>
+        );
+    }
+
+    if (error && !sseData && displayOrders.length === 0) {
+        return (
+            <div className="order-log-wrapper glass-panel">
+                <h3 className="section-title"><FileText size={16} /> 주문 내역</h3>
+                <div className="error-placeholder">
+                    서버 연결 실패
+                    <button className="retry-btn" onClick={loadData}><RefreshCw size={12} /> 재시도</button>
+                </div>
             </div>
         );
     }
@@ -74,7 +90,7 @@ export function OrderLog({ market }: Props) {
                                 <tr key={order.id}>
                                     <td className="time-cell">
                                         {new Date(order.created_at).toLocaleString('ko-KR', {
-                                            month: '2-digit', day: '2-digit',
+                                            year: 'numeric', month: '2-digit', day: '2-digit',
                                             hour: '2-digit', minute: '2-digit'
                                         })}
                                     </td>

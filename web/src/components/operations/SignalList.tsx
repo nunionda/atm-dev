@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Zap, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Zap, ArrowUpCircle, ArrowDownCircle, RefreshCw } from 'lucide-react';
 import type { Signal, MarketId } from '../../lib/api';
 import { fetchSignals, getMarketConfig } from '../../lib/api';
 import { useSSE } from '../../hooks/useSSE';
@@ -12,16 +12,20 @@ interface Props {
 export function SignalList({ market }: Props) {
     const [signals, setSignals] = useState<Signal[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
     const sseData = useSSE<Signal[]>(`${market}:signals`, () => fetchSignals(market));
 
-    useEffect(() => {
+    const loadData = useCallback(() => {
         setLoading(true);
+        setError(false);
         setSignals([]);
         fetchSignals(market)
             .then(data => setSignals(data))
-            .catch(() => {})
+            .catch(() => setError(true))
             .finally(() => setLoading(false));
     }, [market]);
+
+    useEffect(() => { loadData(); }, [loadData]);
 
     const displaySignals = sseData || signals;
     const sym = getMarketConfig(market).currencySymbol;
@@ -31,6 +35,18 @@ export function SignalList({ market }: Props) {
             <div className="signal-list-wrapper glass-panel">
                 <h3 className="section-title"><Zap size={16} /> 오늘의 시그널</h3>
                 <div className="loading-placeholder">로딩 중...</div>
+            </div>
+        );
+    }
+
+    if (error && !sseData && displaySignals.length === 0) {
+        return (
+            <div className="signal-list-wrapper glass-panel">
+                <h3 className="section-title"><Zap size={16} /> 오늘의 시그널</h3>
+                <div className="error-placeholder">
+                    서버 연결 실패
+                    <button className="retry-btn" onClick={loadData}><RefreshCw size={12} /> 재시도</button>
+                </div>
             </div>
         );
     }

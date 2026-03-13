@@ -5,16 +5,21 @@
 
 .perf-header {
     margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
 }
 
-.perf-header .page-title {
+.perf-header-text .page-title {
     font-size: 1.5rem;
     font-weight: 700;
     color: var(--text-primary);
     margin-bottom: 4px;
 }
 
-.perf-header .page-subtitle {
+.perf-header-text .page-subtitle {
     font-size: 0.85rem;
     color: var(--text-muted);
 }
@@ -27,4 +32,15 @@
 
 .equity-section .section-title {
     margin-bottom: 12px;
+}
+
+/* Loading State */
+.performance-page .loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 5rem 0;
+    gap: 1.5rem;
+    color: var(--text-secondary);
 }

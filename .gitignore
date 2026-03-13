@@ -21,6 +21,9 @@ venv/
 *.swp
 *.swo
 
+# Claude Code
+.claude/
+
 # Node
 node_modules/
 dist/

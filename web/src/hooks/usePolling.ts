@@ -69,6 +69,19 @@ export function usePolling<T>(
   const mountedRef = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const errCountRef = useRef(0);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+
+  // Reset stale data when fetchFn identity changes (e.g., ticker/period switch)
+  const prevFetchRef = useRef(fetchFn);
+  useEffect(() => {
+    if (prevFetchRef.current !== fetchFn) {
+      prevFetchRef.current = fetchFn;
+      setData(null);
+      setError(null);
+      errCountRef.current = 0;
+    }
+  }, [fetchFn]);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -119,7 +132,7 @@ export function usePolling<T>(
 
       timerRef.current = setTimeout(async () => {
         await doFetch();
-        if (mountedRef.current && enabled) schedule();
+        if (mountedRef.current && enabledRef.current) schedule();
       }, eff);
     };
 

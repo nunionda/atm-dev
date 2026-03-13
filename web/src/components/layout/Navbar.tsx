@@ -33,11 +33,11 @@ export function Navbar() {
                         <span>Operations</span>
                     </Link>
                     <Link
-                        to="/rebalance"
-                        className={`nav-link ${isActive('/rebalance') ? 'active' : ''}`}
+                        to="/performance"
+                        className={`nav-link ${isActive('/performance') ? 'active' : ''}`}
                     >
-                        <RefreshCw size={18} />
-                        <span>Rebalance</span>
+                        <BarChart3 size={18} />
+                        <span>Performance</span>
                     </Link>
                     <Link
                         to="/risk"
@@ -47,11 +47,11 @@ export function Navbar() {
                         <span>Risk</span>
                     </Link>
                     <Link
-                        to="/performance"
-                        className={`nav-link ${isActive('/performance') ? 'active' : ''}`}
+                        to="/rebalance"
+                        className={`nav-link ${isActive('/rebalance') ? 'active' : ''}`}
                     >
-                        <BarChart3 size={18} />
-                        <span>Performance</span>
+                        <RefreshCw size={18} />
+                        <span>Rebalance</span>
                     </Link>
                     <Link
                         to="/scalp-analyzer"

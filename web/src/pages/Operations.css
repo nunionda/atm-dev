@@ -81,8 +81,101 @@
     min-width: 0;
 }
 
+/* Bottom grid: OrderLog + RiskEventLog */
+.operations-bottom-grid {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 16px;
+}
+
+/* Bottom side: RiskEventLog + IndexTrendTimeline stacked */
+.operations-bottom-side {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+.operations-risk-events {
+    max-height: 500px;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.operations-risk-events::-webkit-scrollbar {
+    width: 4px;
+}
+
+.operations-risk-events::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+}
+
+/* SSE 연결 상태 배너 */
+.sse-status-banner {
+    position: fixed;
+    top: 64px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    backdrop-filter: blur(12px);
+}
+
+.sse-status-banner.warn {
+    background: rgba(234, 179, 8, 0.15);
+    border: 1px solid rgba(234, 179, 8, 0.3);
+    color: #eab308;
+}
+
+.sse-status-banner.error {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+/* 에러 / 재시도 공통 */
+.error-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 32px 16px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.retry-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 6px;
+    background: rgba(59, 130, 246, 0.1);
+    color: #60a5fa;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.retry-btn:hover {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: rgba(59, 130, 246, 0.5);
+}
+
 @media (max-width: 1024px) {
     .operations-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .operations-bottom-grid {
         grid-template-columns: 1fr;
     }
 }

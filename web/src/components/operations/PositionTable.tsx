@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { TrendingUp, TrendingDown, Clock, ShieldAlert } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { TrendingUp, TrendingDown, Clock, ShieldAlert, RefreshCw } from 'lucide-react';
 import type { Position, MarketId } from '../../lib/api';
 import { fetchPositions, getMarketConfig } from '../../lib/api';
 import { useSSE } from '../../hooks/useSSE';
@@ -14,21 +14,26 @@ const STATUS_BADGE: Record<string, { label: string; color: string }> = {
 
 interface Props {
     market: MarketId;
+    highlightTicker?: string | null;
 }
 
-export function PositionTable({ market }: Props) {
+export function PositionTable({ market, highlightTicker }: Props) {
     const [positions, setPositions] = useState<Position[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
     const sseData = useSSE<Position[]>(`${market}:positions`, () => fetchPositions(market));
 
-    useEffect(() => {
+    const loadData = useCallback(() => {
         setLoading(true);
+        setError(false);
         setPositions([]);
         fetchPositions(market)
             .then(data => setPositions(data))
-            .catch(() => {})
+            .catch(() => setError(true))
             .finally(() => setLoading(false));
     }, [market]);
+
+    useEffect(() => { loadData(); }, [loadData]);
 
     const displayPositions = sseData || positions;
     const sym = getMarketConfig(market).currencySymbol;
@@ -38,6 +43,18 @@ export function PositionTable({ market }: Props) {
             <div className="position-table-wrapper glass-panel">
                 <h3 className="section-title">보유 포지션</h3>
                 <div className="loading-placeholder">로딩 중...</div>
+            </div>
+        );
+    }
+
+    if (error && !sseData && displayPositions.length === 0) {
+        return (
+            <div className="position-table-wrapper glass-panel">
+                <h3 className="section-title">보유 포지션</h3>
+                <div className="error-placeholder">
+                    서버 연결 실패
+                    <button className="retry-btn" onClick={loadData}><RefreshCw size={12} /> 재시도</button>
+                </div>
             </div>
         );
     }
@@ -80,8 +97,10 @@ export function PositionTable({ market }: Props) {
                             const badge = STATUS_BADGE[pos.status];
                             const isProfit = pos.pnl >= 0;
                             const holdingWarn = pos.days_held >= pos.max_holding_days - 2;
+                            const isHighlighted = highlightTicker &&
+                                (pos.stock_code === highlightTicker || pos.stock_name === highlightTicker);
                             return (
-                                <tr key={pos.id}>
+                                <tr key={pos.id} className={isHighlighted ? 'row-highlight' : ''}>
                                     <td>
                                         <span className="pos-status-badge" style={{ borderColor: badge.color, color: badge.color }}>
                                             {badge.label}

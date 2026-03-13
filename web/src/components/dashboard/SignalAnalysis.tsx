@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
-import { TrendingUp, TrendingDown, CheckCircle, XCircle, Target, LogOut, Compass, Activity, Gauge, ChevronDown, BarChart2, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { TrendingUp, TrendingDown, CheckCircle, XCircle, Target, LogOut, Compass, Activity, Gauge, ChevronDown, BarChart2, RefreshCw, ExternalLink } from 'lucide-react';
 import type { AnalyticsData } from '../../lib/api';
+import { useAppState } from '../../contexts/AppStateContext';
 import {
     analyzeEntrySignals,
     calculateExitLevels,
@@ -617,7 +618,7 @@ function SMCPanel({ smc, fmtPrice }: { smc: SMCAnalysis; fmtPrice: (v: number) =
             )}
 
             <div className={`smc-bias-badge ${smc.smcBias.toLowerCase()}`}>
-                SMC: {smc.smcLabel}
+                Smart Money Concept: {smc.smcLabel}
             </div>
         </div>
     );
@@ -626,6 +627,7 @@ function SMCPanel({ smc, fmtPrice }: { smc: SMCAnalysis; fmtPrice: (v: number) =
 // --- Main Component ---
 
 export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelectTicker, refetch }: SignalAnalysisProps) {
+    const { navigateToOperations } = useAppState();
     const isIndex = ticker.startsWith('^');
     const current = data.length > 0 ? data[data.length - 1] : null;
     const previous = data.length > 1 ? data[data.length - 2] : null;
@@ -666,14 +668,16 @@ export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelec
         : 0;
     const fmtPrice = (v: number) => `${currencySymbol}${v.toLocaleString(undefined, { maximumFractionDigits: isKorean ? 0 : 2 })}`;
 
-    // Stock analysis (auto-computed for non-index tickers)
-    const volumeMA = computeVolumeMA(data, 20);
-    const analysis = !isIndex && current && previous
-        ? analyzeEntrySignals(current, previous, volumeMA, data)
-        : null;
-    const exitLevels = !isIndex && current && previous && current.close
-        ? calculateExitLevels(current.close, current, previous, data)
-        : null;
+    // Stock analysis (auto-computed for non-index tickers, memoized)
+    const volumeMA = useMemo(() => computeVolumeMA(data, 20), [data]);
+    const analysis = useMemo(() => {
+        if (isIndex || !current || !previous) return null;
+        return analyzeEntrySignals(current, previous, volumeMA, data);
+    }, [data, current, previous, isIndex, volumeMA]);
+    const exitLevels = useMemo(() => {
+        if (isIndex || !current || !previous || !current.close) return null;
+        return calculateExitLevels(current.close, current, previous, data);
+    }, [data, current, previous, isIndex]);
 
     const verdictStyle = analysis ? VERDICT_STYLE[analysis.verdict] : null;
 
@@ -689,6 +693,17 @@ export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelec
                         {priceChange >= 0 ? '+' : ''}{isKorean ? priceChange.toLocaleString() : priceChange.toFixed(2)} ({priceChangePct.toFixed(2)}%)
                     </div>
                 </div>
+            )}
+
+            {/* View in Operations (non-index tickers only) */}
+            {!isIndex && (
+                <button
+                    className="sa-view-ops-btn"
+                    onClick={() => navigateToOperations({ ticker })}
+                >
+                    <ExternalLink size={14} />
+                    View in Operations
+                </button>
             )}
 
             {/* Index Quick Select */}

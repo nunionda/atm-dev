@@ -8,29 +8,28 @@ export function useAnalyticsData(ticker: string, period: string = 'ytd', interva
     const [fetchKey, setFetchKey] = useState(0);
 
     useEffect(() => {
-        let mounted = true;
+        const controller = new AbortController();
 
         async function loadData() {
             try {
                 setLoading(true);
                 setError(null);
-                const result = await fetchAnalyticsData(ticker, period, interval);
-                if (mounted) {
+                const result = await fetchAnalyticsData(ticker, period, interval, controller.signal);
+                if (!controller.signal.aborted) {
                     setData(result);
                     setLoading(false);
                 }
             } catch (err: any) {
-                if (mounted) {
-                    setError(err.message || 'An error occurred fetching data.');
-                    setLoading(false);
-                }
+                if (controller.signal.aborted || err?.name === 'AbortError') return; // Ignore aborted requests
+                setError(err.message || 'An error occurred fetching data.');
+                setLoading(false);
             }
         }
 
         loadData();
 
         return () => {
-            mounted = false;
+            controller.abort();
         };
     }, [ticker, period, interval, fetchKey]);
 
