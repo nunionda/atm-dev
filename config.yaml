@@ -262,3 +262,84 @@ arbitrage:
       ticker_b: "102110.KS"
       name_b: "TIGER 200"
       sector: "KS200_ETF"
+
+# ── S&P 500 선물지수 매매 전략 (E-mini ES / Micro MES) ──
+sp500_futures:
+  # 기본 설정
+  ticker: "ES=F"                     # E-mini S&P 500 선물 티커
+  contract_multiplier: 50.0          # E-mini: $50/pt, Micro: $5/pt
+  is_micro: false                    # Micro E-mini 여부
+
+  # Z-Score 통계적 위치 분석
+  zscore_ma_period: 20               # Z-Score MA 기간
+  zscore_std_period: 20              # Z-Score 표준편차 기간
+  zscore_long_threshold: -2.0        # 롱 진입 Z-Score (과매도)
+  zscore_short_threshold: 2.0        # 숏 진입 Z-Score (과매수)
+
+  # 추세 필터 (EMA 정렬)
+  ma_fast: 10                        # 단기 EMA
+  ma_mid: 20                         # 중기 EMA
+  ma_slow: 50                        # 장기 EMA
+  ma_trend: 200                      # 장기 추세 MA
+  adx_period: 14                     # ADX 기간
+  adx_threshold: 25.0                # 최소 추세 강도
+  adx_strong: 40.0                   # 강한 추세 ADX
+
+  # MACD
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+
+  # RSI
+  rsi_period: 14
+  rsi_oversold: 30.0                 # 과매도
+  rsi_overbought: 70.0               # 과매수
+
+  # 볼린저밴드
+  bb_period: 20
+  bb_std: 2.0
+  bb_squeeze_ratio: 0.8              # 스퀴즈 판단 비율
+
+  # ATR
+  atr_period: 14
+  atr_breakout_mult: 0.5             # 돌파 필터: (High-PrevClose) > mult×ATR
+  atr_trend_mult: 1.5                # 추세 진입: Close > PrevClose ± mult×ATR
+
+  # 거래량
+  volume_ma_period: 20
+  volume_confirm_mult: 1.5           # 거래량 확인 배수
+
+  # OBV
+  obv_ema_fast: 5
+  obv_ema_slow: 20
+
+  # 진입 임계값
+  entry_threshold: 60.0              # 4-Layer 합산 최소 점수 (0-100)
+
+  # 손절 설정 (ATR 기반 동적)
+  sl_atr_mult: 2.0                   # ADX < 25 → 2.0×ATR
+  sl_atr_mult_strong: 1.5            # ADX ≥ 25 → 1.5×ATR (타이트)
+  sl_hard_pct: 0.03                  # 하드 손절 3% (선물 특화)
+
+  # 익절 설정
+  tp_atr_mult: 3.0                   # ATR ×3 익절
+  tp_rr_ratio: 2.0                   # 최소 R:R 비율
+
+  # 트레일링 스탑
+  trailing_activation_pct: 0.02      # +2%에서 트레일링 활성화
+  trailing_atr_mult: 2.0             # 트레일링 ATR 배수
+  chandelier_atr_mult: 3.0           # 샹들리에 ATR 배수
+
+  # 최대 보유 기간
+  max_holding_days: 20
+
+  # 포지션 사이징 (Kelly Criterion)
+  kelly_fraction: 0.3                # Half-Kelly 선물용
+  max_contracts: 10                  # 최대 계약 수
+  risk_per_trade_pct: 0.015          # 트레이드당 리스크 1.5%
+
+  # 4-Layer 가중치 (합계 100)
+  weight_zscore: 25.0                # L1: Z-Score 통계적 위치
+  weight_trend: 25.0                 # L2: 추세/구조
+  weight_momentum: 25.0              # L3: 모멘텀 (MACD, ADX, RSI)
+  weight_volume: 25.0                # L4: 거래량/OBV
