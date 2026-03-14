@@ -13,6 +13,7 @@ from typing import Dict, Optional
 import pandas as pd
 import yfinance as yf
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from data.config_manager import ConfigManager
 from strategy.sp500_futures import SP500FuturesStrategy
@@ -69,7 +70,7 @@ def _get_config():
 # ── 캐시 ──
 _analysis_cache: Dict[str, dict] = {}
 _analysis_cache_ts: Dict[str, float] = {}
-CACHE_TTL = 60  # 60초
+CACHE_TTL = 300  # 5분 (리프레시 최적화)
 
 _backtest_in_progress = False
 _backtest_cache: Optional[dict] = None
@@ -157,7 +158,10 @@ async def analyze_futures(
 
     # 캐시 확인
     if cache_key in _analysis_cache and (now - _analysis_cache_ts.get(cache_key, 0)) < CACHE_TTL:
-        return _analysis_cache[cache_key]
+        return JSONResponse(
+            content=_analysis_cache[cache_key],
+            headers={"Cache-Control": "no-cache"},
+        )
 
     try:
         df = _download_futures_data(ticker, period)
@@ -254,7 +258,10 @@ async def analyze_futures(
 
         _analysis_cache[cache_key] = result
         _analysis_cache_ts[cache_key] = now
-        return result
+        return JSONResponse(
+            content=result,
+            headers={"Cache-Control": "no-cache"},
+        )
 
     except HTTPException:
         raise

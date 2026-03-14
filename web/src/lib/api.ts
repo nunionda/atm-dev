@@ -39,6 +39,8 @@ export interface AnalyticsResponse {
     data: AnalyticsData[];
 }
 
+import { getCached, setCache } from './cache';
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 export async function fetchAnalyticsData(
@@ -47,9 +49,11 @@ export async function fetchAnalyticsData(
     interval: string = '1d',
     signal?: AbortSignal,
 ): Promise<AnalyticsResponse> {
+    const cacheKey = `analytics:${ticker}:${period}:${interval}`;
+    const cached = getCached<AnalyticsResponse>(cacheKey);
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
-    // Allow external abort (e.g., from useAnalyticsData cleanup)
     if (signal) signal.addEventListener('abort', () => controller.abort());
 
     try {
@@ -59,11 +63,15 @@ export async function fetchAnalyticsData(
         );
         clearTimeout(timeout);
         if (!response.ok) {
+            if (cached) return cached; // 실패 시 캐시 폴백
             throw new Error(`Failed to fetch analytics for ${ticker}. Status: ${response.status}`);
         }
-        return await response.json();
+        const data = await response.json();
+        setCache(cacheKey, data);
+        return data;
     } catch (error) {
         clearTimeout(timeout);
+        if (cached) return cached; // 네트워크 에러 시 캐시 폴백
         throw error;
     }
 }
@@ -182,6 +190,7 @@ export interface MarketOverview {
 }
 
 export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketOverview | null> {
+    const cacheKey = 'market-overview';
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
     if (signal) signal.addEventListener('abort', () => controller.abort());
@@ -191,17 +200,17 @@ export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketO
         clearTimeout(timeout);
         if (!response.ok) {
             console.error(`[API] market-overview HTTP ${response.status}`);
-            return null;
+            return getCached<MarketOverview>(cacheKey);
         }
         const data = await response.json();
+        setCache(cacheKey, data);
         console.log(`[API] market-overview loaded: ${data.indices?.length} indices`);
         return data;
     } catch (error: any) {
         clearTimeout(timeout);
-        // Silently handle abort (React Strict Mode, component unmount, etc.)
         if (error?.name === 'AbortError') return null;
         console.error('[API] market-overview fetch failed:', error);
-        return null;
+        return getCached<MarketOverview>(cacheKey);
     }
 }
 
@@ -1014,12 +1023,15 @@ export async function fetchFuturesTickers(): Promise<FuturesTickerInfo[]> {
 }
 
 export async function fetchFuturesAnalysis(ticker: string = 'ES=F', period: string = '1y'): Promise<FuturesAnalysis | null> {
+    const cacheKey = `futures:${ticker}:${period}`;
     try {
         const res = await fetch(`${API_BASE_URL}/futures/analyze/${encodeURIComponent(ticker)}?period=${period}`);
-        if (!res.ok) return null;
-        return res.json();
+        if (!res.ok) return getCached<FuturesAnalysis>(cacheKey);
+        const data = await res.json();
+        setCache(cacheKey, data);
+        return data;
     } catch {
-        return null;
+        return getCached<FuturesAnalysis>(cacheKey);
     }
 }
 

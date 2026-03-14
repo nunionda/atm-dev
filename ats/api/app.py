@@ -29,8 +29,24 @@ event_bus = SSEEventBus()
 sim_controller = SimulationController(event_bus)
 
 
+def _prewarm_cache():
+    """서버 시작 시 주요 티커 캐시 프리워밍."""
+    import logging
+    import yfinance as yf
+    logger = logging.getLogger(__name__)
+    warm_tickers = ["ES=F", "NQ=F", "^GSPC", "^IXIC"]
+    for ticker in warm_tickers:
+        try:
+            yf.download(ticker, period="6mo", interval="1d", progress=False)
+            logger.info("Cache pre-warmed: %s", ticker)
+        except Exception as e:
+            logger.warning("Pre-warm failed for %s: %s", ticker, e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 캐시 프리워밍 (백그라운드)
+    asyncio.create_task(asyncio.to_thread(_prewarm_cache))
     # 모든 마켓 엔진 시작
     await sim_controller.start_all()
     yield

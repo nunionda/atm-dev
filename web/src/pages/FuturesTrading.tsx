@@ -9,6 +9,7 @@ import {
   type FuturesTickerInfo,
   type FuturesBacktestResult,
 } from '../lib/api';
+import { ChartSkeleton, ScoreCardsSkeleton } from '../components/common/Skeleton';
 import './FuturesTrading.css';
 
 // ══════════════════════════════════════════
@@ -136,15 +137,17 @@ function EquityCurveChart({ data }: { data: { date: string; total_value: number;
     const seen = new Set<string>();
     const dedupedData = data
       .filter(d => {
-        if (seen.has(d.date)) return false;
-        seen.add(d.date);
+        // 날짜 부분만 추출 (시간 포함 시 중복 발생 방지)
+        const dateKey = d.date.split(' ')[0].split('T')[0];
+        if (seen.has(dateKey)) return false;
+        seen.add(dateKey);
         return true;
       })
-      .sort((a, b) => a.date.localeCompare(b.date));
+      .sort((a, b) => a.date.split(' ')[0].localeCompare(b.date.split(' ')[0]));
 
     areaSeries.setData(
       dedupedData.map(d => ({
-        time: d.date as Time,
+        time: d.date.split(' ')[0].split('T')[0] as Time,
         value: d.total_value,
       }))
     );
@@ -285,7 +288,9 @@ function FuturesPriceChart({ ticker }: { ticker: string }) {
           chart.remove();
           chartRef.current = null;
         };
-      } catch (err) {
+      } catch (err: any) {
+        // AbortError는 React StrictMode 이중 마운트로 인한 정상 동작 — 무시
+        if (err?.name === 'AbortError') return;
         console.error('Chart load error:', err);
       }
     })();
@@ -533,7 +538,12 @@ export function FuturesTrading() {
         </div>
       ) : (
         <div className="futures-loading">
-          {loading ? 'Loading analysis...' : 'No analysis data available'}
+          {loading ? (
+            <>
+              <ScoreCardsSkeleton />
+              <ChartSkeleton height={300} />
+            </>
+          ) : 'No analysis data available'}
         </div>
       )}
 

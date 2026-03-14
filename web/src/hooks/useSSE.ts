@@ -5,6 +5,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { getCached, setCache } from '../lib/cache';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
@@ -125,13 +126,14 @@ export function useSSE<T>(
     eventType: string,
     fallbackFetch?: () => Promise<T>,
 ): T | null {
-    const [data, setData] = useState<T | null>(null);
+    // sessionStorage 캐시에서 초기값 로드 (브라우저 리프레시 시 즉시 표시)
+    const [data, setData] = useState<T | null>(() => getCached<T>(`sse:${eventType}`));
     const fallbackRef = useRef(fallbackFetch);
     fallbackRef.current = fallbackFetch;
 
     useEffect(() => {
-        // 이벤트 타입 변경 시 이전 마켓의 stale 데이터 초기화
-        setData(null);
+        // 이벤트 타입 변경 시 캐시된 데이터로 초기화 (없으면 null)
+        setData(getCached<T>(`sse:${eventType}`));
 
         if (USE_MOCK) return;
 
@@ -139,7 +141,11 @@ export function useSSE<T>(
         refCount++;
         if (refCount === 1) connect();
 
-        const handler: Listener = (d) => setData(d as T);
+        const handler: Listener = (d) => {
+            setData(d as T);
+            // SSE 데이터를 캐시에 저장 (다음 리프레시 대비)
+            setCache(`sse:${eventType}`, d);
+        };
         addListener(eventType, handler);
 
         return () => {
@@ -190,8 +196,10 @@ export function useSSE<T>(
         // 현재 상태 체크
         statusHandler(currentStatus);
 
-        // SSE가 3초 내 연결되지 않으면 1회 REST 폴백 실행
-        if (currentStatus !== 'connected' && !initialFetched) {
+        // 캐시 데이터가 있으면 초기 REST 폴백 스킵 (이미 표시 중)
+        // 캐시가 없고 SSE가 3초 내 연결되지 않으면 1회 REST 폴백 실행
+        const hasCachedData = getCached(`sse:${eventType}`) !== null;
+        if (!hasCachedData && currentStatus !== 'connected' && !initialFetched) {
             initialTimer = setTimeout(() => {
                 if (!cancelled && currentStatus !== 'connected' && !initialFetched) {
                     initialFetched = true;

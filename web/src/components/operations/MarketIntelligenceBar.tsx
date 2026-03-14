@@ -59,7 +59,7 @@ export function MarketIntelligenceBar({ activeMarket }: Props) {
     useEffect(() => { loadData(); }, [loadData]);
 
     // 60초 폴링
-    const polling = usePolling(fetchMarketIntelligence, { interval: 60000, enabled: true });
+    const polling = usePolling(fetchMarketIntelligence, { interval: 60000, enabled: true, cacheKey: 'market-intelligence' });
 
     // Merge SSE / polling data
     const effective = polling.data || data;
