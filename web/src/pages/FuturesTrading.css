@@ -1,0 +1,519 @@
+/* ── FuturesTrading Page ── */
+
+.futures-trading {
+  padding: 2rem 1rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.futures-trading .page-header {
+  margin-bottom: 1.5rem;
+}
+
+.futures-trading .page-header h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.futures-trading .page-header p {
+  color: var(--text-secondary, #888);
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+}
+
+/* ── Top Bar ── */
+.futures-top-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.futures-ticker-select {
+  background: var(--dark-bg, #1a1a2e);
+  border: 1px solid var(--border-color, #333);
+  color: var(--text-primary, #e0e0e0);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.futures-direction-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 1rem;
+  border-radius: 20px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+}
+
+.futures-direction-badge.long {
+  background: rgba(46, 204, 113, 0.15);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.3);
+}
+
+.futures-direction-badge.short {
+  background: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+  border: 1px solid rgba(231, 76, 60, 0.3);
+}
+
+.futures-direction-badge.neutral {
+  background: rgba(149, 165, 166, 0.15);
+  color: #95a5a6;
+  border: 1px solid rgba(149, 165, 166, 0.3);
+}
+
+.futures-auto-refresh {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #888);
+}
+
+.futures-auto-refresh label {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.futures-refresh-btn {
+  background: transparent;
+  border: 1px solid var(--border-color, #333);
+  color: var(--text-secondary, #888);
+  padding: 0.3rem 0.7rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.futures-refresh-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary, #e0e0e0);
+}
+
+/* ── Main Grid ── */
+.futures-main-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+/* ── Glass Panel ── */
+.futures-panel {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 12px;
+  padding: 1.25rem;
+}
+
+.futures-panel h3 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-secondary, #888);
+  margin: 0 0 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ── 4-Layer Score ── */
+.layer-scores {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.layer-label {
+  width: 90px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary, #888);
+}
+
+.layer-bar-container {
+  flex: 1;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 11px;
+  overflow: hidden;
+  position: relative;
+}
+
+.layer-bar-fill {
+  height: 100%;
+  border-radius: 11px;
+  transition: width 0.5s ease;
+}
+
+.layer-bar-fill.zscore { background: linear-gradient(90deg, #3498db, #2980b9); }
+.layer-bar-fill.trend { background: linear-gradient(90deg, #2ecc71, #27ae60); }
+.layer-bar-fill.momentum { background: linear-gradient(90deg, #e67e22, #d35400); }
+.layer-bar-fill.volume { background: linear-gradient(90deg, #9b59b6, #8e44ad); }
+
+.layer-score-text {
+  width: 65px;
+  text-align: right;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.layer-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.2rem;
+}
+
+.signal-tag {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary, #888);
+}
+
+.total-score-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color, #333);
+}
+
+.total-score-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.total-score-value.pass { color: #2ecc71; }
+.total-score-value.fail { color: #e74c3c; }
+
+.total-score-threshold {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #888);
+}
+
+/* ── Signal Card ── */
+.signal-card {
+  border-left: 3px solid var(--border-color, #333);
+  padding-left: 1rem;
+}
+
+.signal-card.long { border-left-color: #2ecc71; }
+.signal-card.short { border-left-color: #e74c3c; }
+
+.signal-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0;
+}
+
+.signal-card-row .label {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #888);
+}
+
+.signal-card-row .value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.signal-card-row .value.profit { color: #2ecc71; }
+.signal-card-row .value.loss { color: #e74c3c; }
+
+/* ── Z-Score Gauge ── */
+.zscore-gauge-container {
+  margin-bottom: 1.5rem;
+}
+
+.zscore-gauge {
+  position: relative;
+  height: 60px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 12px;
+  padding: 0.75rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.zscore-gauge-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary, #888);
+  white-space: nowrap;
+}
+
+.zscore-gauge-track {
+  flex: 1;
+  height: 12px;
+  background: linear-gradient(90deg,
+    #e74c3c 0%, #e74c3c 16.7%,
+    #e67e22 16.7%, #e67e22 33.3%,
+    #555 33.3%, #555 66.7%,
+    #e67e22 66.7%, #e67e22 83.3%,
+    #e74c3c 83.3%, #e74c3c 100%
+  );
+  border-radius: 6px;
+  position: relative;
+}
+
+.zscore-gauge-needle {
+  position: absolute;
+  top: -4px;
+  width: 4px;
+  height: 20px;
+  background: #fff;
+  border-radius: 2px;
+  transform: translateX(-50%);
+  transition: left 0.5s ease;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+}
+
+.zscore-gauge-value {
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 60px;
+  text-align: right;
+}
+
+.zscore-gauge-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.3rem;
+  padding: 0 1.5rem;
+  margin-left: 80px;
+  margin-right: 70px;
+}
+
+.zscore-gauge-labels span {
+  font-size: 0.65rem;
+  color: var(--text-secondary, #888);
+}
+
+/* ── Chart Section ── */
+.futures-chart-section {
+  margin-bottom: 1.5rem;
+}
+
+.futures-chart-container {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 12px;
+  padding: 1rem;
+  min-height: 400px;
+}
+
+.chart-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 400px;
+  color: var(--text-secondary, #888);
+  font-size: 0.9rem;
+}
+
+/* ── Backtest Section ── */
+.futures-backtest-section {
+  margin-bottom: 1.5rem;
+}
+
+.backtest-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 12px;
+  padding: 0.75rem 1.25rem;
+  cursor: pointer;
+  width: 100%;
+  color: var(--text-primary, #e0e0e0);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.backtest-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.backtest-content {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color, #333);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  padding: 1.25rem;
+}
+
+.backtest-form {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.backtest-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.backtest-field label {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #888);
+}
+
+.backtest-field input {
+  background: var(--dark-bg, #1a1a2e);
+  border: 1px solid var(--border-color, #333);
+  color: var(--text-primary, #e0e0e0);
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  width: 120px;
+}
+
+.backtest-field input[type="checkbox"] {
+  width: auto;
+}
+
+.backtest-run-btn {
+  background: linear-gradient(135deg, #3498db, #2980b9);
+  color: #fff;
+  border: none;
+  padding: 0.5rem 1.5rem;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.backtest-run-btn:hover { opacity: 0.9; }
+.backtest-run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Backtest Metrics ── */
+.backtest-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.backtest-metric-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color, #333);
+  border-radius: 8px;
+  padding: 0.75rem;
+  text-align: center;
+}
+
+.backtest-metric-card .metric-label {
+  font-size: 0.7rem;
+  color: var(--text-secondary, #888);
+  text-transform: uppercase;
+  margin-bottom: 0.25rem;
+}
+
+.backtest-metric-card .metric-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-value.positive { color: #2ecc71; }
+.metric-value.negative { color: #e74c3c; }
+
+/* ── Equity Curve ── */
+.equity-curve-container {
+  height: 250px;
+  margin-bottom: 1rem;
+}
+
+/* ── Trade Table ── */
+.futures-trade-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.futures-trade-table th {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--border-color, #333);
+  color: var(--text-secondary, #888);
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.futures-trade-table td {
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  font-variant-numeric: tabular-nums;
+}
+
+.futures-trade-table tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* ── Direction Colors in Table ── */
+td.dir-long { color: #2ecc71; }
+td.dir-short { color: #e74c3c; }
+
+/* ── Loading ── */
+.futures-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  color: var(--text-secondary, #888);
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .futures-main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .backtest-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .backtest-field input {
+    width: 100%;
+  }
+
+  .futures-top-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .futures-auto-refresh {
+    margin-left: 0;
+  }
+}

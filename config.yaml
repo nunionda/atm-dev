@@ -294,6 +294,8 @@ sp500_futures:
   rsi_period: 14
   rsi_oversold: 30.0                 # 과매도
   rsi_overbought: 70.0               # 과매수
+  rsi_long_range: [40.0, 70.0]       # 롱 진입 RSI 범위
+  rsi_short_range: [30.0, 60.0]      # 숏 진입 RSI 범위
 
   # 볼린저밴드
   bb_period: 20
@@ -302,7 +304,7 @@ sp500_futures:
 
   # ATR
   atr_period: 14
-  atr_breakout_mult: 0.5             # 돌파 필터: (High-PrevClose) > mult×ATR
+  atr_breakout_mult: 0.75            # 돌파 필터: (High-PrevClose) > mult×ATR
   atr_trend_mult: 1.5                # 추세 진입: Close > PrevClose ± mult×ATR
 
   # 거래량
@@ -319,7 +321,7 @@ sp500_futures:
   # 손절 설정 (ATR 기반 동적)
   sl_atr_mult: 2.0                   # ADX < 25 → 2.0×ATR
   sl_atr_mult_strong: 1.5            # ADX ≥ 25 → 1.5×ATR (타이트)
-  sl_hard_pct: 0.03                  # 하드 손절 3% (선물 특화)
+  sl_hard_pct: 0.05                  # 하드 손절 5% (선물 특화)
 
   # 익절 설정
   tp_atr_mult: 3.0                   # ATR ×3 익절
@@ -343,3 +345,20 @@ sp500_futures:
   weight_trend: 25.0                 # L2: 추세/구조
   weight_momentum: 25.0              # L3: 모멘텀 (MACD, ADX, RSI)
   weight_volume: 25.0                # L4: 거래량/OBV
+
+  # CHoCH 퇴출 확인
+  choch_confirm_bars: 2              # MACD 반전 확인 봉수
+  choch_pnl_gate_loss: -0.02         # CHoCH 손실 게이트 (-2%)
+  choch_pnl_gate_profit: 0.04        # CHoCH 이익 게이트 (+4%)
+
+  # 페이크아웃 필터
+  fakeout_min_vol_ratio: 0.8         # 최소 거래량 비율
+  fakeout_max_wick_ratio: 1.5        # 최대 윅/바디 비율
+
+  # 서킷브레이커
+  rg1_daily_loss_limit: -0.03        # 일일 손실 한도 (-3%)
+  rg2_mdd_limit: -0.10              # MDD 한도 (-10%)
+
+  # 거래비용 (백테스트용)
+  futures_slippage_per_contract: 12.50   # 슬리피지/계약 ($, 1틱 ES)
+  futures_commission_per_contract: 4.62  # 라운드턴 커미션/계약 ($)

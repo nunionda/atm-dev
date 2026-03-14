@@ -5,8 +5,12 @@ config.yaml + .env 로드
 
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass, field
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -192,6 +196,97 @@ class SP500FuturesConfig:
     weight_trend: float = 25.0          # Layer 2: 추세/구조
     weight_momentum: float = 25.0       # Layer 3: 모멘텀 (MACD, ADX)
     weight_volume: float = 25.0         # Layer 4: 거래량/OBV
+    # CHoCH 퇴출 확인
+    choch_confirm_bars: int = 2
+    choch_pnl_gate_loss: float = -0.02
+    choch_pnl_gate_profit: float = 0.04
+    # 페이크아웃 필터
+    fakeout_min_vol_ratio: float = 0.8
+    fakeout_max_wick_ratio: float = 1.5
+    # 서킷브레이커
+    rg1_daily_loss_limit: float = -0.03
+    rg2_mdd_limit: float = -0.10
+    # 거래비용
+    futures_slippage_per_contract: float = 12.50
+    futures_commission_per_contract: float = 4.62
+
+    # ── 4-Layer 스코어링 임계값 (T1: 매직넘버 config화) ──
+
+    # Layer 1: Z-Score 티어별 임계값
+    zscore_tier1: float = 3.0       # 극단 (만점)
+    zscore_tier2: float = 2.0       # 강한
+    zscore_tier3: float = 1.5       # 약한
+    zscore_tier4: float = 1.0       # 평균 부근
+    zscore_tier1_pct: float = 1.0   # 만점 비율
+    zscore_tier2_pct: float = 0.8
+    zscore_tier3_pct: float = 0.5
+    zscore_tier4_pct: float = 0.3
+    zscore_block_threshold: float = 2.0  # 반대 방향 차단 임계값
+
+    # Layer 2: 추세/구조 가중 비율
+    trend_ema_full_pct: float = 0.4     # EMA 완전 정배열/역배열
+    trend_ema_partial_pct: float = 0.2  # EMA 부분 정배열/역배열
+    trend_ma200_pos_pct: float = 0.3    # MA200 위/아래
+    trend_ma200_slope_pct: float = 0.3  # MA200 기울기
+    trend_slope_lookback: int = 5       # MA200 기울기 계산 봉수
+
+    # Layer 3: 모멘텀 가중 비율
+    momentum_macd_cross_pct: float = 0.3    # MACD 크로스
+    momentum_macd_hist_pct: float = 0.2     # MACD 히스토그램 상승/하락
+    momentum_adx_trend_pct: float = 0.3     # ADX + DI 확인
+    momentum_adx_bonus_pct: float = 0.1     # ADX 강한 추세 보너스
+    momentum_rsi_ok_pct: float = 0.2        # RSI 적정 범위
+    momentum_rsi_extreme_pct: float = 0.15  # RSI 극단 (과매수/과매도 반등)
+
+    # Layer 4: 거래량/OBV 가중 비율
+    volume_surge_pct: float = 0.35       # 거래량 서지
+    volume_above_avg_pct: float = 0.15   # 거래량 평균 초과
+    volume_above_avg_ratio: float = 1.2  # 평균 초과 판단 비율
+    volume_obv_pct: float = 0.35         # OBV 추세
+    volume_squeeze_pct: float = 0.3      # BB 스퀴즈
+
+    # ── Progressive Trailing 4-tier (T2: CLAUDE.md 사양) ──
+    trailing_tier1_pnl: float = 0.15     # ≥15% PnL
+    trailing_tier1_atr: float = 1.5      # ATR 배수 (타이트)
+    trailing_tier1_floor: float = -0.08  # 최소 floor -8%
+    trailing_tier2_pnl: float = 0.10     # ≥10% PnL
+    trailing_tier2_atr: float = 2.0      # ATR 배수
+    trailing_tier2_floor: float = -0.06  # 최소 floor -6%
+    trailing_tier3_pnl: float = 0.07     # ≥7% PnL
+    trailing_tier3_atr: float = 2.5      # ATR 배수
+    trailing_tier3_floor: float = -0.05  # 최소 floor -5%
+    trailing_default_atr: float = 3.0    # 기본 ATR 배수
+    trailing_default_floor: float = -0.04  # 기본 floor -4%
+
+    # 포지션 사이징 (스코어 비례)
+    sizing_base_mult: float = 0.4        # 최소 배수 (60점)
+    sizing_max_mult: float = 1.25        # 최대 배수 (100점)
+    sizing_score_base: float = 60.0      # 기준 점수
+    sizing_score_range: float = 40.0     # 점수 범위 (100-60)
+
+    # ATR 폴백
+    atr_fallback_pct: float = 0.01       # ATR 0일 때 가격의 1%
+
+    # 도지 캔들 임계값
+    doji_body_threshold: float = 0.001   # 도지 판단 body 최소값
+
+    # ── Market Regime (Phase 2) ──
+    regime_bull_entry_threshold: float = 55.0    # BULL 시 진입 임계값
+    regime_bear_entry_threshold: float = 65.0    # BEAR 시 진입 임계값
+    regime_bull_max_holding: int = 25            # BULL 시 최대 보유일
+    regime_bear_max_holding: int = 12            # BEAR 시 최대 보유일
+    regime_bear_sl_pct: float = 0.03             # BEAR 시 하드 손절
+    regime_counter_bias_penalty: float = 5.0     # 역추세 진입 페널티 점수
+
+    # ── EV Engine + Dynamic Kelly (Phase 3) ──
+    ev_lookback: int = 30              # EV 계산 이력 수
+    ev_min_trades: int = 5             # EV 게이트 활성 최소 트레이드
+    kelly_min_trades: int = 10         # Dynamic Kelly 최소 트레이드
+    kelly_half_mult: float = 0.5       # Half-Kelly 안전 계수
+    kelly_max_fraction: float = 0.5    # Kelly 최대값
+
+    # ── 연속 손절 정지 (Phase 4A) ──
+    max_consecutive_losses: int = 3    # 연속 손절 시 진입 차단
 
 
 @dataclass
@@ -225,15 +320,109 @@ class ConfigManager:
 
     def load(self) -> ATSConfig:
         config = ATSConfig()
+
+        # 1. .env 로딩
+        self._load_env(config)
+
+        # 2. YAML 로딩
         try:
             import yaml
             with open(self.config_path) as f:
                 data = yaml.safe_load(f) or {}
-            if "sp500_futures" in data:
-                fc = data["sp500_futures"]
-                for k, v in fc.items():
-                    if hasattr(config.sp500_futures, k):
-                        setattr(config.sp500_futures, k, v)
         except FileNotFoundError:
-            pass
+            logger.warning("config.yaml not found at %s, using defaults", self.config_path)
+            return config
+
+        # 3. 전체 섹션 매핑 로딩
+        section_map = {
+            "strategy": config.strategy,
+            "exit": config.exit,
+            "portfolio": config.portfolio,
+            "risk": config.risk,
+            "order": config.order,
+            "smc_strategy": config.smc_strategy,
+            "breakout_retest": config.breakout_retest,
+            "sp500_futures": config.sp500_futures,
+        }
+
+        for section_name, section_obj in section_map.items():
+            if section_name in data and isinstance(data[section_name], dict):
+                self._apply_section(section_obj, data[section_name], section_name)
+
+        # 4. system 레벨 설정
+        if "system" in data and isinstance(data["system"], dict):
+            if "log_level" in data["system"]:
+                config.log_level = str(data["system"]["log_level"])
+
+        # 5. 4-Layer 가중치 합계 검증
+        self._validate_weights(config)
+
         return config
+
+    def _load_env(self, config: ATSConfig) -> None:
+        """Load secrets from .env file."""
+        if os.path.exists(self.env_path):
+            try:
+                from dotenv import load_dotenv
+                load_dotenv(self.env_path)
+            except ImportError:
+                logger.debug("python-dotenv not installed, reading env vars directly")
+
+        config.kis_app_key = os.getenv("KIS_APP_KEY", "")
+        config.kis_app_secret = os.getenv("KIS_APP_SECRET", "")
+        config.kis_account_no = os.getenv("KIS_ACCOUNT_NO", "")
+        config.kis_is_paper = os.getenv("KIS_IS_PAPER", "true").lower() == "true"
+        config.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        config.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+        config.db_path = os.getenv("DB_PATH", config.db_path)
+
+        # M10: 실전 모드에서 필수 시크릿 누락 시 경고
+        if not config.kis_is_paper:
+            for field in ["kis_app_key", "kis_app_secret", "kis_account_no"]:
+                if not getattr(config, field):
+                    logger.error("LIVE MODE: %s is required but empty!", field)
+
+    @staticmethod
+    def _apply_section(obj: object, values: dict, section_name: str) -> None:
+        """Apply YAML values to dataclass with type coercion and warnings."""
+        for k, v in values.items():
+            if not hasattr(obj, k):
+                logger.warning("[%s] Unknown config key: %s (ignored)", section_name, k)
+                continue
+
+            current = getattr(obj, k)
+            expected_type = type(current)
+
+            try:
+                if expected_type == bool:
+                    if isinstance(v, bool):
+                        casted = v
+                    else:
+                        casted = str(v).lower() in ("true", "1", "yes")
+                elif expected_type == int:
+                    casted = int(v)
+                elif expected_type == float:
+                    casted = float(v)
+                elif expected_type == tuple and isinstance(v, list):
+                    casted = tuple(v)
+                else:
+                    casted = v
+                setattr(obj, k, casted)
+            except (ValueError, TypeError) as e:
+                logger.error(
+                    "[%s] Type error for %s: expected %s, got %s (%s)",
+                    section_name, k, expected_type.__name__, type(v).__name__, e,
+                )
+
+    @staticmethod
+    def _validate_weights(config: ATSConfig) -> None:
+        """Validate that layer weights sum to ~100."""
+        fc = config.sp500_futures
+        layer_sum = fc.weight_zscore + fc.weight_trend + fc.weight_momentum + fc.weight_volume
+        if abs(layer_sum - 100.0) > 0.1:
+            logger.warning(
+                "SP500 futures 4-Layer weights sum to %.1f (expected 100.0): "
+                "zscore=%.1f, trend=%.1f, momentum=%.1f, volume=%.1f",
+                layer_sum, fc.weight_zscore, fc.weight_trend,
+                fc.weight_momentum, fc.weight_volume,
+            )

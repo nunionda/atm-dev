@@ -12,6 +12,7 @@ import { ScalpAnalyzer } from './pages/ScalpAnalyzer';
 import { FabioStrategy } from './pages/FabioStrategy';
 import { OptionCalculator } from './pages/OptionCalculator';
 import { Rebalance } from './pages/Rebalance';
+import { FuturesTrading } from './pages/FuturesTrading';
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
           <Route path="/rebalance" element={<Rebalance />} />
           <Route path="/risk" element={<Risk />} />
           <Route path="/performance" element={<Performance />} />
+          <Route path="/futures-trading" element={<FuturesTrading />} />
           <Route path="/scalp-analyzer" element={<ScalpAnalyzer />} />
           <Route path="/scalp-analyzer/fabio" element={<FabioStrategy />} />
           <Route path="/option-calculator" element={<OptionCalculator />} />

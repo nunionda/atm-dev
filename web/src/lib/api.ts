@@ -39,7 +39,7 @@ export interface AnalyticsResponse {
     data: AnalyticsData[];
 }
 
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 export async function fetchAnalyticsData(
     ticker: string,
@@ -879,5 +879,204 @@ export async function fetchBacktestStatus(market: MarketId): Promise<BacktestSta
         start_date: null,
         end_date: null,
     }));
+}
+
+
+// ══════════════════════════════════════════
+// Futures Trading API
+// ══════════════════════════════════════════
+
+export interface FuturesLayerScore {
+    score: number;
+    max_score: number;
+    signals: string[];
+}
+
+export interface FuturesAnalysis {
+    ticker: string;
+    direction: 'LONG' | 'SHORT' | 'NEUTRAL';
+    total_score: number;
+    entry_threshold: number;
+    signal_active: boolean;
+    layers: {
+        zscore: FuturesLayerScore;
+        trend: FuturesLayerScore;
+        momentum: FuturesLayerScore;
+        volume: FuturesLayerScore;
+    };
+    indicators: {
+        zscore: number;
+        rsi: number;
+        adx: number;
+        macd_hist: number;
+        atr: number;
+        bb_squeeze_ratio: number;
+        volume_ratio: number;
+    };
+    entry_price: number;
+    stop_loss: number;
+    take_profit: number;
+    risk_reward_ratio: number;
+    position_size_contracts: number;
+    last_updated: string;
+}
+
+export interface FuturesSignalData {
+    ticker: string;
+    direction: string;
+    signal_strength: number;
+    entry_price: number;
+    stop_loss: number;
+    take_profit: number;
+    atr: number;
+    z_score: number;
+    risk_reward_ratio: number;
+    position_size_contracts: number;
+    primary_signals: string[];
+    confirmation_filters: string[];
+    metadata: Record<string, number>;
+    timestamp: string;
+}
+
+export interface FuturesTickerInfo {
+    ticker: string;
+    name: string;
+    multiplier: number;
+    micro: string | null;
+}
+
+export interface FuturesMonteCarloResult {
+    var_95: number;
+    cvar_99: number;
+    worst_mdd: number;
+    median_return: number;
+    bankruptcy_prob: number;
+}
+
+export interface FuturesBacktestMetrics {
+    total_return_pct: number;
+    sharpe_ratio: number;
+    sortino_ratio: number;
+    calmar_ratio: number;
+    cagr: number;
+    max_drawdown_pct: number;
+    mdd_duration_days: number;
+    total_trades: number;
+    win_rate: number;
+    profit_factor: number;
+    avg_win: number;
+    avg_loss: number;
+    avg_rr: number;
+    total_pnl: number;
+    total_costs: number;
+    long_trades: number;
+    short_trades: number;
+    long_win_rate: number;
+    short_win_rate: number;
+    avg_holding_days: number;
+    max_consecutive_wins: number;
+    max_consecutive_losses: number;
+    best_trade_pct: number;
+    worst_trade_pct: number;
+    exit_reasons: Record<string, number>;
+    monte_carlo: FuturesMonteCarloResult;
+}
+
+export interface FuturesTrade {
+    entry_date: string;
+    exit_date: string;
+    direction: string;
+    entry_price: number;
+    exit_price: number;
+    contracts: number;
+    pnl_dollar: number;
+    pnl_pct: number;
+    holding_days: number;
+    exit_reason: string;
+}
+
+export interface FuturesBacktestResult {
+    ticker: string;
+    start_date: string;
+    end_date: string;
+    initial_equity: number;
+    final_equity: number;
+    metrics: FuturesBacktestMetrics;
+    equity_curve: { date: string; total_value: number; equity: number; drawdown_pct: number }[];
+    trades: FuturesTrade[];
+}
+
+export async function fetchFuturesTickers(): Promise<FuturesTickerInfo[]> {
+    const res = await fetch(`${API_BASE_URL}/futures/tickers`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.tickers || [];
+}
+
+export async function fetchFuturesAnalysis(ticker: string = 'ES=F', period: string = '1y'): Promise<FuturesAnalysis | null> {
+    try {
+        const res = await fetch(`${API_BASE_URL}/futures/analyze/${encodeURIComponent(ticker)}?period=${period}`);
+        if (!res.ok) return null;
+        return res.json();
+    } catch {
+        return null;
+    }
+}
+
+export async function fetchFuturesSignal(ticker: string = 'ES=F', equity: number = 100000): Promise<{ signal: FuturesSignalData | null; message?: string }> {
+    try {
+        const res = await fetch(`${API_BASE_URL}/futures/signal/${encodeURIComponent(ticker)}?equity=${equity}`);
+        if (!res.ok) return { signal: null };
+        return res.json();
+    } catch {
+        return { signal: null };
+    }
+}
+
+export async function fetchFuturesQuote(ticker: string = 'ES=F') {
+    const res = await fetch(`${API_BASE_URL}/futures/quote/${encodeURIComponent(ticker)}`);
+    if (!res.ok) return null;
+    return res.json();
+}
+
+export async function triggerFuturesBacktest(
+    ticker: string,
+    startDate: string,
+    endDate: string,
+    equity: number = 100000,
+    isMicro: boolean = false,
+): Promise<FuturesBacktestResult | null> {
+    try {
+        const params = new URLSearchParams({
+            ticker, start_date: startDate, end_date: endDate,
+            equity: String(equity), is_micro: String(isMicro),
+        });
+        const res = await fetch(`${API_BASE_URL}/futures/backtest?${params}`, { method: 'POST' });
+        if (!res.ok) return null;
+        return res.json();
+    } catch {
+        return null;
+    }
+}
+
+export async function fetchFuturesBacktestStatus(): Promise<{ in_progress: boolean; has_result: boolean }> {
+    try {
+        const res = await fetch(`${API_BASE_URL}/futures/backtest/status`);
+        if (!res.ok) return { in_progress: false, has_result: false };
+        return res.json();
+    } catch {
+        return { in_progress: false, has_result: false };
+    }
+}
+
+export async function fetchFuturesBacktestResult(): Promise<FuturesBacktestResult | null> {
+    try {
+        const res = await fetch(`${API_BASE_URL}/futures/backtest/result`);
+        if (res.status === 404) return null;
+        if (!res.ok) return null;
+        return res.json();
+    } catch {
+        return null;
+    }
 }
 

@@ -54,8 +54,8 @@ export function Navbar() {
                         <span>Rebalance</span>
                     </Link>
                     <Link
-                        to="/scalp-analyzer"
-                        className={`nav-link ${isActive('/scalp-analyzer') ? 'active' : ''}`}
+                        to="/futures-trading"
+                        className={`nav-link ${isActive('/futures-trading') || isActive('/scalp-analyzer') ? 'active' : ''}`}
                     >
                         <Activity size={18} />
                         <span>Futures</span>

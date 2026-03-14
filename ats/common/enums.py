@@ -1,11 +1,13 @@
 """
-ATS 공통 열거형 정의
+ATS 공용 Enum 정의
+문서: ATS-SAD-001 §12.2
 """
 
 from enum import Enum
 
 
 class SystemState(Enum):
+    """시스템 상태 (SAD §5.1 상태 다이어그램)"""
     INIT = "INIT"
     READY = "READY"
     RUNNING = "RUNNING"
@@ -15,9 +17,12 @@ class SystemState(Enum):
 
 
 class PositionStatus(Enum):
+    """포지션 상태 (SAD §9.1 상태 전이)"""
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
+    CLOSING = "CLOSING"
     CLOSED = "CLOSED"
+    CANCELLED = "CANCELLED"
 
 
 class OrderSide(Enum):
@@ -30,26 +35,47 @@ class OrderType(Enum):
     LIMIT = "LIMIT"
 
 
+class OrderStatus(Enum):
+    SUBMITTED = "SUBMITTED"
+    FILLED = "FILLED"
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"
+    CANCELLED = "CANCELLED"
+    REJECTED = "REJECTED"
+
+
+class FuturesDirection(Enum):
+    """선물 매매 방향"""
+    LONG = "LONG"
+    SHORT = "SHORT"
+    NEUTRAL = "NEUTRAL"
+
+
 class ExitReason(Enum):
+    """청산 사유 (BRD §2.4)"""
     STOP_LOSS = "ES1"
     TAKE_PROFIT = "ES2"
     TRAILING_STOP = "ES3"
     DEAD_CROSS = "ES4"
     MAX_HOLDING = "ES5"
+    CHOCH_REVERSAL = "ES_CHOCH"
+    CHANDELIER_EXIT = "ES_CHANDELIER"
+    HARD_STOP = "ES_HARD"
+    CIRCUIT_BREAKER = "ES_CB"
     ATR_STOP_LOSS = "ES_ATR_SL"
     ATR_TAKE_PROFIT = "ES_ATR_TP"
-    CHANDELIER_EXIT = "ES_CHANDELIER"
-    CHOCH_REVERSAL = "ES_CHOCH"
 
 
 class TradeEventType(Enum):
-    ENTRY = "ENTRY"
-    EXIT = "EXIT"
-    SIGNAL = "SIGNAL"
-    RISK_GATE = "RISK_GATE"
-
-
-class FuturesDirection(Enum):
-    LONG = "LONG"
-    SHORT = "SHORT"
-    NEUTRAL = "NEUTRAL"
+    """매매 이벤트 유형 (SAD §10.4)"""
+    SIGNAL_DETECTED = "SIGNAL_DETECTED"
+    RISK_CHECK_PASSED = "RISK_CHECK_PASSED"
+    RISK_CHECK_FAILED = "RISK_CHECK_FAILED"
+    ORDER_SUBMITTED = "ORDER_SUBMITTED"
+    ORDER_FILLED = "ORDER_FILLED"
+    ORDER_CANCELLED = "ORDER_CANCELLED"
+    ORDER_REJECTED = "ORDER_REJECTED"
+    STOP_LOSS_TRIGGERED = "STOP_LOSS_TRIGGERED"
+    TAKE_PROFIT_TRIGGERED = "TAKE_PROFIT_TRIGGERED"
+    TRAILING_STOP_TRIGGERED = "TRAILING_STOP_TRIGGERED"
+    DAILY_LIMIT_HIT = "DAILY_LIMIT_HIT"
+    MDD_LIMIT_HIT = "MDD_LIMIT_HIT"
