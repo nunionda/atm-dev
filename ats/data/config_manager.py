@@ -155,7 +155,7 @@ class SP500FuturesConfig:
 
     # ATR 설정
     atr_period: int = 14
-    atr_breakout_mult: float = 0.5      # 돌파 필터: (High - PrevClose) > mult * ATR
+    atr_breakout_mult: float = 0.15     # 돌파 필터: (High - PrevClose) > mult * ATR (일일봉 최적화)
     atr_trend_mult: float = 1.5         # 추세 진입: Close > PrevClose ± mult * ATR
 
     # 거래량
@@ -167,7 +167,7 @@ class SP500FuturesConfig:
     obv_ema_slow: int = 20
 
     # 진입 점수 임계값
-    entry_threshold: float = 60.0       # 최소 진입 점수 (0-100)
+    entry_threshold: float = 50.0       # 최소 진입 점수 (0-100, 일일봉 최적화)
 
     # 손절 설정
     sl_atr_mult: float = 2.0           # ATR 기반 손절 배수 (기본)
@@ -201,14 +201,40 @@ class SP500FuturesConfig:
     choch_pnl_gate_loss: float = -0.02
     choch_pnl_gate_profit: float = 0.04
     # 페이크아웃 필터
-    fakeout_min_vol_ratio: float = 0.8
-    fakeout_max_wick_ratio: float = 1.5
-    # 서킷브레이커
+    fakeout_min_vol_ratio: float = 0.5   # 일일봉 최적화 (기존 0.8)
+    fakeout_max_wick_ratio: float = 2.0   # 일일봉 최적화 (기존 1.5)
+    # 서킷브레이커 (시스템 레벨)
     rg1_daily_loss_limit: float = -0.03
     rg2_mdd_limit: float = -0.10
+
+    # 거래소 서킷브레이커 (CME, sp500_futures.md Section 5)
+    cb_level1_pct: float = 0.07        # -7% → 거래 중단
+    cb_level2_pct: float = 0.13        # -13% → 거래 중단
+    cb_level3_pct: float = 0.20        # -20% → 당일 종결
+    cb_overnight_limit: float = 0.07   # 야간 ±7%
+    exchange_cb_enabled: bool = True
+
+    # 증거금 (sp500_futures.md Section 3)
+    es_initial_margin: float = 15500.0      # ES 개시증거금
+    es_maintenance_margin: float = 13700.0   # ES 유지증거금
+    mes_initial_margin: float = 1550.0       # MES 개시증거금
+    mes_maintenance_margin: float = 1370.0   # MES 유지증거금
+    margin_call_enabled: bool = True         # 증거금 시뮬레이션 토글
+
+    # 롤오버 (sp500_futures.md Section 9)
+    roll_cost_per_contract: float = 12.50    # 캘린더 스프레드 비용 추정
+    roll_warning_days: int = 5               # 롤 접근 경고 일수
+
     # 거래비용
     futures_slippage_per_contract: float = 12.50
     futures_commission_per_contract: float = 4.62
+    # 비용 세분화
+    es_exchange_fee: float = 1.40
+    es_broker_fee: float = 0.85
+    es_nfa_fee: float = 0.02
+    mes_exchange_fee: float = 0.35
+    mes_broker_fee: float = 0.25
+    mes_nfa_fee: float = 0.02
 
     # ── 4-Layer 스코어링 임계값 (T1: 매직넘버 config화) ──
 
@@ -222,6 +248,8 @@ class SP500FuturesConfig:
     zscore_tier3_pct: float = 0.5
     zscore_tier4_pct: float = 0.3
     zscore_block_threshold: float = 2.0  # 반대 방향 차단 임계값
+    zscore_trend_cont_max_pct: float = 0.6  # 추세추종 보간 상한 (Z=-1 근처)
+    zscore_trend_cont_min_pct: float = 0.2  # 추세추종 보간 하한 (Z=+1.5 근처)
 
     # Layer 2: 추세/구조 가중 비율
     trend_ema_full_pct: float = 0.4     # EMA 완전 정배열/역배열
@@ -271,7 +299,7 @@ class SP500FuturesConfig:
     doji_body_threshold: float = 0.001   # 도지 판단 body 최소값
 
     # ── Market Regime (Phase 2) ──
-    regime_bull_entry_threshold: float = 55.0    # BULL 시 진입 임계값
+    regime_bull_entry_threshold: float = 50.0    # BULL 시 진입 임계값 (일일봉 최적화)
     regime_bear_entry_threshold: float = 65.0    # BEAR 시 진입 임계값
     regime_bull_max_holding: int = 25            # BULL 시 최대 보유일
     regime_bear_max_holding: int = 12            # BEAR 시 최대 보유일

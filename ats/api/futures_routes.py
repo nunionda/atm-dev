@@ -15,8 +15,10 @@ import yfinance as yf
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
+from datetime import datetime, timezone, timedelta
+
 from data.config_manager import ConfigManager
-from strategy.sp500_futures import SP500FuturesStrategy
+from strategy.sp500_futures import SP500FuturesStrategy, get_roll_schedule, days_to_next_roll
 from backtest.futures_backtester import FuturesBacktester
 from infra.logger import get_logger
 
@@ -44,7 +46,7 @@ FUTURES_TICKERS = [
     {"ticker": "MNQ=F", "name": "Micro E-mini NASDAQ 100", "multiplier": 2, "micro": None},
     # 한국 지수 선물
     {"ticker": "^KS200", "name": "KOSPI 200", "multiplier": 250000, "micro": None},
-    {"ticker": "^KQ150", "name": "KOSDAQ 150", "multiplier": 10000, "micro": None},
+    {"ticker": "^KQ11", "name": "KOSDAQ Composite", "multiplier": 10000, "micro": None},
 ]
 
 # ── Lazy strategy init ──
@@ -481,3 +483,101 @@ async def futures_backtest_result():
     if _backtest_cache is None:
         raise HTTPException(status_code=404, detail="No backtest result available")
     return _backtest_cache
+
+
+# ══════════════════════════════════════════
+# 롤오버 스케줄
+# ══════════════════════════════════════════
+
+@futures_router.get("/futures/roll-schedule")
+async def roll_schedule(year: int = Query(default=2026)):
+    """ES 선물 롤오버 스케줄 반환."""
+    schedule = get_roll_schedule(year)
+    next_roll = days_to_next_roll()
+    return {"schedule": schedule, "next_roll": next_roll}
+
+
+# ══════════════════════════════════════════
+# 상품 규격 + 세션 정보
+# ══════════════════════════════════════════
+
+def _get_current_session() -> dict:
+    """KST 기준 현재 CME 세션 판별."""
+    KST = timezone(timedelta(hours=9))
+    CT = timezone(timedelta(hours=-6))  # US Central (non-DST)
+
+    now_utc = datetime.now(timezone.utc)
+    now_kst = now_utc.astimezone(KST)
+
+    # 서머타임 체크 (3월 둘째 일요일 ~ 11월 첫째 일요일)
+    month = now_kst.month
+    is_dst = 3 <= month <= 10  # 근사치
+
+    # CT 기준 세션 구분 (서머타임 시 CT → CDT = UTC-5)
+    if is_dst:
+        ct_offset = timezone(timedelta(hours=-5))
+    else:
+        ct_offset = CT
+    now_ct = now_utc.astimezone(ct_offset)
+
+    hour = now_ct.hour
+    weekday = now_ct.weekday()  # 0=Mon ... 6=Sun
+
+    # 주말
+    if weekday == 5 or (weekday == 6 and hour < 17):
+        return {"name": "Weekend (Closed)", "status": "CLOSED", "is_dst": is_dst}
+
+    # 일일 점검: 16:00-17:00 CT
+    if hour == 16:
+        return {"name": "Daily Maintenance", "status": "HALT", "is_dst": is_dst}
+
+    # 금요일 16:00 이후
+    if weekday == 4 and hour >= 16:
+        return {"name": "Weekend (Closed)", "status": "CLOSED", "is_dst": is_dst}
+
+    # RTH: 08:30-15:00 CT
+    if 8 < hour < 15 or (hour == 8 and now_ct.minute >= 30):
+        return {"name": "Regular Trading Hours (RTH)", "status": "RTH", "is_dst": is_dst}
+
+    # 나머지: Globex (프리마켓/포스트마켓)
+    return {"name": "Globex (Extended Hours)", "status": "GLOBEX", "is_dst": is_dst}
+
+
+@futures_router.get("/futures/contract-specs")
+async def contract_specs():
+    """ES vs MES 상품 규격 + 현재 세션 정보."""
+    config = ConfigManager().load().sp500_futures
+
+    # 대략적 S&P 500 수준 (최신 시세 대신 고정값 사용)
+    sp500_approx = 5660
+
+    es_notional = sp500_approx * 50
+    mes_notional = sp500_approx * 5
+
+    es_rt_cost = (config.es_exchange_fee + config.es_broker_fee + config.es_nfa_fee) * 2 + config.futures_slippage_per_contract * 2
+    mes_rt_cost = (config.mes_exchange_fee + config.mes_broker_fee + config.mes_nfa_fee) * 2 + 1.25 * 2  # MES slippage
+
+    return {
+        "es": {
+            "multiplier": 50,
+            "tick_size": 0.25,
+            "tick_value": 12.50,
+            "notional": es_notional,
+            "initial_margin": config.es_initial_margin,
+            "maintenance_margin": config.es_maintenance_margin,
+        },
+        "mes": {
+            "multiplier": 5,
+            "tick_size": 0.25,
+            "tick_value": 1.25,
+            "notional": mes_notional,
+            "initial_margin": config.mes_initial_margin,
+            "maintenance_margin": config.mes_maintenance_margin,
+        },
+        "current_session": _get_current_session(),
+        "cost_breakdown": {
+            "es_round_trip": round(es_rt_cost, 2),
+            "mes_round_trip": round(mes_rt_cost, 2),
+            "cost_pct_of_notional": round(es_rt_cost / es_notional, 6) if es_notional > 0 else 0,
+        },
+    }

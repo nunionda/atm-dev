@@ -27,7 +27,9 @@ S&P 500 선물지수 매매 신호 전략 (E-mini ES / Micro MES)
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass, field
+from datetime import date as date_type, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -40,6 +42,79 @@ from infra.logger import get_logger
 from strategy.base import BaseStrategy
 
 logger = get_logger("sp500_futures")
+
+
+# ══════════════════════════════════════════
+# 롤오버 유틸리티
+# ══════════════════════════════════════════
+
+_CONTRACT_MONTH_CODES = {3: "H", 6: "M", 9: "U", 12: "Z"}
+
+
+def _third_friday(year: int, month: int) -> date_type:
+    """주어진 년/월의 셋째 금요일 계산."""
+    c = calendar.Calendar(firstweekday=calendar.MONDAY)
+    fridays = [
+        d for d in c.itermonthdays2(year, month)
+        if d[0] != 0 and d[1] == calendar.FRIDAY
+    ]
+    return date_type(year, month, fridays[2][0])
+
+
+def get_roll_schedule(year: int) -> List[dict]:
+    """해당 연도의 ES 선물 롤 스케줄 반환.
+
+    Returns:
+        [{"contract": "ESH26", "roll_date": "2026-03-16",
+          "expiry": "2026-03-20", "next_contract": "ESM26"}, ...]
+    """
+    months = [3, 6, 9, 12]
+    schedule = []
+    for i, month in enumerate(months):
+        expiry = _third_friday(year, month)
+        # 롤 데이트 = 만기 주 월요일 (만기 전)
+        days_to_monday = (expiry.weekday() - 0) % 7  # 금요일(4) → 4일 전이 월요일
+        roll_date = expiry - timedelta(days=days_to_monday)
+        if roll_date >= expiry:
+            roll_date -= timedelta(days=7)
+
+        code = _CONTRACT_MONTH_CODES[month]
+        yr_short = str(year)[-2:]
+        next_month = months[(i + 1) % len(months)]
+        next_year = year + 1 if next_month == 3 else year
+        next_code = _CONTRACT_MONTH_CODES[next_month]
+        next_yr_short = str(next_year)[-2:]
+
+        schedule.append({
+            "contract": f"ES{code}{yr_short}",
+            "roll_date": roll_date.isoformat(),
+            "expiry": expiry.isoformat(),
+            "next_contract": f"ES{next_code}{next_yr_short}",
+        })
+    return schedule
+
+
+def days_to_next_roll(current_date: Optional[date_type] = None) -> Optional[dict]:
+    """다음 롤까지 남은 일수와 계약 정보.
+
+    Returns:
+        {"contract": "ESH26→ESM26", "roll_date": "2026-03-16", "days_remaining": 3}
+        or None if no upcoming roll within 60 days.
+    """
+    if current_date is None:
+        current_date = date_type.today()
+
+    for year in [current_date.year, current_date.year + 1]:
+        for entry in get_roll_schedule(year):
+            roll_dt = date_type.fromisoformat(entry["roll_date"])
+            diff = (roll_dt - current_date).days
+            if 0 <= diff <= 60:
+                return {
+                    "contract": f"{entry['contract']}→{entry['next_contract']}",
+                    "roll_date": entry["roll_date"],
+                    "days_remaining": diff,
+                }
+    return None
 
 
 # ══════════════════════════════════════════
@@ -623,8 +698,12 @@ class SP500FuturesStrategy(BaseStrategy):
     def _score_zscore(self, df: pd.DataFrame, is_long: bool) -> Tuple[float, List[str]]:
         """
         Layer 1: Z-Score 통계적 위치 (max weight_zscore점).
-        Z < -2.0: 통계적 과매도 (롱 유리)
-        Z > +2.0: 통계적 과매수 (숏 유리)
+
+        2-Mode 스코어링:
+          A) Mean-Reversion: Z < -2.0 → 롱 만점, Z > +2.0 → 숏 만점 (기존)
+          B) Trend-Continuation: 추세 방향에서 풀백(평균 회귀) 시 보간 점수
+             - LONG: Z ∈ [-1, +1] → 선형 보간 (평균 근처 = 추세 중 건강한 풀백)
+             - SHORT: Z ∈ [-1, +1] → 선형 보간
         """
         if len(df) < 1:
             return 0.0, []
@@ -634,8 +713,12 @@ class SP500FuturesStrategy(BaseStrategy):
         signals = []
         score = 0.0
 
+        # 추세추종 보간 상한 (max_score의 비율)
+        trend_cont_max_pct = getattr(self.fc, 'zscore_trend_cont_max_pct', 0.6)
+        trend_cont_min_pct = getattr(self.fc, 'zscore_trend_cont_min_pct', 0.2)
+
         if is_long:
-            # 과매도일수록 롱 점수 증가
+            # A) Mean-Reversion: 과매도 영역 (기존 로직)
             if zscore <= -self.fc.zscore_tier1:
                 score = max_score * self.fc.zscore_tier1_pct
                 signals.append("Z_EXTREME_OVERSOLD")
@@ -648,11 +731,20 @@ class SP500FuturesStrategy(BaseStrategy):
             elif zscore <= -self.fc.zscore_tier4:
                 score = max_score * self.fc.zscore_tier4_pct
                 signals.append("Z_BELOW_MEAN")
-            # 과매수 영역에서 롱은 차단
+            # B) Trend-Continuation: Z ∈ (-1, +1.5] → 추세 중 풀백/평균 진입
+            elif -self.fc.zscore_tier4 < zscore <= 1.5:
+                # Z=-1 → max_pct, Z=+1.5 → min_pct (선형 보간)
+                t = (zscore - (-self.fc.zscore_tier4)) / (1.5 - (-self.fc.zscore_tier4))
+                t = max(0.0, min(1.0, t))
+                pct = trend_cont_max_pct * (1 - t) + trend_cont_min_pct * t
+                score = max_score * pct
+                signals.append("Z_TREND_PULLBACK")
+            # C) 과매수 극단 → 롱 차단
             elif zscore >= self.fc.zscore_block_threshold:
                 score = 0
+                signals.append("Z_OVERBOUGHT_BLOCK")
         else:
-            # 과매수일수록 숏 점수 증가
+            # A) Mean-Reversion: 과매수 영역 (기존 로직)
             if zscore >= self.fc.zscore_tier1:
                 score = max_score * self.fc.zscore_tier1_pct
                 signals.append("Z_EXTREME_OVERBOUGHT")
@@ -665,9 +757,17 @@ class SP500FuturesStrategy(BaseStrategy):
             elif zscore >= self.fc.zscore_tier4:
                 score = max_score * self.fc.zscore_tier4_pct
                 signals.append("Z_ABOVE_MEAN")
-            # 과매도 영역에서 숏은 차단
+            # B) Trend-Continuation: Z ∈ [-1.5, +1) → 추세 중 풀백/평균 진입
+            elif -1.5 <= zscore < self.fc.zscore_tier4:
+                t = (self.fc.zscore_tier4 - zscore) / (self.fc.zscore_tier4 - (-1.5))
+                t = max(0.0, min(1.0, t))
+                pct = trend_cont_max_pct * (1 - t) + trend_cont_min_pct * t
+                score = max_score * pct
+                signals.append("Z_TREND_PULLBACK")
+            # C) 과매도 극단 → 숏 차단
             elif zscore <= -self.fc.zscore_block_threshold:
                 score = 0
+                signals.append("Z_OVERSOLD_BLOCK")
 
         return round(score, 1), signals
 

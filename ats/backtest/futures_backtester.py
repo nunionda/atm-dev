@@ -7,15 +7,18 @@
 고도화:
   - 거래비용 모델링 (슬리피지 + 커미션)
   - 확장 메트릭 (Sortino, Calmar, CAGR, 연승/연패, MDD Duration)
-  - 서킷브레이커 (RG1 일일 손실, RG2 MDD)
+  - 서킷브레이커 (RG1 일일 손실, RG2 MDD, 거래소 CB)
+  - 증거금 시뮬레이션 (개시/유지 증거금, Margin Call)
+  - 롤오버 비용 (분기별 캘린더 스프레드)
   - Monte Carlo 스트레스 테스트
 """
 
 from __future__ import annotations
 
+import calendar
 import random
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, date as date_type, timedelta
 from typing import Callable, Dict, List, Optional
 
 import numpy as np
@@ -87,6 +90,64 @@ class FuturesBacktester:
             self.slippage_per_contract = self.fc.futures_slippage_per_contract
             self.commission_per_contract = self.fc.futures_commission_per_contract
 
+        # 증거금
+        if is_micro:
+            self.initial_margin = self.fc.mes_initial_margin
+            self.maintenance_margin = self.fc.mes_maintenance_margin
+        else:
+            self.initial_margin = self.fc.es_initial_margin
+            self.maintenance_margin = self.fc.es_maintenance_margin
+        self.margin_calls: List[dict] = []
+
+        # 거래소 서킷브레이커
+        self.cb_events: List[dict] = []
+
+        # 롤오버
+        self.roll_events: List[dict] = []
+        self.total_roll_costs = 0.0
+        self._roll_dates = self._compute_roll_dates()
+
+    # ── 롤오버 유틸리티 ──
+
+    def _compute_roll_dates(self) -> set:
+        """백테스트 기간 내 롤 데이트(셋째 금요일 직전 월요일) 집합 반환."""
+        start_dt = datetime.strptime(self.start_date, "%Y%m%d")
+        end_dt = datetime.strptime(self.end_date, "%Y%m%d")
+        roll_dates = set()
+        for year in range(start_dt.year - 1, end_dt.year + 1):
+            for month in [3, 6, 9, 12]:
+                expiry = self._third_friday(year, month)
+                roll_date = expiry - timedelta(days=(expiry.weekday() - 0) % 7)
+                if roll_date >= expiry:
+                    roll_date -= timedelta(days=7)
+                roll_dates.add(roll_date.isoformat())
+        return roll_dates
+
+    @staticmethod
+    def _third_friday(year: int, month: int) -> date_type:
+        """주어진 년/월의 셋째 금요일 계산."""
+        c = calendar.Calendar(firstweekday=calendar.MONDAY)
+        fridays = [
+            d for d in c.itermonthdays2(year, month)
+            if d[0] != 0 and d[1] == calendar.FRIDAY
+        ]
+        return date_type(year, month, fridays[2][0])
+
+    # ── 거래소 서킷브레이커 ──
+
+    def _check_exchange_cb(self, close: float, prev_close: float) -> Optional[str]:
+        """거래소 CB 체크. 발동 시 레벨 문자열 반환."""
+        if not self.fc.exchange_cb_enabled or prev_close <= 0:
+            return None
+        pct_change = (close - prev_close) / prev_close
+        if pct_change <= -self.fc.cb_level3_pct:
+            return "LEVEL3"
+        if pct_change <= -self.fc.cb_level2_pct:
+            return "LEVEL2"
+        if pct_change <= -self.fc.cb_level1_pct:
+            return "LEVEL1"
+        return None
+
     def run(self) -> dict:
         """백테스트 실행. metrics + equity_curve + trades 반환."""
         # 1. 데이터 다운로드 (워밍업 포함)
@@ -136,6 +197,10 @@ class FuturesBacktester:
         total_costs = 0.0
         day_start_equity = equity  # RG1 일일 손실 추적
         prev_date_str = ""
+        rg2_halt_days = 0  # RG2 서킷브레이커 쿨다운 카운터
+        consec_halt_days = 0  # 연속손절 쿨다운 카운터
+        RG2_COOLDOWN = 60  # 60 거래일 후 리셋
+        CONSEC_COOLDOWN = 20  # 연속손절 후 20 거래일 쿨다운
 
         total_bars = len(df_bt)
         for i, (date, row) in enumerate(df_bt.iterrows()):
@@ -153,47 +218,89 @@ class FuturesBacktester:
                 )
                 prev_date_str = date_str
 
+            prev_close = float(df_bt.iloc[max(0, i - 1)]["close"])
+
+            # ── 거래소 서킷브레이커 체크 ──
+            cb_level = self._check_exchange_cb(current_price, prev_close)
+            cb_block_entry = False
+            if cb_level:
+                self.cb_events.append({
+                    "date": date_str,
+                    "level": cb_level,
+                    "pct_change": round((current_price - prev_close) / prev_close * 100, 2),
+                })
+                cb_block_entry = True  # 모든 레벨에서 신규 진입 차단
+
+            # ── 롤오버 비용 처리 ──
+            if date_str in self._roll_dates and position is not None:
+                roll_cost = position.contracts * self.fc.roll_cost_per_contract
+                equity -= roll_cost
+                self.total_roll_costs += roll_cost
+                total_costs += roll_cost
+                self.roll_events.append({
+                    "date": date_str,
+                    "contracts": position.contracts,
+                    "cost": round(roll_cost, 2),
+                })
+
             # 포지션 보유 중 → 청산 체크
             if position is not None:
                 position.holding_days += 1
 
-                price_data = PriceData(
-                    stock_code=self.ticker,
-                    stock_name=self.ticker,
-                    current_price=current_price,
-                    open_price=float(row["open"]),
-                    high_price=float(row["high"]),
-                    low_price=float(row["low"]),
-                    prev_close=float(df_bt.iloc[max(0, i - 1)]["close"]),
-                    volume=int(row.get("volume", 0)),
-                    change_pct=0.0,
-                    timestamp=date_str,
-                )
+                # ── Margin Call 체크 ──
+                unrealized = self._unrealized_pnl(position, current_price)
+                if self.fc.margin_call_enabled:
+                    required_margin = self.maintenance_margin * position.contracts
+                    if (equity + unrealized) < required_margin:
+                        # Margin Call → 강제 청산
+                        if position.direction == "LONG":
+                            pnl_points = current_price - position.entry_price
+                        else:
+                            pnl_points = position.entry_price - current_price
 
-                df_slice = df.loc[:date]
+                        pnl_dollar = pnl_points * position.contracts * self.multiplier
+                        exit_cost = position.contracts * (
+                            self.slippage_per_contract + self.commission_per_contract / 2
+                        )
+                        pnl_dollar -= exit_cost
+                        total_costs += exit_cost
+                        pnl_pct = pnl_points / position.entry_price if position.entry_price > 0 else 0
+                        equity += pnl_dollar
 
-                exit_signals = self.strategy.scan_exit_signals(
-                    positions=[position],
-                    ohlcv_data={self.ticker: df_slice},
-                    current_prices={self.ticker: price_data},
-                )
+                        trades.append({
+                            "entry_date": position.entry_date,
+                            "exit_date": date_str,
+                            "direction": position.direction,
+                            "entry_price": round(position.entry_price, 2),
+                            "exit_price": round(current_price, 2),
+                            "contracts": position.contracts,
+                            "pnl_dollar": round(pnl_dollar, 2),
+                            "pnl_pct": round(pnl_pct * 100, 2),
+                            "holding_days": position.holding_days,
+                            "exit_reason": "MARGIN_CALL",
+                        })
+                        self.margin_calls.append({
+                            "date": date_str,
+                            "equity": round(equity + unrealized, 2),
+                            "required": round(required_margin, 2),
+                        })
+                        self.strategy.record_trade_result(pnl_pct)
+                        self.strategy._position_states.pop(self.ticker, None)
+                        position = None
 
-                if exit_signals:
-                    exit_sig = exit_signals[0]
+                # ── 거래소 CB Level 2/3 → 강제 청산 ──
+                if position is not None and cb_level in ("LEVEL2", "LEVEL3"):
                     if position.direction == "LONG":
                         pnl_points = current_price - position.entry_price
                     else:
                         pnl_points = position.entry_price - current_price
 
                     pnl_dollar = pnl_points * position.contracts * self.multiplier
-
-                    # 퇴출 거래비용
                     exit_cost = position.contracts * (
                         self.slippage_per_contract + self.commission_per_contract / 2
                     )
                     pnl_dollar -= exit_cost
                     total_costs += exit_cost
-
                     pnl_pct = pnl_points / position.entry_price if position.entry_price > 0 else 0
                     equity += pnl_dollar
 
@@ -207,25 +314,104 @@ class FuturesBacktester:
                         "pnl_dollar": round(pnl_dollar, 2),
                         "pnl_pct": round(pnl_pct * 100, 2),
                         "holding_days": position.holding_days,
-                        "exit_reason": exit_sig.exit_reason,
+                        "exit_reason": f"CB_{cb_level}",
                     })
-
-                    # EV/Kelly/연속손절 추적
                     self.strategy.record_trade_result(pnl_pct)
-
                     self.strategy._position_states.pop(self.ticker, None)
                     position = None
+
+                # ── 전략 퇴출 시그널 ──
+                if position is not None:
+                    price_data = PriceData(
+                        stock_code=self.ticker,
+                        stock_name=self.ticker,
+                        current_price=current_price,
+                        open_price=float(row["open"]),
+                        high_price=float(row["high"]),
+                        low_price=float(row["low"]),
+                        prev_close=prev_close,
+                        volume=int(row.get("volume", 0)),
+                        change_pct=0.0,
+                        timestamp=date_str,
+                    )
+
+                    df_slice = df.loc[:date]
+
+                    exit_signals = self.strategy.scan_exit_signals(
+                        positions=[position],
+                        ohlcv_data={self.ticker: df_slice},
+                        current_prices={self.ticker: price_data},
+                    )
+
+                    if exit_signals:
+                        exit_sig = exit_signals[0]
+                        if position.direction == "LONG":
+                            pnl_points = current_price - position.entry_price
+                        else:
+                            pnl_points = position.entry_price - current_price
+
+                        pnl_dollar = pnl_points * position.contracts * self.multiplier
+
+                        exit_cost = position.contracts * (
+                            self.slippage_per_contract + self.commission_per_contract / 2
+                        )
+                        pnl_dollar -= exit_cost
+                        total_costs += exit_cost
+
+                        pnl_pct = pnl_points / position.entry_price if position.entry_price > 0 else 0
+                        equity += pnl_dollar
+
+                        trades.append({
+                            "entry_date": position.entry_date,
+                            "exit_date": date_str,
+                            "direction": position.direction,
+                            "entry_price": round(position.entry_price, 2),
+                            "exit_price": round(current_price, 2),
+                            "contracts": position.contracts,
+                            "pnl_dollar": round(pnl_dollar, 2),
+                            "pnl_pct": round(pnl_pct * 100, 2),
+                            "holding_days": position.holding_days,
+                            "exit_reason": exit_sig.exit_reason,
+                        })
+
+                        self.strategy.record_trade_result(pnl_pct)
+                        self.strategy._position_states.pop(self.ticker, None)
+                        position = None
 
             # 포지션 없음 → 진입 체크 (서킷브레이커 검증)
             if position is None:
                 # RG1: 일일 손실 한도
                 total_value = equity
                 daily_pnl_pct = (total_value - day_start_equity) / day_start_equity if day_start_equity > 0 else 0
-                if daily_pnl_pct <= self.fc.rg1_daily_loss_limit:
-                    pass  # 진입 차단
-                # RG2: MDD 한도
-                elif peak_equity > 0 and (total_value - peak_equity) / peak_equity <= self.fc.rg2_mdd_limit:
-                    pass  # 진입 차단
+
+                # RG2: MDD 한도 (쿨다운 리셋 포함)
+                mdd_breached = peak_equity > 0 and (total_value - peak_equity) / peak_equity <= self.fc.rg2_mdd_limit
+                if mdd_breached:
+                    rg2_halt_days += 1
+                    if rg2_halt_days >= RG2_COOLDOWN:
+                        peak_equity = total_value
+                        rg2_halt_days = 0
+                        mdd_breached = False
+                        self.strategy._trade_history = []
+                else:
+                    rg2_halt_days = 0
+
+                # 연속손절 쿨다운
+                if self.strategy._consecutive_losses >= self.strategy.fc.max_consecutive_losses:
+                    consec_halt_days += 1
+                    if consec_halt_days >= CONSEC_COOLDOWN:
+                        self.strategy._consecutive_losses = 0
+                        consec_halt_days = 0
+                        self.strategy._trade_history = []
+                else:
+                    consec_halt_days = 0
+
+                if cb_block_entry:
+                    pass  # 거래소 CB 차단
+                elif daily_pnl_pct <= self.fc.rg1_daily_loss_limit:
+                    pass  # RG1 차단
+                elif mdd_breached:
+                    pass  # RG2 차단
                 else:
                     df_slice = df.loc[:date]
                     signal = self.strategy.generate_futures_signal(
@@ -236,24 +422,33 @@ class FuturesBacktester:
                     )
 
                     if signal:
-                        # 진입 거래비용
-                        entry_cost = signal.position_size_contracts * (
-                            self.slippage_per_contract + self.commission_per_contract / 2
-                        )
-                        equity -= entry_cost
-                        total_costs += entry_cost
+                        contracts = signal.position_size_contracts
 
-                        position = FuturesPosition(
-                            stock_code=self.ticker,
-                            entry_price=current_price,
-                            direction=signal.direction,
-                            contracts=signal.position_size_contracts,
-                            entry_date=date_str,
-                            stop_loss=signal.stop_loss,
-                            take_profit=signal.take_profit,
-                        )
-                        state = self.strategy._get_position_state(self.ticker)
-                        state.reset_for_entry(signal.direction, current_price)
+                        # ── 증거금 검증 ──
+                        if self.fc.margin_call_enabled:
+                            max_affordable = int(equity // self.initial_margin) if self.initial_margin > 0 else contracts
+                            contracts = min(contracts, max_affordable)
+                            if contracts <= 0:
+                                contracts = 0  # 증거금 부족 → 진입 불가
+
+                        if contracts > 0:
+                            entry_cost = contracts * (
+                                self.slippage_per_contract + self.commission_per_contract / 2
+                            )
+                            equity -= entry_cost
+                            total_costs += entry_cost
+
+                            position = FuturesPosition(
+                                stock_code=self.ticker,
+                                entry_price=current_price,
+                                direction=signal.direction,
+                                contracts=contracts,
+                                entry_date=date_str,
+                                stop_loss=signal.stop_loss,
+                                take_profit=signal.take_profit,
+                            )
+                            state = self.strategy._get_position_state(self.ticker)
+                            state.reset_for_entry(signal.direction, current_price)
 
             # Equity curve 기록
             unrealized = self._unrealized_pnl(position, current_price) if position else 0.0
@@ -261,11 +456,17 @@ class FuturesBacktester:
             peak_equity = max(peak_equity, total_value)
             drawdown = (total_value - peak_equity) / peak_equity if peak_equity > 0 else 0
 
+            margin_used = position.contracts * self.initial_margin if position else 0.0
+            notional = current_price * position.contracts * self.multiplier if position else 0.0
+            eff_leverage = notional / max(total_value, 1) if position else 0.0
+
             equity_curve.append({
                 "date": date_str,
                 "total_value": round(total_value, 2),
                 "equity": round(equity, 2),
                 "drawdown_pct": round(drawdown * 100, 2),
+                "margin_used": round(margin_used, 2),
+                "effective_leverage": round(eff_leverage, 2),
             })
 
         # 미청산 포지션 강제 청산
@@ -305,6 +506,22 @@ class FuturesBacktester:
 
         # 3. Metrics 계산
         metrics = self._calculate_metrics(trades, equity_curve, total_costs)
+
+        # 증거금/CB/롤오버 메트릭 추가
+        metrics["margin_call_count"] = len(self.margin_calls)
+        metrics["cb_event_count"] = len(self.cb_events)
+        metrics["cb_events_detail"] = self.cb_events[:20]  # 최대 20개
+        metrics["roll_count"] = len(self.roll_events)
+        metrics["total_roll_costs"] = round(self.total_roll_costs, 2)
+
+        # 레버리지 통계
+        leverages = [e["effective_leverage"] for e in equity_curve if e["effective_leverage"] > 0]
+        metrics["max_effective_leverage"] = round(max(leverages), 2) if leverages else 0.0
+        margins = [e["margin_used"] for e in equity_curve if e["margin_used"] > 0]
+        equities = [e["total_value"] for i, e in enumerate(equity_curve) if e["margin_used"] > 0]
+        metrics["avg_margin_utilization"] = (
+            round(sum(margins) / sum(equities) * 100, 1) if equities and sum(equities) > 0 else 0.0
+        )
 
         return {
             "ticker": self.ticker,
@@ -539,6 +756,10 @@ class FuturesBacktester:
                 "return_distribution": [], "mdd_distribution": [],
                 "return_percentiles": {"p5": 0, "p25": 0, "p50": 0, "p75": 0, "p95": 0},
             },
+            # 증거금/CB/롤오버
+            "margin_call_count": 0, "max_effective_leverage": 0, "avg_margin_utilization": 0,
+            "cb_event_count": 0, "cb_events_detail": [],
+            "roll_count": 0, "total_roll_costs": 0,
         }
 
     def _empty_result(self) -> dict:

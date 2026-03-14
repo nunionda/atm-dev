@@ -657,3 +657,15 @@ td.dir-short { color: #e74c3c; }
     margin-left: 0;
   }
 }
+
+/* ── Rollover Warning Banner ── */
+.futures-roll-banner {
+  background: rgba(241, 196, 15, 0.12);
+  border: 1px solid rgba(241, 196, 15, 0.3);
+  border-radius: 6px;
+  padding: 8px 14px;
+  margin-bottom: 12px;
+  font-size: 0.82rem;
+  color: #f1c40f;
+  text-align: center;
+}

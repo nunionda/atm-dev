@@ -992,6 +992,14 @@ export interface FuturesBacktestMetrics {
     worst_trade_pct: number;
     exit_reasons: Record<string, number>;
     monte_carlo: FuturesMonteCarloResult;
+    // 증거금/CB/롤오버
+    margin_call_count: number;
+    max_effective_leverage: number;
+    avg_margin_utilization: number;
+    cb_event_count: number;
+    cb_events_detail: { date: string; level: string; pct_change: number }[];
+    roll_count: number;
+    total_roll_costs: number;
 }
 
 export interface FuturesTrade {
@@ -1014,7 +1022,7 @@ export interface FuturesBacktestResult {
     initial_equity: number;
     final_equity: number;
     metrics: FuturesBacktestMetrics;
-    equity_curve: { date: string; total_value: number; equity: number; drawdown_pct: number }[];
+    equity_curve: { date: string; total_value: number; equity: number; drawdown_pct: number; margin_used: number; effective_leverage: number }[];
     trades: FuturesTrade[];
 }
 
@@ -1027,10 +1035,27 @@ export async function fetchFuturesTickers(): Promise<FuturesTickerInfo[]> {
 
 export async function fetchFuturesAnalysis(ticker: string = 'ES=F', period: string = '1y'): Promise<FuturesAnalysis | null> {
     const cacheKey = `futures:${ticker}:${period}`;
+    const isDefaultIndicators = (d: FuturesAnalysis) =>
+        d.indicators.adx === 0 && d.indicators.atr === 0 && d.indicators.rsi === 50;
+
     try {
         const res = await fetch(`${API_BASE_URL}/futures/analyze/${encodeURIComponent(ticker)}?period=${period}`);
         if (!res.ok) return getCached<FuturesAnalysis>(cacheKey);
-        const data = await res.json();
+        const data: FuturesAnalysis = await res.json();
+
+        // yfinance 동시 호출 시 첫 응답이 기본값을 반환할 수 있음 → 1회 재시도
+        if (isDefaultIndicators(data)) {
+            await new Promise(r => setTimeout(r, 2000));
+            const retry = await fetch(`${API_BASE_URL}/futures/analyze/${encodeURIComponent(ticker)}?period=${period}`);
+            if (retry.ok) {
+                const retryData: FuturesAnalysis = await retry.json();
+                if (!isDefaultIndicators(retryData)) {
+                    setCache(cacheKey, retryData);
+                    return retryData;
+                }
+            }
+        }
+
         setCache(cacheKey, data);
         return data;
     } catch {
@@ -1092,6 +1117,42 @@ export async function fetchFuturesBacktestResult(): Promise<FuturesBacktestResul
     try {
         const res = await fetch(`${API_BASE_URL}/futures/backtest/result`);
         if (res.status === 404) return null;
+        if (!res.ok) return null;
+        return res.json();
+    } catch {
+        return null;
+    }
+}
+
+// 롤오버 스케줄
+export interface RollScheduleEntry {
+    contract: string;
+    roll_date: string;
+    expiry: string;
+    next_contract: string;
+}
+
+export async function fetchRollSchedule(year: number = new Date().getFullYear()): Promise<{ schedule: RollScheduleEntry[]; next_roll: { contract: string; roll_date: string; days_remaining: number } | null }> {
+    try {
+        const res = await fetch(`${API_BASE_URL}/futures/roll-schedule?year=${year}`);
+        if (!res.ok) return { schedule: [], next_roll: null };
+        return res.json();
+    } catch {
+        return { schedule: [], next_roll: null };
+    }
+}
+
+// 상품 규격
+export interface ContractSpecs {
+    es: { multiplier: number; tick_size: number; tick_value: number; notional: number; initial_margin: number; maintenance_margin: number };
+    mes: { multiplier: number; tick_size: number; tick_value: number; notional: number; initial_margin: number; maintenance_margin: number };
+    current_session: { name: string; status: string; is_dst: boolean };
+    cost_breakdown: { es_round_trip: number; mes_round_trip: number; cost_pct_of_notional: number };
+}
+
+export async function fetchContractSpecs(): Promise<ContractSpecs | null> {
+    try {
+        const res = await fetch(`${API_BASE_URL}/futures/contract-specs`);
         if (!res.ok) return null;
         return res.json();
     } catch {

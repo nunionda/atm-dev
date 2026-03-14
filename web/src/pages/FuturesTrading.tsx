@@ -5,14 +5,42 @@ import {
   fetchFuturesTickers,
   triggerFuturesBacktest,
   fetchAnalyticsData,
+  fetchRollSchedule,
+  fetchContractSpecs,
   type FuturesAnalysis,
   type FuturesTickerInfo,
   type FuturesBacktestResult,
   type FuturesMonteCarloResult,
+  type RollScheduleEntry,
+  type ContractSpecs,
 } from '../lib/api';
 import { EquityCurve } from '../components/performance/EquityCurve';
 import { ChartSkeleton, ScoreCardsSkeleton } from '../components/common/Skeleton';
 import './FuturesTrading.css';
+
+// ══════════════════════════════════════════
+// Currency Helper — 한국 지수는 ₩, 나머지는 $
+// ══════════════════════════════════════════
+
+const KRW_TICKERS = new Set(['^KS200', '^KQ11', '^KQ150']);
+
+function getTickerCurrency(ticker: string): { symbol: string; locale: string; code: string } {
+  if (KRW_TICKERS.has(ticker)) {
+    return { symbol: '₩', locale: 'ko-KR', code: 'KRW' };
+  }
+  return { symbol: '$', locale: 'en-US', code: 'USD' };
+}
+
+function formatPrice(value: number, ticker: string, decimals = 2): string {
+  const { symbol, locale } = getTickerCurrency(ticker);
+  return `${symbol}${value.toLocaleString(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
+}
+
+function formatPnL(value: number, ticker: string): string {
+  const { symbol, locale } = getTickerCurrency(ticker);
+  if (value < 0) return `-${symbol}${Math.abs(value).toLocaleString(locale)}`;
+  return `${symbol}${value.toLocaleString(locale)}`;
+}
 
 // ══════════════════════════════════════════
 // Layer Score Bar
@@ -339,24 +367,38 @@ export function FuturesTrading() {
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
 
-  // Backtest state
+  // Backtest state — default: 2년 전 ~ 오늘
   const [btOpen, setBtOpen] = useState(false);
-  const [btStartDate, setBtStartDate] = useState('20240101');
-  const [btEndDate, setBtEndDate] = useState('20260101');
-  const [btEquity, setBtEquity] = useState(100000);
+  const [btStartDate, setBtStartDate] = useState(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 2);
+    return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [btEndDate, setBtEndDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [btEquity, setBtEquity] = useState(() => 100000);
   const [btMicro, setBtMicro] = useState(false);
   const [btRunning, setBtRunning] = useState(false);
   const [btResult, setBtResult] = useState<FuturesBacktestResult | null>(null);
   const [btError, setBtError] = useState<string | null>(null);
   const [btElapsed, setBtElapsed] = useState(0);
+
+  // 롤오버 + 상품 규격
+  const [nextRoll, setNextRoll] = useState<{ contract: string; roll_date: string; days_remaining: number } | null>(null);
+  const [contractSpecs, setContractSpecs] = useState<ContractSpecs | null>(null);
+  const [specsOpen, setSpecsOpen] = useState(false);
   const btTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Load tickers on mount
   useEffect(() => {
     fetchFuturesTickers().then(t => setTickers(t));
+    fetchRollSchedule().then(r => setNextRoll(r.next_roll));
+    fetchContractSpecs().then(s => setContractSpecs(s));
   }, []);
 
-  // Load analysis
+  // Load analysis — 종목 전환 시 이전 데이터 즉시 클리어
   const loadAnalysis = useCallback(async () => {
     setLoading(true);
     try {
@@ -367,7 +409,10 @@ export function FuturesTrading() {
     }
   }, [ticker]);
 
-  useEffect(() => { loadAnalysis(); }, [loadAnalysis]);
+  useEffect(() => {
+    setAnalysis(null);  // 이전 종목 데이터 클리어
+    loadAnalysis();
+  }, [loadAnalysis]);
 
   // Auto-refresh
   useEffect(() => {
@@ -459,6 +504,62 @@ export function FuturesTrading() {
         </div>
       </div>
 
+      {/* ── Rollover Warning Banner ── */}
+      {nextRoll && nextRoll.days_remaining <= 7 && (
+        <div className="futures-roll-banner">
+          Roll Approaching: {nextRoll.contract} on {nextRoll.roll_date} (D-{nextRoll.days_remaining})
+        </div>
+      )}
+
+      {/* ── Contract Specs Panel ── */}
+      <div className="futures-panel" style={{ marginBottom: 12 }}>
+        <div
+          className="backtest-toggle"
+          onClick={() => setSpecsOpen(!specsOpen)}
+          style={{ cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 8 }}
+        >
+          <span style={{ transform: specsOpen ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s', display: 'inline-block' }}>▶</span>
+          <strong>Contract Specifications</strong>
+          {contractSpecs?.current_session && (
+            <span style={{
+              marginLeft: 'auto',
+              fontSize: '0.75rem',
+              padding: '2px 8px',
+              borderRadius: 4,
+              background: contractSpecs.current_session.status === 'RTH' ? 'rgba(46,204,113,0.2)' :
+                          contractSpecs.current_session.status === 'HALT' ? 'rgba(231,76,60,0.2)' : 'rgba(241,196,15,0.2)',
+              color: contractSpecs.current_session.status === 'RTH' ? '#2ecc71' :
+                     contractSpecs.current_session.status === 'HALT' ? '#e74c3c' : '#f1c40f',
+            }}>
+              {contractSpecs.current_session.name} {contractSpecs.current_session.is_dst ? '(DST)' : ''}
+            </span>
+          )}
+        </div>
+        {specsOpen && contractSpecs && (
+          <div style={{ marginTop: 12 }}>
+            <table className="futures-trade-table" style={{ fontSize: '0.78rem' }}>
+              <thead>
+                <tr>
+                  <th>Spec</th><th>E-mini (ES)</th><th>Micro (MES)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>Multiplier</td><td>${contractSpecs.es.multiplier}/pt</td><td>${contractSpecs.mes.multiplier}/pt</td></tr>
+                <tr><td>Tick Size</td><td>{contractSpecs.es.tick_size} pts</td><td>{contractSpecs.mes.tick_size} pts</td></tr>
+                <tr><td>Tick Value</td><td>${contractSpecs.es.tick_value}</td><td>${contractSpecs.mes.tick_value}</td></tr>
+                <tr><td>Notional</td><td>${contractSpecs.es.notional.toLocaleString()}</td><td>${contractSpecs.mes.notional.toLocaleString()}</td></tr>
+                <tr><td>Initial Margin</td><td>${contractSpecs.es.initial_margin.toLocaleString()}</td><td>${contractSpecs.mes.initial_margin.toLocaleString()}</td></tr>
+                <tr><td>Maint. Margin</td><td>${contractSpecs.es.maintenance_margin.toLocaleString()}</td><td>${contractSpecs.mes.maintenance_margin.toLocaleString()}</td></tr>
+                <tr><td>RT Cost</td><td>${contractSpecs.cost_breakdown.es_round_trip.toFixed(2)}</td><td>${contractSpecs.cost_breakdown.mes_round_trip.toFixed(2)}</td></tr>
+              </tbody>
+            </table>
+            <div style={{ fontSize: '0.72rem', color: '#888', marginTop: 6 }}>
+              Cost as % of notional: ~{(contractSpecs.cost_breakdown.cost_pct_of_notional * 100).toFixed(4)}% round-trip
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* ── Main Grid: Score + Signal ── */}
       {analysis ? (
         <div className="futures-main-grid">
@@ -522,13 +623,13 @@ export function FuturesTrading() {
               </div>
               <div className="signal-card-row">
                 <span className="label">Entry Price</span>
-                <span className="value">{analysis.entry_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                <span className="value">{formatPrice(analysis.entry_price, ticker)}</span>
               </div>
               <div className="signal-card-row">
                 <span className="label">Stop Loss</span>
                 {analysis.direction !== 'NEUTRAL' && analysis.indicators.atr > 0 ? (
                   <span className="value loss">
-                    {analysis.stop_loss.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {formatPrice(analysis.stop_loss, ticker)}
                     {' '}({((analysis.stop_loss - analysis.entry_price) / analysis.entry_price * 100).toFixed(1)}%)
                   </span>
                 ) : (
@@ -539,7 +640,7 @@ export function FuturesTrading() {
                 <span className="label">Take Profit</span>
                 {analysis.direction !== 'NEUTRAL' && analysis.indicators.atr > 0 ? (
                   <span className="value profit">
-                    {analysis.take_profit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {formatPrice(analysis.take_profit, ticker)}
                     {' '}(+{((analysis.take_profit - analysis.entry_price) / analysis.entry_price * 100).toFixed(1)}%)
                   </span>
                 ) : (
@@ -633,7 +734,7 @@ export function FuturesTrading() {
                 <input value={btEndDate} onChange={e => setBtEndDate(e.target.value)} placeholder="YYYYMMDD" />
               </div>
               <div className="backtest-field">
-                <label>Equity ($)</label>
+                <label>Equity ({getTickerCurrency(ticker).symbol})</label>
                 <input type="number" value={btEquity} onChange={e => setBtEquity(Number(e.target.value))} />
               </div>
               <div className="backtest-field">
@@ -653,6 +754,13 @@ export function FuturesTrading() {
 
             {btResult && (
               <>
+                {/* Actual date range from equity curve */}
+                {btResult.equity_curve.length > 0 && (
+                  <div style={{ fontSize: '0.8rem', color: '#888', marginBottom: 8 }}>
+                    Data Range: {btResult.equity_curve[0].date} ~ {btResult.equity_curve[btResult.equity_curve.length - 1].date}
+                    {' '}({btResult.equity_curve.length} trading days)
+                  </div>
+                )}
                 {/* Metrics */}
                 <div className="backtest-metrics-grid">
                   <MetricCard label="Return" value={`${btResult.metrics.total_return_pct.toFixed(1)}%`} colorize />
@@ -667,13 +775,20 @@ export function FuturesTrading() {
                   <MetricCard label="Profit Factor" value={btResult.metrics.profit_factor.toFixed(2)} />
                   <MetricCard label="Avg R:R" value={btResult.metrics.avg_rr.toFixed(2)} />
                   <MetricCard label="Long / Short" value={`${btResult.metrics.long_trades} / ${btResult.metrics.short_trades}`} />
-                  <MetricCard label="Total P&L" value={`$${btResult.metrics.total_pnl.toLocaleString()}`} colorize />
-                  <MetricCard label="Costs" value={`$${btResult.metrics.total_costs?.toLocaleString() ?? 0}`} />
+                  <MetricCard label="Total P&L" value={formatPnL(btResult.metrics.total_pnl, ticker)} colorize />
+                  <MetricCard label="Costs" value={formatPnL(btResult.metrics.total_costs ?? 0, ticker)} />
                   <MetricCard label="Best Trade" value={`${btResult.metrics.best_trade_pct?.toFixed(1) ?? 0}%`} colorize />
                   <MetricCard label="Worst Trade" value={`${btResult.metrics.worst_trade_pct?.toFixed(1) ?? 0}%`} colorize />
                   <MetricCard label="Max W Streak" value={String(btResult.metrics.max_consecutive_wins ?? 0)} />
                   <MetricCard label="Max L Streak" value={String(btResult.metrics.max_consecutive_losses ?? 0)} />
                   <MetricCard label="Avg Hold" value={`${btResult.metrics.avg_holding_days}d`} />
+                  {/* 증거금/CB/롤오버 메트릭 */}
+                  <MetricCard label="Margin Calls" value={String(btResult.metrics.margin_call_count ?? 0)} />
+                  <MetricCard label="Max Leverage" value={`${(btResult.metrics.max_effective_leverage ?? 0).toFixed(1)}x`} />
+                  <MetricCard label="Margin Util" value={`${(btResult.metrics.avg_margin_utilization ?? 0).toFixed(1)}%`} />
+                  <MetricCard label="CB Events" value={String(btResult.metrics.cb_event_count ?? 0)} />
+                  <MetricCard label="Rollovers" value={String(btResult.metrics.roll_count ?? 0)} />
+                  <MetricCard label="Roll Costs" value={formatPnL(btResult.metrics.total_roll_costs ?? 0, ticker)} />
                 </div>
 
                 {/* Equity Curve (dual: equity + drawdown) */}
@@ -717,8 +832,8 @@ export function FuturesTrading() {
                           <th>Entry</th>
                           <th>Exit</th>
                           <th>Dir</th>
-                          <th>Entry $</th>
-                          <th>Exit $</th>
+                          <th>Entry {getTickerCurrency(ticker).symbol}</th>
+                          <th>Exit {getTickerCurrency(ticker).symbol}</th>
                           <th>Contracts</th>
                           <th>P&L</th>
                           <th>P&L %</th>
@@ -732,11 +847,11 @@ export function FuturesTrading() {
                             <td>{t.entry_date}</td>
                             <td>{t.exit_date}</td>
                             <td className={t.direction === 'LONG' ? 'dir-long' : 'dir-short'}>{t.direction}</td>
-                            <td>{t.entry_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                            <td>{t.exit_price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td>{formatPrice(t.entry_price, ticker)}</td>
+                            <td>{formatPrice(t.exit_price, ticker)}</td>
                             <td>{t.contracts}</td>
                             <td style={{ color: t.pnl_dollar >= 0 ? '#2ecc71' : '#e74c3c' }}>
-                              ${t.pnl_dollar.toLocaleString()}
+                              {formatPnL(t.pnl_dollar, ticker)}
                             </td>
                             <td style={{ color: t.pnl_pct >= 0 ? '#2ecc71' : '#e74c3c' }}>
                               {t.pnl_pct.toFixed(1)}%
