@@ -960,6 +960,9 @@ export interface FuturesMonteCarloResult {
     worst_mdd: number;
     median_return: number;
     bankruptcy_prob: number;
+    return_distribution: { bin: number; count: number }[];
+    mdd_distribution: { bin: number; count: number }[];
+    return_percentiles: { p5: number; p25: number; p50: number; p75: number; p95: number };
 }
 
 export interface FuturesBacktestMetrics {
@@ -1057,12 +1060,16 @@ export async function triggerFuturesBacktest(
     endDate: string,
     equity: number = 100000,
     isMicro: boolean = false,
+    overrides?: { entry_threshold?: number; sl_hard_pct?: number; max_holding_days?: number },
 ): Promise<FuturesBacktestResult | null> {
     try {
         const params = new URLSearchParams({
             ticker, start_date: startDate, end_date: endDate,
             equity: String(equity), is_micro: String(isMicro),
         });
+        if (overrides?.entry_threshold != null) params.set('entry_threshold', String(overrides.entry_threshold));
+        if (overrides?.sl_hard_pct != null) params.set('sl_hard_pct', String(overrides.sl_hard_pct));
+        if (overrides?.max_holding_days != null) params.set('max_holding_days', String(overrides.max_holding_days));
         const res = await fetch(`${API_BASE_URL}/futures/backtest?${params}`, { method: 'POST' });
         if (!res.ok) return null;
         return res.json();
@@ -1071,13 +1078,13 @@ export async function triggerFuturesBacktest(
     }
 }
 
-export async function fetchFuturesBacktestStatus(): Promise<{ in_progress: boolean; has_result: boolean }> {
+export async function fetchFuturesBacktestStatus(): Promise<{ in_progress: boolean; has_result: boolean; progress: number }> {
     try {
         const res = await fetch(`${API_BASE_URL}/futures/backtest/status`);
-        if (!res.ok) return { in_progress: false, has_result: false };
+        if (!res.ok) return { in_progress: false, has_result: false, progress: 0 };
         return res.json();
     } catch {
-        return { in_progress: false, has_result: false };
+        return { in_progress: false, has_result: false, progress: 0 };
     }
 }
 

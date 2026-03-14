@@ -74,6 +74,7 @@ CACHE_TTL = 300  # 5분 (리프레시 최적화)
 
 _backtest_in_progress = False
 _backtest_cache: Optional[dict] = None
+_backtest_progress: float = 0.0
 
 VALID_PERIODS = {"1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "max", "5d", "1d"}
 VALID_TICKER_SET = {t["ticker"] for t in FUTURES_TICKERS}
@@ -256,8 +257,12 @@ async def analyze_futures(
             "last_updated": curr.name.strftime("%Y-%m-%d") if hasattr(curr.name, "strftime") else str(curr.name),
         }
 
-        _analysis_cache[cache_key] = result
-        _analysis_cache_ts[cache_key] = now
+        # 지표가 전부 기본값이면 캐시 저장 안 함 (yfinance 초기 로딩 실패 방지)
+        ind = result["indicators"]
+        has_real_data = ind["adx"] != 0 or ind["atr"] != 0 or ind["rsi"] != 50.0
+        if has_real_data:
+            _analysis_cache[cache_key] = result
+            _analysis_cache_ts[cache_key] = now
         return JSONResponse(
             content=result,
             headers={"Cache-Control": "no-cache"},
@@ -397,9 +402,11 @@ async def run_futures_backtest(
         raise HTTPException(status_code=400, detail="max_holding_days must be 1-252")
 
     _backtest_in_progress = True
+    global _backtest_progress
+    _backtest_progress = 0.0
 
     def _run_sync():
-        global _backtest_cache, _backtest_in_progress
+        global _backtest_cache, _backtest_in_progress, _backtest_progress
         try:
             import copy
             config = copy.deepcopy(_get_config())
@@ -414,6 +421,10 @@ async def run_futures_backtest(
             if max_holding_days is not None:
                 config.sp500_futures.max_holding_days = max_holding_days
 
+            def _on_progress(pct: float):
+                global _backtest_progress
+                _backtest_progress = pct
+
             bt = FuturesBacktester(
                 config=config,
                 ticker=ticker,
@@ -421,9 +432,11 @@ async def run_futures_backtest(
                 end_date=end_date,
                 initial_equity=equity,
                 is_micro=is_micro,
+                progress_callback=_on_progress,
             )
             result = bt.run()
             _backtest_cache = result
+            _backtest_progress = 100.0
             return result
         finally:
             _backtest_in_progress = False
@@ -458,6 +471,7 @@ async def futures_backtest_status():
     return {
         "in_progress": _backtest_in_progress,
         "has_result": _backtest_cache is not None,
+        "progress": round(_backtest_progress, 1),
     }
 
 

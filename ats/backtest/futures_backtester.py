@@ -16,7 +16,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -62,6 +62,7 @@ class FuturesBacktester:
         end_date: str = "20260101",
         initial_equity: float = 100000.0,
         is_micro: bool = False,
+        progress_callback: Optional[Callable[[float], None]] = None,
     ):
         # is_micro 설정 반영
         if is_micro:
@@ -76,6 +77,7 @@ class FuturesBacktester:
         self.initial_equity = initial_equity
         self.is_micro = is_micro
         self.multiplier = 5.0 if is_micro else config.sp500_futures.contract_multiplier
+        self.progress_callback = progress_callback
 
         # 거래비용
         if is_micro:
@@ -135,9 +137,14 @@ class FuturesBacktester:
         day_start_equity = equity  # RG1 일일 손실 추적
         prev_date_str = ""
 
+        total_bars = len(df_bt)
         for i, (date, row) in enumerate(df_bt.iterrows()):
             current_price = float(row["close"])
             date_str = date.strftime("%Y-%m-%d") if hasattr(date, "strftime") else str(date)
+
+            # 진행률 보고 (50봉마다)
+            if self.progress_callback and i % 50 == 0:
+                self.progress_callback(i / total_bars * 100)
 
             # 새로운 거래일 → 일일 시작 에쿼티 갱신
             if date_str != prev_date_str:
@@ -437,8 +444,13 @@ class FuturesBacktester:
 
     def _run_monte_carlo(self, daily_returns: pd.Series, n_simulations: int = 1000, n_days: int = 252) -> dict:
         """Monte Carlo 부트스트랩 스트레스 테스트."""
+        empty_mc = {
+            "var_95": 0, "cvar_99": 0, "worst_mdd": 0, "median_return": 0, "bankruptcy_prob": 0,
+            "return_distribution": [], "mdd_distribution": [],
+            "return_percentiles": {"p5": 0, "p25": 0, "p50": 0, "p75": 0, "p95": 0},
+        }
         if len(daily_returns) < 20:
-            return {"var_95": 0, "cvar_99": 0, "worst_mdd": 0, "median_return": 0, "bankruptcy_prob": 0}
+            return empty_mc
 
         returns_list = daily_returns.tolist()
         final_returns = []
@@ -470,12 +482,34 @@ class FuturesBacktester:
         cvar_99_count = max(1, int(n_simulations * 0.01))
         cvar_99 = np.mean(final_returns[:cvar_99_count])
 
+        # 분포 히스토그램 데이터 (20 bins)
+        final_arr = np.array(final_returns) * 100
+        mdd_arr = np.array(max_drawdowns) * 100
+
+        ret_counts, ret_edges = np.histogram(final_arr, bins=20)
+        mdd_counts, mdd_edges = np.histogram(mdd_arr, bins=20)
+
         return {
             "var_95": round(abs(final_returns[var_95_idx]) * 100, 2),
             "cvar_99": round(abs(cvar_99) * 100, 2),
             "worst_mdd": round(abs(min(max_drawdowns)) * 100, 2),
             "median_return": round(np.median(final_returns) * 100, 2),
             "bankruptcy_prob": round(bankrupt_count / n_simulations * 100, 2),
+            "return_distribution": [
+                {"bin": round(float(ret_edges[i]), 1), "count": int(ret_counts[i])}
+                for i in range(len(ret_counts))
+            ],
+            "mdd_distribution": [
+                {"bin": round(float(mdd_edges[i]), 1), "count": int(mdd_counts[i])}
+                for i in range(len(mdd_counts))
+            ],
+            "return_percentiles": {
+                "p5": round(float(np.percentile(final_arr, 5)), 2),
+                "p25": round(float(np.percentile(final_arr, 25)), 2),
+                "p50": round(float(np.percentile(final_arr, 50)), 2),
+                "p75": round(float(np.percentile(final_arr, 75)), 2),
+                "p95": round(float(np.percentile(final_arr, 95)), 2),
+            },
         }
 
     def _count_exit_reasons(self, trades: List[dict]) -> dict:
@@ -500,7 +534,11 @@ class FuturesBacktester:
             "max_consecutive_wins": 0, "max_consecutive_losses": 0,
             "best_trade_pct": 0, "worst_trade_pct": 0,
             "exit_reasons": {},
-            "monte_carlo": {"var_95": 0, "cvar_99": 0, "worst_mdd": 0, "median_return": 0, "bankruptcy_prob": 0},
+            "monte_carlo": {
+                "var_95": 0, "cvar_99": 0, "worst_mdd": 0, "median_return": 0, "bankruptcy_prob": 0,
+                "return_distribution": [], "mdd_distribution": [],
+                "return_percentiles": {"p5": 0, "p25": 0, "p50": 0, "p75": 0, "p95": 0},
+            },
         }
 
     def _empty_result(self) -> dict:

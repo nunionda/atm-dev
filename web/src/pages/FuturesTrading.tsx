@@ -8,7 +8,9 @@ import {
   type FuturesAnalysis,
   type FuturesTickerInfo,
   type FuturesBacktestResult,
+  type FuturesMonteCarloResult,
 } from '../lib/api';
+import { EquityCurve } from '../components/performance/EquityCurve';
 import { ChartSkeleton, ScoreCardsSkeleton } from '../components/common/Skeleton';
 import './FuturesTrading.css';
 
@@ -97,78 +99,93 @@ function MetricCard({ label, value, colorize }: { label: string; value: string; 
 }
 
 // ══════════════════════════════════════════
-// Equity Curve Chart
+// Monte Carlo Distribution Histogram
 // ══════════════════════════════════════════
 
-function EquityCurveChart({ data }: { data: { date: string; total_value: number; drawdown_pct: number }[] }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
+function MonteCarloDistribution({ mc }: { mc: FuturesMonteCarloResult }) {
+  if (!mc.return_distribution?.length && !mc.mdd_distribution?.length) return null;
 
-  useEffect(() => {
-    if (!containerRef.current || !data.length) return;
-
-    if (chartRef.current) {
-      chartRef.current.remove();
-    }
-
-    const chart = createChart(containerRef.current, {
-      width: containerRef.current.clientWidth,
-      height: 250,
-      layout: {
-        background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#888',
-      },
-      grid: {
-        vertLines: { color: 'rgba(255,255,255,0.03)' },
-        horzLines: { color: 'rgba(255,255,255,0.03)' },
-      },
-      rightPriceScale: { borderColor: '#333' },
-      timeScale: { borderColor: '#333' },
-    });
-    chartRef.current = chart;
-
-    const areaSeries = chart.addAreaSeries({
-      lineColor: '#3498db',
-      topColor: 'rgba(52, 152, 219, 0.3)',
-      bottomColor: 'rgba(52, 152, 219, 0.0)',
-      lineWidth: 2,
-    });
-
-    const seen = new Set<string>();
-    const dedupedData = data
-      .filter(d => {
-        // 날짜 부분만 추출 (시간 포함 시 중복 발생 방지)
-        const dateKey = d.date.split(' ')[0].split('T')[0];
-        if (seen.has(dateKey)) return false;
-        seen.add(dateKey);
-        return true;
-      })
-      .sort((a, b) => a.date.split(' ')[0].localeCompare(b.date.split(' ')[0]));
-
-    areaSeries.setData(
-      dedupedData.map(d => ({
-        time: d.date.split(' ')[0].split('T')[0] as Time,
-        value: d.total_value,
-      }))
+  const renderHistogram = (
+    data: { bin: number; count: number }[],
+    title: string,
+    color: string,
+    percentiles?: { p5: number; p25: number; p50: number; p75: number; p95: number },
+  ) => {
+    if (!data.length) return null;
+    const maxCount = Math.max(...data.map(d => d.count), 1);
+    return (
+      <div className="mc-dist-panel">
+        <div className="mc-dist-title">{title}</div>
+        {percentiles && (
+          <div className="mc-percentiles">
+            <span>P5: {percentiles.p5.toFixed(1)}%</span>
+            <span>P25: {percentiles.p25.toFixed(1)}%</span>
+            <span className="mc-p-median">P50: {percentiles.p50.toFixed(1)}%</span>
+            <span>P75: {percentiles.p75.toFixed(1)}%</span>
+            <span>P95: {percentiles.p95.toFixed(1)}%</span>
+          </div>
+        )}
+        <div className="mc-histogram">
+          {data.map((d, i) => (
+            <div key={i} className="mc-bar-col" title={`${d.bin.toFixed(1)}%: ${d.count} sims`}>
+              <div
+                className="mc-bar"
+                style={{
+                  height: `${(d.count / maxCount) * 100}%`,
+                  background: color,
+                }}
+              />
+              {i % 4 === 0 && <span className="mc-bin-label">{d.bin.toFixed(0)}</span>}
+            </div>
+          ))}
+        </div>
+      </div>
     );
+  };
 
-    chart.timeScale().fitContent();
+  return (
+    <div className="mc-distribution">
+      {renderHistogram(mc.return_distribution, 'Return Distribution (1000 sims, 252 days)', 'rgba(52, 152, 219, 0.7)', mc.return_percentiles)}
+      {renderHistogram(mc.mdd_distribution, 'Max Drawdown Distribution', 'rgba(231, 76, 60, 0.7)')}
+    </div>
+  );
+}
 
-    const ro = new ResizeObserver(() => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    });
-    ro.observe(containerRef.current);
+// ══════════════════════════════════════════
+// Exit Reason Breakdown
+// ══════════════════════════════════════════
 
-    return () => {
-      ro.disconnect();
-      chart.remove();
-      chartRef.current = null;
-    };
-  }, [data]);
+function ExitReasonBreakdown({ reasons }: { reasons: Record<string, number> }) {
+  const entries = Object.entries(reasons).sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return null;
+  const total = entries.reduce((s, [, v]) => s + v, 0);
+  const maxCount = Math.max(...entries.map(([, v]) => v), 1);
 
-  return <div ref={containerRef} className="equity-curve-container" />;
+  const reasonLabels: Record<string, string> = {
+    ES1: 'Hard Stop (-5%)',
+    ES_ATR_SL: 'ATR Stop Loss',
+    ES_ATR_TP: 'ATR Take Profit',
+    ES_CHANDELIER: 'Chandelier Exit',
+    ES3: 'Trailing Stop',
+    ES_CHOCH: 'CHoCH Reversal',
+    ES5: 'Max Holding Days',
+    FORCED_CLOSE: 'End of Period',
+  };
+
+  return (
+    <div className="exit-breakdown">
+      <div className="exit-breakdown-title">EXIT REASONS</div>
+      {entries.map(([reason, count]) => (
+        <div key={reason} className="exit-row">
+          <span className="exit-label">{reasonLabels[reason] || reason}</span>
+          <div className="exit-bar-wrap">
+            <div className="exit-bar" style={{ width: `${(count / maxCount) * 100}%` }} />
+          </div>
+          <span className="exit-count">{count} ({(count / total * 100).toFixed(0)}%)</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // ══════════════════════════════════════════
@@ -330,6 +347,9 @@ export function FuturesTrading() {
   const [btMicro, setBtMicro] = useState(false);
   const [btRunning, setBtRunning] = useState(false);
   const [btResult, setBtResult] = useState<FuturesBacktestResult | null>(null);
+  const [btError, setBtError] = useState<string | null>(null);
+  const [btElapsed, setBtElapsed] = useState(0);
+  const btTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Load tickers on mount
   useEffect(() => {
@@ -356,15 +376,36 @@ export function FuturesTrading() {
     return () => clearInterval(id);
   }, [autoRefresh, loadAnalysis]);
 
+  // Preset date helpers
+  const setPreset = (years: number) => {
+    const now = new Date();
+    const end = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+    const start = new Date(now);
+    start.setFullYear(start.getFullYear() - years);
+    const startStr = `${start.getFullYear()}${String(start.getMonth() + 1).padStart(2, '0')}${String(start.getDate()).padStart(2, '0')}`;
+    setBtStartDate(startStr);
+    setBtEndDate(end);
+  };
+
   // Run backtest
   const runBacktest = async () => {
     setBtRunning(true);
     setBtResult(null);
+    setBtError(null);
+    setBtElapsed(0);
+    btTimerRef.current = setInterval(() => setBtElapsed(s => s + 1), 1000);
     try {
       const result = await triggerFuturesBacktest(ticker, btStartDate, btEndDate, btEquity, btMicro);
-      if (result) setBtResult(result);
+      if (result) {
+        setBtResult(result);
+      } else {
+        setBtError('Backtest returned no result');
+      }
+    } catch (e: unknown) {
+      setBtError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
       setBtRunning(false);
+      if (btTimerRef.current) { clearInterval(btTimerRef.current); btTimerRef.current = null; }
     }
   };
 
@@ -485,21 +526,33 @@ export function FuturesTrading() {
               </div>
               <div className="signal-card-row">
                 <span className="label">Stop Loss</span>
-                <span className="value loss">
-                  {analysis.stop_loss.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  {' '}({((analysis.stop_loss - analysis.entry_price) / analysis.entry_price * 100).toFixed(1)}%)
-                </span>
+                {analysis.direction !== 'NEUTRAL' && analysis.indicators.atr > 0 ? (
+                  <span className="value loss">
+                    {analysis.stop_loss.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {' '}({((analysis.stop_loss - analysis.entry_price) / analysis.entry_price * 100).toFixed(1)}%)
+                  </span>
+                ) : (
+                  <span className="value muted">—</span>
+                )}
               </div>
               <div className="signal-card-row">
                 <span className="label">Take Profit</span>
-                <span className="value profit">
-                  {analysis.take_profit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  {' '}(+{((analysis.take_profit - analysis.entry_price) / analysis.entry_price * 100).toFixed(1)}%)
-                </span>
+                {analysis.direction !== 'NEUTRAL' && analysis.indicators.atr > 0 ? (
+                  <span className="value profit">
+                    {analysis.take_profit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {' '}(+{((analysis.take_profit - analysis.entry_price) / analysis.entry_price * 100).toFixed(1)}%)
+                  </span>
+                ) : (
+                  <span className="value muted">—</span>
+                )}
               </div>
               <div className="signal-card-row">
                 <span className="label">R:R Ratio</span>
-                <span className="value">{analysis.risk_reward_ratio.toFixed(2)} : 1</span>
+                <span className="value">
+                  {analysis.direction !== 'NEUTRAL' && analysis.indicators.atr > 0
+                    ? `${analysis.risk_reward_ratio.toFixed(2)} : 1`
+                    : '—'}
+                </span>
               </div>
               <div className="signal-card-row">
                 <span className="label">Contracts</span>
@@ -563,6 +616,13 @@ export function FuturesTrading() {
 
         {btOpen && (
           <div className="backtest-content">
+            {/* Preset buttons */}
+            <div className="bt-presets">
+              {[1, 2, 3, 5].map(y => (
+                <button key={y} className="bt-preset-btn" onClick={() => setPreset(y)}>{y}Y</button>
+              ))}
+            </div>
+
             <div className="backtest-form">
               <div className="backtest-field">
                 <label>Start Date</label>
@@ -583,9 +643,13 @@ export function FuturesTrading() {
                 </label>
               </div>
               <button className="backtest-run-btn" onClick={runBacktest} disabled={btRunning}>
-                {btRunning ? 'Running...' : 'Run Backtest'}
+                {btRunning ? `Running…${btElapsed > 0 ? ` (${btElapsed}s)` : ''}` : 'Run Backtest'}
               </button>
             </div>
+
+            {btError && (
+              <div className="bt-error">{btError}</div>
+            )}
 
             {btResult && (
               <>
@@ -612,8 +676,25 @@ export function FuturesTrading() {
                   <MetricCard label="Avg Hold" value={`${btResult.metrics.avg_holding_days}d`} />
                 </div>
 
-                {/* Monte Carlo */}
-                {btResult.metrics.monte_carlo && btResult.metrics.monte_carlo.var_95 > 0 && (
+                {/* Equity Curve (dual: equity + drawdown) */}
+                {btResult.equity_curve.length > 0 && (
+                  <EquityCurve
+                    data={btResult.equity_curve.map(e => ({
+                      date: e.date.split(' ')[0].split('T')[0],
+                      equity: e.total_value,
+                      drawdown_pct: e.drawdown_pct,
+                    }))}
+                    height={280}
+                  />
+                )}
+
+                {/* Exit Reasons */}
+                {btResult.metrics.exit_reasons && Object.keys(btResult.metrics.exit_reasons).length > 0 && (
+                  <ExitReasonBreakdown reasons={btResult.metrics.exit_reasons} />
+                )}
+
+                {/* Monte Carlo Summary */}
+                {btResult.metrics.monte_carlo && btResult.metrics.total_trades > 0 && (
                   <div className="monte-carlo-section">
                     <h4 style={{ color: 'var(--text-secondary)', marginBottom: 8, fontSize: 13 }}>MONTE CARLO STRESS TEST (1000 sims)</h4>
                     <div className="backtest-metrics-grid">
@@ -623,12 +704,8 @@ export function FuturesTrading() {
                       <MetricCard label="Median Return" value={`${btResult.metrics.monte_carlo.median_return.toFixed(1)}%`} colorize />
                       <MetricCard label="Bankruptcy" value={`${btResult.metrics.monte_carlo.bankruptcy_prob.toFixed(1)}%`} />
                     </div>
+                    <MonteCarloDistribution mc={btResult.metrics.monte_carlo} />
                   </div>
-                )}
-
-                {/* Equity Curve */}
-                {btResult.equity_curve.length > 0 && (
-                  <EquityCurveChart data={btResult.equity_curve} />
                 )}
 
                 {/* Trade Table */}
