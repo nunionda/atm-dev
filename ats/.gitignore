@@ -21,18 +21,6 @@ venv/
 *.swp
 *.swo
 
-# Claude Code (로컬 전용 설정만 제외)
-.claude/settings.local.json
-.claude/launch.json
-
-# 서버 PID 파일
-.pids/
-
-# Node
-node_modules/
-dist/
-
 # OS
 .DS_Store
 Thumbs.db
-temp.json
