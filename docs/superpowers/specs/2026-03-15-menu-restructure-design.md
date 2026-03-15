@@ -33,7 +33,8 @@
 
 - 8개 → 3개 메인 메뉴로 축소
 - Theory는 우측 아이콘(📖)으로 이동 (보조 메뉴)
-- 각 메뉴는 hover/click 시 드롭다운 표시
+- 각 메뉴 hover 시 드롭다운 표시 (데스크톱), 모바일은 hamburger + accordion
+- Active state: 현재 URL이 그룹 prefix로 시작하면 해당 그룹 하이라이트 (e.g., `/signals/stocks` → Signal Lab active)
 
 ### Dropdown Menus
 
@@ -65,13 +66,28 @@
 | `/performance` | `/review/performance` | Review | Performance |
 | — | `/review/backtest` | Review | **BacktestPage (Rebalance에서 분리)** |
 | `/rebalance` | `/review/rebalance` | Review | Rebalance (백테스트 제거) |
-| `/theory` | `/theory` | 우측 아이콘 | Theory |
+| `/theory/*` | `/theory/*` | 우측 아이콘 | Theory (wildcard 유지) |
 
 ### Default Routes (그룹 진입 시)
 
-- `/signals` → Signal Lab Overview
+- `/signals` → Signal Lab Overview (자산군 탭 없이 3-카드 요약)
 - `/trading` → `/trading/operations`로 리다이렉트
 - `/review` → `/review/performance`로 리다이렉트
+
+### Legacy Route Redirects
+
+기존 북마크/딥링크 호환을 위한 리다이렉트 (React Router `<Navigate>`):
+
+| Old Route | Redirect To |
+|-----------|-------------|
+| `/dashboard` | `/signals/stocks` |
+| `/scalp-analyzer` | `/signals/futures` |
+| `/scalp-analyzer/fabio` | `/signals/futures/fabio` |
+| `/option-calculator` | `/signals/options` |
+| `/operations` | `/trading/operations` |
+| `/risk` | `/trading/risk` |
+| `/performance` | `/review/performance` |
+| `/rebalance` | `/review/rebalance` |
 
 ---
 
@@ -194,6 +210,7 @@ Trading / Review 내부 페이지:
 Signal Scanner(Signal Lab > Stocks)와 데이터 공유하되 관점 차이:
 - Signal Scanner: "진입할 종목은?" (분석 관점)
 - Rebalance: "포트폴리오 조정은?" (운용 관점)
+- **구현**: 동일 API 엔드포인트 (`/rebalance/scan`, `/rebalance/recommendations`) 호출. 각 컴포넌트가 독립적으로 fetch (공유 캐시 불필요 — 페이지 전환 시 최신 데이터 보장)
 
 ---
 
@@ -201,13 +218,14 @@ Signal Scanner(Signal Lab > Stocks)와 데이터 공유하되 관점 차이:
 
 | Change | Type | Detail |
 |--------|------|--------|
-| Navbar.tsx | **수정** | 드롭다운 3-그룹 구조로 재작성 |
-| App.tsx | **수정** | 라우트 재구성 (nested routes) |
+| Navbar.tsx + CSS | **수정** | 드롭다운 3-그룹 구조로 재작성 (hover 드롭다운, 모바일 accordion) |
+| App.tsx | **수정** | 라우트 재구성 (nested routes) + legacy redirect |
 | SignalOverview.tsx | **신규** | 3자산 시그널 요약 랜딩 페이지 |
 | SubNavigation.tsx | **신규** | 공통 서브 네비게이션 컴포넌트 |
 | BacktestPage.tsx | **신규** | BacktestSection을 감싸는 페이지 |
 | Dashboard.tsx | **수정** | Signal Scanner 탭 추가, 서브탭 구조 |
-| ScalpAnalyzer.tsx | **수정** | 서브탭 구조 적용 |
+| ScalpAnalyzer.tsx | **수정** | 서브탭 구조 적용, 내부 Link 경로 업데이트 |
+| FabioStrategy.tsx | **수정** | 내부 Link 경로 업데이트 (`/scalp-analyzer` → `/signals/futures`) |
 | OptionCalculator.tsx | **수정** | 서브탭 구조 적용 |
 | Rebalance.tsx | **수정** | BacktestSection 제거 |
 | Operations.tsx | **수정 최소** | 라우트 경로만 변경 |
