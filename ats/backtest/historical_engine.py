@@ -138,10 +138,9 @@ class HistoricalBacktester:
 
         # 유니버스 모드 설정
         universe_constituents = None
-        rebalance_mgr = None
+        scanner = None
         if self.universe_id:
             from simulation.universe import UNIVERSE_CONFIG, UniverseScanner
-            from backtest.rebalancer import RebalanceManager
 
             if self.universe_id not in UNIVERSE_CONFIG:
                 raise ValueError(
@@ -153,10 +152,6 @@ class HistoricalBacktester:
             scanner = UniverseScanner(
                 constituents=universe_constituents,
                 top_n=self.top_n,
-            )
-            rebalance_mgr = RebalanceManager(
-                scanner=scanner,
-                rebalance_interval=self.rebalance_days,
             )
 
         # 데이터 다운로드 대상
@@ -414,8 +409,8 @@ class HistoricalBacktester:
         async def _noop_event(event_type: str, data: Any) -> None:
             pass  # SSE 비활성
 
-        # 유니버스 모드: 초기 워치리스트는 빈 리스트 (첫 리밸런싱에서 채워짐)
-        initial_watchlist = self.watchlist if not rebalance_mgr else self.watchlist
+        # 유니버스 모드: 초기 워치리스트는 기본 워치리스트 (첫 리밸런싱에서 교체됨)
+        initial_watchlist = self.watchlist
 
         self.engine = SimulationEngine(
             on_event=_noop_event,
@@ -433,6 +428,10 @@ class HistoricalBacktester:
         )
         # 백테스트 모드: 전체 거래/에퀴티 이력 보존 (truncation 비활성화)
         self.engine._replay_mode = True
+
+        # 유니버스 모드: 엔진에 리밸런스 매니저 내장
+        if scanner:
+            self.engine.init_rebalance_manager(scanner, self.rebalance_days)
 
         # ── 4. 워밍업 (거래 없이 데이터만 주입) ──
         if warmup_dates:
@@ -473,6 +472,7 @@ class HistoricalBacktester:
         print("🚀 백테스트 시작...\n")
         total_days = len(backtest_dates)
         active_watchlist = self.watchlist  # 현재 활성 워치리스트
+        rebal_printed = 0  # 출력 완료된 리밸런싱 이벤트 수
 
         for i, date in enumerate(backtest_dates):
             self.provider.set_current_date(date)
@@ -480,40 +480,10 @@ class HistoricalBacktester:
             # 일일 리셋 (일간 PnL 초기화)
             self.engine.reset_daily_state()
 
-            # ── 리밸런싱 체크 (유니버스 모드) ──
-            if rebalance_mgr and rebalance_mgr.should_rebalance():
-                # 전체 유니버스 OHLCV 사용
+            # ── 리밸런싱: 전체 유니버스 OHLCV 주입 (엔진 내부에서 자동 처리) ──
+            if self.engine._rebalance_mgr and self.engine._rebalance_mgr.should_rebalance():
                 full_ohlcv = self.provider.get_ohlcv_up_to_date(download_watchlist)
-                active_positions = {
-                    code: pos for code, pos in self.engine.positions.items()
-                    if pos.status == "ACTIVE"
-                }
-
-                event = rebalance_mgr.execute_rebalance(
-                    ohlcv_map=full_ohlcv,
-                    current_date=date,
-                    active_positions=active_positions,
-                )
-
-                # 워치리스트 교체
-                active_watchlist = event.new_watchlist
-                self.engine.update_watchlist(active_watchlist)
-
-                # 탈락 종목 ES7 청산 지정
-                if event.positions_force_exited:
-                    self.engine.set_rebalance_exits(set(event.positions_force_exited))
-
-                cycle = event.cycle_number
-                added = len(event.stocks_added)
-                removed = len(event.stocks_removed)
-                forced = len(event.positions_force_exited)
-                sys.stdout.write(
-                    f"\r   🔄 리밸런스 #{cycle} ({_fmt_date(date)}): "
-                    f"+{added} -{removed} 종목, ES7 청산 {forced}건\n"
-                )
-
-            if rebalance_mgr:
-                rebalance_mgr.tick()
+                self.engine.set_full_universe_ohlcv(full_ohlcv)
 
             # 데이터 주입 + 6-Phase 실행
             day_ohlcv = self.provider.get_ohlcv_up_to_date(active_watchlist)
@@ -548,6 +518,20 @@ class HistoricalBacktester:
                 current_prices=day_prices,
             )
 
+            # 리밸런싱 진단 출력 (엔진 내부에서 실행된 리밸런싱 이벤트)
+            if self.engine._rebalance_history and len(self.engine._rebalance_history) > rebal_printed:
+                event = self.engine._rebalance_history[-1]
+                active_watchlist = event.new_watchlist  # 워치리스트 갱신 추적
+                cycle = event.cycle_number
+                added = len(event.stocks_added)
+                removed = len(event.stocks_removed)
+                forced = len(event.positions_force_exited)
+                sys.stdout.write(
+                    f"\r   🔄 리밸런스 #{cycle} ({_fmt_date(date)}): "
+                    f"+{added} -{removed} 종목, ES7 청산 {forced}건\n"
+                )
+                rebal_printed = len(self.engine._rebalance_history)
+
             # 메트릭 수집
             self.collector.record_daily(date, self.engine)
 
@@ -578,9 +562,9 @@ class HistoricalBacktester:
             result.survivorship_details = self._survivorship.get("details", {})
 
         # 리밸런싱 결과 첨부
-        if rebalance_mgr:
-            result.total_rebalances = rebalance_mgr.cycle_count
-            result.avg_turnover_pct = rebalance_mgr.avg_turnover_pct
+        if self.engine._rebalance_mgr:
+            result.total_rebalances = self.engine._rebalance_mgr.cycle_count
+            result.avg_turnover_pct = self.engine._rebalance_mgr.avg_turnover_pct
 
         return result
 
