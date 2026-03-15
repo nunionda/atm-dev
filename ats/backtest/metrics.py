@@ -110,6 +110,9 @@ class PhaseStats:
     # MDD Guard (P0)
     es_mdd_guard: int = 0             # DD>15% 비방어 포지션 강제 청산 횟수
 
+    # P4: SPY MA200 Gate (RG6)
+    rg6_spy_blocks: int = 0           # SPY < MA200 → long strategy entry blocked
+
     # 종목별 레짐 분류
     stock_regime_distribution: Dict[str, int] = field(default_factory=dict)
     stock_regime_strategy_map: Dict[str, int] = field(default_factory=dict)

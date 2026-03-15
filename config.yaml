@@ -343,3 +343,8 @@ sp500_futures:
   weight_trend: 25.0                 # L2: 추세/구조
   weight_momentum: 25.0              # L3: 모멘텀 (MACD, ADX, RSI)
   weight_volume: 25.0                # L4: 거래량/OBV
+
+benchmark_tuning:
+  spy_ma200_gate: true          # P4 RG6: block long strategies when index < MA200
+  spy_ma200_period: 200         # MA period for SPY gate
+  qqq_rsi_threshold: 45         # QQQ RSI threshold for bearish filter

@@ -944,6 +944,12 @@ class SimulationEngine:
         self._index_trend: Dict = {}          # _analyze_index_trend() 결과 캐시
         self._index_trend_history: List[Dict] = []  # 추세 변경 이력 (max 20)
 
+        # P4: SPY MA200 gate — SPY(^GSPC) 200일 이평선 하회 시 공격적 전략 차단
+        self._spy_below_ma200: bool = False
+        self._qqq_bearish: bool = False        # P4: QQQ bearish filter (index RSI < 45)
+        self._rs_tech_leading: Optional[bool] = None  # P4: tech RS ratio (None=unknown)
+        self._spy_ma200_gate_enabled: bool = True  # P4: config flag (default enabled)
+
         self._backtest_date: Optional[str] = None  # 백테스트 시 시뮬레이션 날짜
         self._cycle_count = 0
         self._order_counter = 0
@@ -986,6 +992,7 @@ class SimulationEngine:
             "stock_regime_distribution": {},     # {regime: count} 마지막 사이클 분포
             "stock_regime_strategy_map": {},     # {"regime→strategy": count} 라우팅 이력
             "es_mdd_guard": 0,                    # MDD 가드 강제 청산 횟수
+            "rg6_spy_blocks": 0,                  # P4: SPY < MA200 게이트 차단 횟수
         }
 
         # 에쿼티 히스토리 (프로그레시브 트레일링 기준용)
@@ -1116,6 +1123,19 @@ class SimulationEngine:
         if self.strategy_mode == "multi" or self.strategy_mode in REGIME_STRATEGY_MODES:
             self._phase_stats.setdefault("multi_dedup_skips", 0)
 
+        # P4: benchmark_tuning 설정 로드 (최초 1회)
+        if not hasattr(self, '_benchmark_tuning_loaded'):
+            self._benchmark_tuning_loaded = True
+            try:
+                from data.config_manager import ConfigManager
+                _cfg_mgr = ConfigManager()
+                _full_cfg = _cfg_mgr.load()
+                bt_cfg = getattr(_full_cfg, "benchmark_tuning", None)
+                if bt_cfg is not None:
+                    self._spy_ma200_gate_enabled = bool(getattr(bt_cfg, "spy_ma200_gate", True))
+            except Exception:
+                pass  # 기본값 True 유지
+
     # ══════════════════════════════════════════
     # 메인 루프
     # ══════════════════════════════════════════
@@ -1217,6 +1237,9 @@ class SimulationEngine:
         # Phase 0.1: 종목별 개별 레짐 갱신 (7일 주기, analytics용)
         self._stock_regimes_updated = False
         self._update_stock_regimes()
+
+        # P4: SPY/QQQ benchmark signals (RG6 gate)
+        self._update_spy_qqq_signals()
 
         # Phase 0.5: 지수 추세 기반 전략 비중 동적 조정 (multi/레짐 모드)
         if (self.strategy_mode == "multi" or self.strategy_mode in REGIME_STRATEGY_MODES) and self._index_ohlcv:
@@ -2263,6 +2286,56 @@ class SimulationEngine:
                 return regime
         return "STRONG_BEAR"
 
+    def _update_spy_qqq_signals(self):
+        """P4: Update SPY MA200 gate and QQQ bearish filter from index OHLCV data.
+
+        Uses self._index_ohlcv (^GSPC / ^NDX) as SPY/QQQ proxy (correlation ~0.99).
+        Sets:
+          self._spy_below_ma200 — True when index < MA200 (or MA50 if <200 days available)
+          self._qqq_bearish    — True when index RSI(14) < 45 (broad market weakness)
+        """
+        if not self._index_ohlcv or len(self._index_ohlcv) < 30:
+            return
+
+        closes = [d["close"] for d in self._index_ohlcv]
+
+        # SPY MA200 gate: index < 200-day MA → restrict long strategies
+        if len(closes) >= 200:
+            ma200 = sum(closes[-200:]) / 200
+            self._spy_below_ma200 = closes[-1] < ma200
+        elif len(closes) >= 50:
+            # Fallback: use MA50 if fewer than 200 days available
+            ma_n = sum(closes[-50:]) / 50
+            self._spy_below_ma200 = closes[-1] < ma_n
+
+        # QQQ bearish: use RSI(14) of index as proxy
+        if len(closes) >= 15:
+            changes = [closes[i] - closes[i - 1] for i in range(max(1, len(closes) - 15), len(closes))]
+            gains = [max(0.0, c) for c in changes]
+            losses = [max(0.0, -c) for c in changes]
+            avg_gain = sum(gains) / len(gains) if gains else 0.0
+            avg_loss = sum(losses) / len(losses) if losses else 0.0
+            if avg_loss > 0:
+                rs = avg_gain / avg_loss
+                rsi = 100.0 - (100.0 / (1.0 + rs))
+            else:
+                rsi = 100.0
+            # QQQ bearish: RSI < 45 suggests broad market weakness
+            self._qqq_bearish = rsi < 45.0
+
+    def _strategy_allowed_by_rg6(self, strategy: str) -> bool:
+        """P4 RG6: If index is below MA200, only defensive/mean_reversion are allowed.
+
+        Long-only strategies (momentum, smc, breakout_retest) are blocked during
+        confirmed downtrends to avoid entries into bear market rallies.
+        """
+        if not self._spy_ma200_gate_enabled:
+            return True
+        if not self._spy_below_ma200:
+            return True
+        # Below MA200 → only counter-trend / defensive strategies
+        return strategy in ("defensive", "mean_reversion")
+
     def _update_stock_regimes(self, force: bool = False):
         """워치리스트 종목의 개별 레짐 갱신. 성능을 위해 7일 주기로 실행. 2-cycle smoothing."""
         if self._stock_regimes_updated:
@@ -3150,6 +3223,11 @@ class SimulationEngine:
         6-Phase 통합 파이프라인 (기존 Momentum Swing):
         Phase 0 (시장 체제) → Phase 4 (리스크 게이트) → 종목별 Phase 1→2→3
         """
+        # ── P4 RG6: SPY MA200 게이트 ──
+        if not self._strategy_allowed_by_rg6("momentum"):
+            self._phase_stats["rg6_spy_blocks"] += 1
+            return
+
         # ── Phase 0: 시장 체제 판단 ──
         self._update_market_regime()
         # BEAR 체제: 제한적 거래 허용 (max_positions=2, max_weight=5%)
@@ -3453,6 +3531,11 @@ class SimulationEngine:
         SMC 4-Layer 스코어링 기반 진입 스캔.
         Phase 0 (시장 체제) + Phase 4 (리스크 게이트) → SMC 스코어링 → 매수 실행.
         """
+        # ── P4 RG6: SPY MA200 게이트 ──
+        if not self._strategy_allowed_by_rg6("smc"):
+            self._phase_stats["rg6_spy_blocks"] += 1
+            return
+
         # ── Phase 0: 시장 체제 판단 ──
         self._update_market_regime()
 
@@ -4587,6 +4670,11 @@ class SimulationEngine:
         Pass 1: IDLE 티커 → Phase A 돌파 감지
         Pass 2: WAITING_RETEST 티커 → Phase B 리테스트 확인
         """
+        # ── P4 RG6: SPY MA200 게이트 ──
+        if not self._strategy_allowed_by_rg6("breakout_retest"):
+            self._phase_stats["rg6_spy_blocks"] += 1
+            return
+
         # ── Phase 0: 시장 체제 판단 ──
         self._update_market_regime()
 

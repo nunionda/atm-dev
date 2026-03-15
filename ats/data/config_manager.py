@@ -241,6 +241,14 @@ class UniverseConfig:
 
 
 @dataclass
+class BenchmarkTuningConfig:
+    """P4: SPY/QQQ benchmark tuning — RG6 gate settings."""
+    spy_ma200_gate: bool = True       # Enable RG6: block long strategies when index < MA200
+    spy_ma200_period: int = 200       # MA period for SPY gate
+    qqq_rsi_threshold: float = 45.0   # QQQ RSI threshold for bearish filter
+
+
+@dataclass
 class ATSConfig:
     """ATS 전체 설정 (config.yaml 매핑)."""
     system_name: str = "ATS-MomentumSwing"
@@ -254,6 +262,7 @@ class ATSConfig:
     breakout_retest: BreakoutRetestConfig = field(default_factory=BreakoutRetestConfig)
     mean_reversion: MeanReversionConfig = field(default_factory=MeanReversionConfig)
     arbitrage: ArbitrageConfig = field(default_factory=ArbitrageConfig)
+    benchmark_tuning: BenchmarkTuningConfig = field(default_factory=BenchmarkTuningConfig)
     exit: ExitConfig = field(default_factory=ExitConfig)
     portfolio: PortfolioConfig = field(default_factory=PortfolioConfig)
     portfolio_allocation: PortfolioAllocationConfig = field(default_factory=PortfolioAllocationConfig)
@@ -375,6 +384,13 @@ class ConfigManager:
             config.arbitrage = ArbitrageConfig(**scalar_fields)
             config.arbitrage.fixed_pairs = arb.get("fixed_pairs", [])
             config.arbitrage.basis_signals = arb.get("basis_signals", [])
+
+        # P4: Benchmark Tuning (SPY MA200 gate / QQQ RSI filter)
+        bt = yaml_data.get("benchmark_tuning", {})
+        if bt:
+            config.benchmark_tuning = BenchmarkTuningConfig(**{
+                k: bt[k] for k in BenchmarkTuningConfig.__dataclass_fields__ if k in bt
+            })
 
         # Portfolio Allocation (Tactical 전용)
         pa = yaml_data.get("portfolio_allocation", {})
