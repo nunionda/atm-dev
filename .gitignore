@@ -39,3 +39,5 @@ temp.json
 
 # 런타임 PID 파일
 .pids/
+ats/output/
+plan.md
