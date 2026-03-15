@@ -3062,6 +3062,89 @@ class SimulationEngine:
         self._candle_score_cache[cache_key] = score
         return score
 
+    def _get_fib_alignment(self, code: str) -> float:
+        """P3: Fibonacci level proximity score (0.0 to 1.0)."""
+        df = self._ohlcv_cache.get(code)
+        if df is None or len(df) < 30:
+            return 0.0
+
+        close = df['close'].values
+        high = df['high'].values
+        low = df['low'].values
+        price = close[-1]
+
+        # Find recent swing high and swing low (last 50 bars)
+        lookback = min(50, len(df))
+        recent_high = np.max(high[-lookback:])
+        recent_low = np.min(low[-lookback:])
+        swing_range = recent_high - recent_low
+        if swing_range <= 0:
+            return 0.0
+
+        # Key Fib levels (retracement from high)
+        fib_levels = [
+            recent_high - swing_range * 0.382,
+            recent_high - swing_range * 0.500,
+            recent_high - swing_range * 0.618,
+        ]
+
+        # Score = how close price is to nearest Fib level (within 2% = max score)
+        min_dist = min(abs(price - level) / price for level in fib_levels)
+        if min_dist < 0.02:
+            return 1.0 - (min_dist / 0.02)  # Linear decay from 1.0 at level to 0.0 at 2% away
+        return 0.0
+
+    def _get_chart_pattern_score(self, code: str) -> int:
+        """P3: Simple chart pattern detection from raw OHLCV."""
+        cache_key = f"cp_{code}_{self._backtest_date}"
+        if cache_key in self._candle_score_cache:  # reuse same cache dict
+            return self._candle_score_cache[cache_key]
+
+        df = self._ohlcv_cache.get(code)
+        if df is None or len(df) < 30:
+            return 0
+
+        score = 0
+        close = df['close'].values
+        high = df['high'].values
+        low = df['low'].values
+        volume = df['volume'].values if 'volume' in df.columns else None
+        price = close[-1]
+
+        # Double Bottom detection (simplified)
+        lookback = min(60, len(df))
+        lows_arr = low[-lookback:]
+        # Find two local minimums
+        min1_idx = np.argmin(lows_arr[:lookback // 2])
+        min2_idx = lookback // 2 + np.argmin(lows_arr[lookback // 2:])
+        min1 = lows_arr[min1_idx]
+        min2 = lows_arr[min2_idx]
+
+        if min1 > 0 and abs(min1 - min2) / min1 < 0.03:  # Within 3%
+            neckline = np.max(high[-lookback:][min1_idx:min2_idx]) if min2_idx > min1_idx else 0
+            if neckline > 0 and price > neckline:
+                score += 70  # Double bottom confirmed
+
+        # Bull Flag detection (simplified)
+        if len(df) >= 20:
+            atr = np.mean(high[-20:] - low[-20:])
+            # Check for impulse: 5-bar move > 2*ATR
+            impulse_move = close[-15] - close[-20] if len(df) >= 20 else 0
+            if atr > 0 and impulse_move > 2 * atr:
+                # Check consolidation: last 10 bars range < 50% of impulse
+                consol_range = np.max(high[-10:]) - np.min(low[-10:])
+                if consol_range < 0.5 * abs(impulse_move):
+                    # Check declining volume
+                    if volume is not None:
+                        vol_start = np.mean(volume[-15:-10])
+                        vol_end = np.mean(volume[-5:])
+                        if vol_end < vol_start:
+                            score += 60
+
+        score = max(-100, min(100, score))
+        self._candle_score_cache[cache_key] = score
+        return score
+
     def _scan_entries_momentum(self):
         """
         6-Phase 통합 파이프라인 (기존 Momentum Swing):
@@ -3308,6 +3391,15 @@ class SimulationEngine:
                 strength += 10
             elif candle_score < -20:
                 strength -= 5  # Bearish candle near entry = reduce confidence
+
+            # P3: Fibonacci alignment & chart pattern bonus
+            fib_score = self._get_fib_alignment(code)
+            if fib_score > 0.5:
+                strength += 8
+            chart_pattern_score = self._get_chart_pattern_score(code)
+            if chart_pattern_score > 50:
+                strength += 12
+
             strength = min(max(strength, 10), 100)
 
             # B8: Minimum strength filter to reduce ES1 fires
@@ -3981,7 +4073,13 @@ class SimulationEngine:
             if candle_score > 15 and rsi < 40:  # Bullish candle at oversold
                 candle_bonus = 10
 
-            total_score = score_signal + score_vol + score_confirm + candle_bonus
+            # P3: Fib alignment bonus (price at key retracement = good MR entry)
+            fib_bonus = 0
+            fib_score = self._get_fib_alignment(code)
+            if fib_score > 0.5:
+                fib_bonus = 8
+
+            total_score = score_signal + score_vol + score_confirm + candle_bonus + fib_bonus
 
             if total_score < self._mr_cfg.entry_threshold:
                 self._phase_stats["phase3_no_primary"] += 1
@@ -4644,6 +4742,12 @@ class SimulationEngine:
 
             # 존 스코어링
             zone_score = self._score_brt_retest_zone(df, state)
+
+            # P3: Chart pattern bonus for retest quality
+            chart_pattern_score = self._get_chart_pattern_score(code)
+            if chart_pattern_score > 40:
+                zone_score += 10
+
             if zone_score < self._brt_cfg.retest_zone_threshold:
                 continue
 

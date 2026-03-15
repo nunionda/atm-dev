@@ -71,6 +71,8 @@ def calculate_basic_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # 프론트엔드로 일괄 전달하기 위해 df 변환 함수 내에 통합합니다.
     df = calculate_smc(df)
     df = calculate_candlestick_patterns(df)  # P2: Candlestick patterns
+    df = calculate_fibonacci_levels(df)       # P3: Fibonacci levels
+    df = detect_chart_patterns(df)            # P3: Chart patterns
 
     # NaN 값을 None 또는 특정 값으로 처리하기 (JSON 직렬화를 위해)
     df = df.replace({np.nan: None})
@@ -434,3 +436,257 @@ def _update_pattern(patterns: np.ndarray, pattern_scores: np.ndarray,
     update_mask = mask & (abs_score > pattern_scores)
     patterns[update_mask] = label
     pattern_scores[update_mask] = abs_score
+
+
+def calculate_fibonacci_levels(df: pd.DataFrame, swing_length: int = 3) -> pd.DataFrame:
+    """
+    P3: Fibonacci retracement/extension levels based on recent swing high/low.
+    Reuses is_swing_high/is_swing_low from calculate_smc() if available.
+
+    Output columns: fib_236, fib_382, fib_500, fib_618, fib_786,
+                    fib_ext_1272, fib_ext_1618, fib_trend ("UP"/"DOWN")
+    """
+    df = df.copy()
+
+    # Compute swing points if not already present
+    if 'is_swing_high' not in df.columns or 'is_swing_low' not in df.columns:
+        highs = df['high'].values
+        lows = df['low'].values
+        length = len(df)
+        df['is_swing_high'] = False
+        df['is_swing_low'] = False
+        for i in range(swing_length, length - swing_length):
+            is_sh = True
+            is_sl = True
+            for j in range(1, swing_length + 1):
+                if highs[i] <= highs[i - j] or highs[i] <= highs[i + j]:
+                    is_sh = False
+                if lows[i] >= lows[i - j] or lows[i] >= lows[i + j]:
+                    is_sl = False
+            if is_sh:
+                df.at[df.index[i], 'is_swing_high'] = True
+            if is_sl:
+                df.at[df.index[i], 'is_swing_low'] = True
+
+    # Initialize output columns
+    fib_cols = ['fib_236', 'fib_382', 'fib_500', 'fib_618', 'fib_786',
+                'fib_ext_1272', 'fib_ext_1618']
+    for col in fib_cols:
+        df[col] = None
+    df['fib_trend'] = None
+
+    # Find most recent confirmed swing high and swing low
+    sh_mask = df['is_swing_high'] == True  # noqa: E712
+    sl_mask = df['is_swing_low'] == True   # noqa: E712
+
+    sh_indices = df.index[sh_mask]
+    sl_indices = df.index[sl_mask]
+
+    if len(sh_indices) == 0 or len(sl_indices) == 0:
+        return df
+
+    last_sh_idx = sh_indices[-1]
+    last_sl_idx = sl_indices[-1]
+    last_sh_pos = df.index.get_loc(last_sh_idx)
+    last_sl_pos = df.index.get_loc(last_sl_idx)
+
+    swing_high = float(df.loc[last_sh_idx, 'high'])
+    swing_low = float(df.loc[last_sl_idx, 'low'])
+    swing_range = swing_high - swing_low
+
+    if swing_range <= 0:
+        return df
+
+    # Determine trend: if swing low is more recent → uptrend (retracing from high)
+    # if swing high is more recent → downtrend (bouncing from low)
+    ratios_ret = [0.236, 0.382, 0.5, 0.618, 0.786]
+    ratios_ext = [1.272, 1.618]
+
+    if last_sl_pos > last_sh_pos:
+        # Downtrend: swing high then swing low, price bouncing from low
+        trend = "DOWN"
+        fib_ret = [swing_low + swing_range * r for r in ratios_ret]
+        fib_ext = [swing_low - swing_range * (r - 1.0) for r in ratios_ext]
+    else:
+        # Uptrend: swing low then swing high, price retracing from high
+        trend = "UP"
+        fib_ret = [swing_high - swing_range * r for r in ratios_ret]
+        fib_ext = [swing_high + swing_range * (r - 1.0) for r in ratios_ext]
+
+    # Set fib levels as constant across all rows (current levels)
+    df['fib_236'] = fib_ret[0]
+    df['fib_382'] = fib_ret[1]
+    df['fib_500'] = fib_ret[2]
+    df['fib_618'] = fib_ret[3]
+    df['fib_786'] = fib_ret[4]
+    df['fib_ext_1272'] = fib_ext[0]
+    df['fib_ext_1618'] = fib_ext[1]
+    df['fib_trend'] = trend
+
+    return df
+
+
+def detect_chart_patterns(df: pd.DataFrame, swing_length: int = 3) -> pd.DataFrame:
+    """
+    P3: Classic chart pattern detection using swing points.
+    Detects: Double Bottom (+70), Double Top (-70), Bull Flag (+60), Bear Flag (-60).
+
+    Output columns: chart_pattern (str|None), chart_pattern_score (int -100..+100),
+                    chart_pattern_target (float|None)
+    """
+    df = df.copy()
+    n = len(df)
+
+    df['chart_pattern'] = None
+    df['chart_pattern_score'] = 0
+    df['chart_pattern_target'] = None
+
+    if n < 15:
+        return df
+
+    close = df['close'].values.astype(float)
+    high = df['high'].values.astype(float)
+    low = df['low'].values.astype(float)
+    open_p = df['open'].values.astype(float)
+    volume = df['volume'].values.astype(float) if 'volume' in df.columns else None
+
+    # Compute swing points if missing
+    if 'is_swing_high' not in df.columns or 'is_swing_low' not in df.columns:
+        df['is_swing_high'] = False
+        df['is_swing_low'] = False
+        for i in range(swing_length, n - swing_length):
+            is_sh = True
+            is_sl = True
+            for j in range(1, swing_length + 1):
+                if high[i] <= high[i - j] or high[i] <= high[i + j]:
+                    is_sh = False
+                if low[i] >= low[i - j] or low[i] >= low[i + j]:
+                    is_sl = False
+            if is_sh:
+                df.iat[i, df.columns.get_loc('is_swing_high')] = True
+            if is_sl:
+                df.iat[i, df.columns.get_loc('is_swing_low')] = True
+
+    # Collect swing indices
+    sh_positions = [i for i in range(n) if df['is_swing_high'].iloc[i]]
+    sl_positions = [i for i in range(n) if df['is_swing_low'].iloc[i]]
+
+    # ATR for flag detection
+    atr_arr = np.zeros(n)
+    if n >= 14:
+        tr = np.maximum(high[1:] - low[1:],
+                        np.maximum(np.abs(high[1:] - close[:-1]),
+                                   np.abs(low[1:] - close[:-1])))
+        tr = np.concatenate([[high[0] - low[0]], tr])
+        atr_series = pd.Series(tr).rolling(window=14, min_periods=1).mean().values
+        atr_arr = atr_series
+
+    # Scan each bar for patterns (check most recent occurrences)
+    for i in range(20, n):
+        best_pattern = None
+        best_score = 0
+        best_target = None
+
+        # ── Double Bottom ──
+        # Find two swing lows before bar i, separated by 10-50 bars, within 3%
+        recent_sl = [pos for pos in sl_positions if pos < i and pos >= i - 60]
+        if len(recent_sl) >= 2:
+            for k in range(len(recent_sl) - 1, 0, -1):
+                sl2 = recent_sl[k]
+                for m in range(k - 1, -1, -1):
+                    sl1 = recent_sl[m]
+                    sep = sl2 - sl1
+                    if 10 <= sep <= 50:
+                        low1 = low[sl1]
+                        low2 = low[sl2]
+                        if low1 > 0 and abs(low1 - low2) / low1 < 0.03:
+                            neckline = np.max(high[sl1:sl2 + 1])
+                            bottom = min(low1, low2)
+                            if close[i] > neckline:
+                                target = neckline + (neckline - bottom)
+                                if abs(70) > abs(best_score):
+                                    best_pattern = "DOUBLE_BOTTOM"
+                                    best_score = 70
+                                    best_target = target
+                    if best_pattern:
+                        break
+                if best_pattern:
+                    break
+
+        # ── Double Top ──
+        recent_sh = [pos for pos in sh_positions if pos < i and pos >= i - 60]
+        if len(recent_sh) >= 2 and best_pattern is None:
+            for k in range(len(recent_sh) - 1, 0, -1):
+                sh2 = recent_sh[k]
+                for m in range(k - 1, -1, -1):
+                    sh1 = recent_sh[m]
+                    sep = sh2 - sh1
+                    if 10 <= sep <= 50:
+                        high1 = high[sh1]
+                        high2 = high[sh2]
+                        if high1 > 0 and abs(high1 - high2) / high1 < 0.03:
+                            neckline = np.min(low[sh1:sh2 + 1])
+                            top = max(high1, high2)
+                            if close[i] < neckline:
+                                target = neckline - (top - neckline)
+                                if abs(-70) > abs(best_score):
+                                    best_pattern = "DOUBLE_TOP"
+                                    best_score = -70
+                                    best_target = target
+                    if best_pattern:
+                        break
+                if best_pattern:
+                    break
+
+        # ── Bull Flag ──
+        if i >= 20 and best_pattern is None:
+            atr = atr_arr[i] if atr_arr[i] > 0 else 1.0
+            # Impulse: check bars i-20 to i-15 for strong up move
+            impulse_start = max(0, i - 20)
+            impulse_end = max(0, i - 15)
+            if impulse_end < n and impulse_start < n:
+                impulse_move = close[impulse_end] - close[impulse_start]
+                if impulse_move > 2 * atr:
+                    # Consolidation: last 10 bars (i-10 to i)
+                    consol_start = max(0, i - 10)
+                    consol_range = np.max(high[consol_start:i + 1]) - np.min(low[consol_start:i + 1])
+                    if consol_range < 0.5 * abs(impulse_move):
+                        vol_ok = True
+                        if volume is not None:
+                            vol_start_mean = np.mean(volume[max(0, i - 15):max(1, i - 10)])
+                            vol_end_mean = np.mean(volume[max(0, i - 5):i + 1])
+                            vol_ok = vol_end_mean < vol_start_mean
+                        if vol_ok:
+                            target = close[i] + impulse_move
+                            best_pattern = "BULL_FLAG"
+                            best_score = 60
+                            best_target = target
+
+        # ── Bear Flag ──
+        if i >= 20 and best_pattern is None:
+            atr = atr_arr[i] if atr_arr[i] > 0 else 1.0
+            impulse_start = max(0, i - 20)
+            impulse_end = max(0, i - 15)
+            if impulse_end < n and impulse_start < n:
+                impulse_move = close[impulse_start] - close[impulse_end]  # down move
+                if impulse_move > 2 * atr:
+                    consol_start = max(0, i - 10)
+                    consol_range = np.max(high[consol_start:i + 1]) - np.min(low[consol_start:i + 1])
+                    if consol_range < 0.5 * abs(impulse_move):
+                        vol_ok = True
+                        if volume is not None:
+                            vol_start_mean = np.mean(volume[max(0, i - 15):max(1, i - 10)])
+                            vol_end_mean = np.mean(volume[max(0, i - 5):i + 1])
+                            vol_ok = vol_end_mean < vol_start_mean
+                        if vol_ok:
+                            target = close[i] - impulse_move
+                            best_pattern = "BEAR_FLAG"
+                            best_score = -60
+                            best_target = target
+
+        if best_pattern:
+            df.iat[i, df.columns.get_loc('chart_pattern')] = best_pattern
+            df.iat[i, df.columns.get_loc('chart_pattern_score')] = best_score
+            df.iat[i, df.columns.get_loc('chart_pattern_target')] = best_target
+
+    return df
