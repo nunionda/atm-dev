@@ -1225,8 +1225,8 @@ class SimulationEngine:
         self._stock_names = {w["code"]: w["name"] for w in new_watchlist}
 
     def set_rebalance_exits(self, codes: set):
-        """리밸런스 탈락 종목을 ES7 청산 대상으로 지정."""
-        self._rebalance_exit_codes = set(codes)
+        """리밸런스 탈락 종목을 ES7 청산 대상으로 지정 (기존 코드와 병합)."""
+        self._rebalance_exit_codes |= set(codes)
 
     def _get_current_date_str(self) -> str:
         """현재 날짜 문자열. 백테스트 시 시뮬레이션 날짜, 실시간 시 오늘 날짜."""

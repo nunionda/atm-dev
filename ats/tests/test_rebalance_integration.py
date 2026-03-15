@@ -81,3 +81,33 @@ class TestRebalanceManagerExtensions:
         assert mgr._current_watchlist_codes == {"MSFT"}
         assert mgr._cycle_count == old_cycle + 1
         assert mgr._trading_day_count == 0
+
+
+class TestSetRebalanceExitsUnion:
+    """set_rebalance_exits()가 기존 코드를 덮어쓰지 않고 병합하는지 테스트."""
+
+    def test_union_with_existing_codes(self):
+        """기존 퇴출 코드에 새 코드가 병합된다."""
+        from simulation.engine import SimulationEngine
+
+        async def noop(t, d): pass
+        engine = SimulationEngine(on_event=noop, market_id="sp500")
+
+        # 레짐 다운그레이드로 퇴출 코드 추가된 상태
+        engine._rebalance_exit_codes = {"INTC", "BA"}
+
+        # 리밸런싱으로 추가 퇴출
+        engine.set_rebalance_exits({"DIS", "BA"})
+
+        # BA는 중복, DIS는 신규 — 모두 포함되어야 함
+        assert engine._rebalance_exit_codes == {"INTC", "BA", "DIS"}
+
+    def test_union_with_empty_existing(self):
+        """기존 코드가 비어있으면 새 코드만 설정된다."""
+        from simulation.engine import SimulationEngine
+
+        async def noop(t, d): pass
+        engine = SimulationEngine(on_event=noop, market_id="sp500")
+
+        engine.set_rebalance_exits({"AAPL"})
+        assert engine._rebalance_exit_codes == {"AAPL"}
