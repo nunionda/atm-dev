@@ -33,6 +33,26 @@ from simulation.constants import (
 
 
 from simulation.allocator import StrategyAllocator, _compute_adx  # noqa: F401
+from simulation.strategies import (
+    momentum as strat_momentum,
+    smc as strat_smc,
+    mean_reversion as strat_mr,
+    breakout_retest as strat_brt,
+    arbitrage as strat_arb,
+    defensive as strat_def,
+    volatility as strat_vol,
+)
+
+# Strategy dispatch registry — maps strategy name to module with scan_entries/check_exits
+_STRATEGY_MODULES = {
+    "momentum": strat_momentum,
+    "smc": strat_smc,
+    "mean_reversion": strat_mr,
+    "breakout_retest": strat_brt,
+    "arbitrage": strat_arb,
+    "defensive": strat_def,
+    "volatility": strat_vol,
+}
 
 
 class SimulationEngine:
@@ -854,25 +874,11 @@ class SimulationEngine:
     # ══════════════════════════════════════════
 
     def _scan_entries(self):
-        """
-        전략 모드에 따라 진입 스캔 분기.
-        multi: 멀티 전략 동시 실행 (레짐별 비중 기반, 자동 전환)
-        regime_*: 레짐 고정 + multi 파이프라인 (개별 레짐 전략 테스트)
-        momentum/smc/breakout_retest/mean_reversion/arbitrage/defensive: 단일 전략
-        """
+        """전략 모드에 따라 진입 스캔 분기."""
         if self.strategy_mode == "multi" or self.strategy_mode in REGIME_STRATEGY_MODES:
             return self._scan_entries_multi()
-        elif self.strategy_mode == "smc":
-            return self._scan_entries_smc()
-        elif self.strategy_mode == "breakout_retest":
-            return self._scan_entries_breakout_retest()
-        elif self.strategy_mode == "mean_reversion":
-            return self._scan_entries_mean_reversion()
-        elif self.strategy_mode == "arbitrage":
-            return self._scan_entries_arbitrage()
-        elif self.strategy_mode == "defensive":
-            return self._scan_entries_defensive()
-        return self._scan_entries_momentum()
+        module = _STRATEGY_MODULES.get(self.strategy_mode, strat_momentum)
+        module.scan_entries(self)
 
     def _scan_entries_multi(self):
         """
@@ -951,20 +957,9 @@ class SimulationEngine:
             original_mode = self.strategy_mode
             self.strategy_mode = strategy
 
-            if strategy == "momentum":
-                self._scan_entries_momentum()
-            elif strategy == "smc":
-                self._scan_entries_smc()
-            elif strategy == "breakout_retest":
-                self._scan_entries_breakout_retest()
-            elif strategy == "mean_reversion":
-                self._scan_entries_mean_reversion()
-            elif strategy == "defensive":
-                self._scan_entries_defensive()
-            elif strategy == "volatility":
-                self._scan_entries_volatility()
-            elif strategy == "arbitrage":
-                self._scan_entries_arbitrage()
+            module = _STRATEGY_MODULES.get(strategy)
+            if module:
+                module.scan_entries(self)
 
             self.strategy_mode = original_mode
 
@@ -1027,193 +1022,6 @@ class SimulationEngine:
             rsm[rsm_key] = rsm.get(rsm_key, 0) + 1
 
         self._collected_signals = []
-
-    # ── Phase 3.3: Defensive 전략 (인버스 ETF) ──
-
-    def _scan_entries_defensive(self):
-        from simulation.strategies.defensive import scan_entries
-        scan_entries(self)
-
-    def _check_exits_defensive(self):
-        from simulation.strategies.defensive import check_exits
-        check_exits(self)
-
-    # ─────────────────────────────────────────────────────
-    # Phase 6: Volatility Premium Strategy
-    # ─────────────────────────────────────────────────────
-
-    def _scan_entries_volatility(self):
-        from simulation.strategies.volatility import scan_entries
-        scan_entries(self)
-
-    def _check_exits_volatility(self):
-        from simulation.strategies.volatility import check_exits
-        check_exits(self)
-
-    def _scan_entries_momentum(self):
-        from simulation.strategies.momentum import scan_entries
-        scan_entries(self)
-
-    # ══════════════════════════════════════════
-    # SMC 4-Layer 진입 스캔
-    # ══════════════════════════════════════════
-
-    def _scan_entries_smc(self):
-        from simulation.strategies.smc import scan_entries
-        scan_entries(self)
-
-    def _calculate_indicators_smc(self, df: pd.DataFrame) -> pd.DataFrame:
-        from simulation.strategies.smc import calculate_indicators_smc
-        return calculate_indicators_smc(self, df)
-
-    def _score_smc_bias(self, df: pd.DataFrame) -> int:
-        from simulation.strategies.smc import score_smc_bias
-        return score_smc_bias(self, df)
-
-    def _score_volatility(self, df: pd.DataFrame) -> int:
-        from simulation.strategies.smc import score_volatility
-        return score_volatility(self, df)
-
-    def _score_obv_signal(self, df: pd.DataFrame) -> int:
-        from simulation.strategies.smc import score_obv_signal
-        return score_obv_signal(self, df)
-
-    def _score_momentum_signal(self, df: pd.DataFrame) -> int:
-        from simulation.strategies.smc import score_momentum_signal
-        return score_momentum_signal(self, df)
-
-    # ══════════════════════════════════════════
-    # SMC 청산 로직
-    # ══════════════════════════════════════════
-
-    def _check_exits_smc(self):
-        from simulation.strategies.smc import check_exits
-        check_exits(self)
-
-    # ══════════════════════════════════════════
-    # Mean Reversion 지표/진입/청산 로직
-    # ══════════════════════════════════════════
-
-    def _calculate_indicators_mean_reversion(self, df: pd.DataFrame) -> pd.DataFrame:
-        from simulation.strategies.mean_reversion import calculate_indicators_mean_reversion
-        return calculate_indicators_mean_reversion(self, df)
-
-    def _score_mr_signal(self, df: pd.DataFrame) -> int:
-        from simulation.strategies.mean_reversion import score_mr_signal
-        return score_mr_signal(self, df)
-
-    def _score_mr_volatility(self, df: pd.DataFrame) -> int:
-        from simulation.strategies.mean_reversion import score_mr_volatility
-        return score_mr_volatility(self, df)
-
-    def _score_mr_confirmation(self, df: pd.DataFrame) -> int:
-        from simulation.strategies.mean_reversion import score_mr_confirmation
-        return score_mr_confirmation(self, df)
-
-    def _scan_entries_mean_reversion(self):
-        from simulation.strategies.mean_reversion import scan_entries
-        scan_entries(self)
-
-    def _check_exits_mean_reversion(self):
-        from simulation.strategies.mean_reversion import check_exits
-        check_exits(self)
-
-    # ══════════════════════════════════════════
-    # Breakout-Retest 지표/진입/청산 로직
-    # (extracted to simulation/strategies/breakout_retest.py)
-    # ══════════════════════════════════════════
-
-    def _calculate_indicators_breakout_retest(self, df: pd.DataFrame) -> pd.DataFrame:
-        from simulation.strategies.breakout_retest import calculate_indicators_breakout_retest
-        return calculate_indicators_breakout_retest(self, df)
-
-    def _score_brt_structure(self, df: pd.DataFrame) -> int:
-        from simulation.strategies.breakout_retest import score_brt_structure
-        return score_brt_structure(self, df)
-
-    def _score_brt_volatility(self, df: pd.DataFrame) -> int:
-        from simulation.strategies.breakout_retest import score_brt_volatility
-        return score_brt_volatility(self, df)
-
-    def _score_brt_obv(self, df: pd.DataFrame) -> int:
-        from simulation.strategies.breakout_retest import score_brt_obv
-        return score_brt_obv(self, df)
-
-    def _score_brt_momentum(self, df: pd.DataFrame) -> int:
-        from simulation.strategies.breakout_retest import score_brt_momentum
-        return score_brt_momentum(self, df)
-
-    def _check_brt_six_conditions(self, df: pd.DataFrame) -> tuple:
-        from simulation.strategies.breakout_retest import check_brt_six_conditions
-        return check_brt_six_conditions(self, df)
-
-    def _apply_brt_fakeout_filters(self, df: pd.DataFrame) -> tuple:
-        from simulation.strategies.breakout_retest import apply_brt_fakeout_filters
-        return apply_brt_fakeout_filters(self, df)
-
-    def _capture_brt_retest_zones(self, df: pd.DataFrame, breakout_price: float, breakout_atr: float) -> Dict[str, Any]:
-        from simulation.strategies.breakout_retest import capture_brt_retest_zones
-        return capture_brt_retest_zones(self, df, breakout_price, breakout_atr)
-
-    def _scan_entries_breakout_retest(self):
-        from simulation.strategies.breakout_retest import scan_entries
-        scan_entries(self)
-
-    def _score_brt_retest_zone(self, df: pd.DataFrame, state: Dict[str, Any]) -> int:
-        from simulation.strategies.breakout_retest import score_brt_retest_zone
-        return score_brt_retest_zone(self, df, state)
-
-    def _check_exits_breakout_retest(self):
-        from simulation.strategies.breakout_retest import check_exits
-        check_exits(self)
-
-
-    # ══════════════════════════════════════════
-    # Arbitrage: Statistical Pairs (Long+Short 양방향)
-    # 이론 참조: futuresStrategy.md (Z-Score), BlackScholesEquation.md (IV/RV),
-    #           future_trading_stratedy.md (Dynamic ATR), Kelly Criterion.md
-    # ══════════════════════════════════════════
-
-    def _discover_pairs(self) -> List[Dict]:
-        from simulation.strategies.arbitrage import discover_pairs
-        return discover_pairs(self)
-
-    def _load_fixed_pairs(self) -> List[Dict]:
-        from simulation.strategies.arbitrage import load_fixed_pairs
-        return load_fixed_pairs(self)
-
-    def _check_basis_gate(self) -> bool:
-        from simulation.strategies.arbitrage import check_basis_gate
-        return check_basis_gate(self)
-
-    def _score_arb_correlation(self, pair: Dict) -> int:
-        from simulation.strategies.arbitrage import score_arb_correlation
-        return score_arb_correlation(self, pair)
-
-    def _score_arb_spread(self, pair: Dict) -> int:
-        from simulation.strategies.arbitrage import score_arb_spread
-        return score_arb_spread(self, pair)
-
-    def _score_arb_volume(self, pair: Dict) -> int:
-        from simulation.strategies.arbitrage import score_arb_volume
-        return score_arb_volume(self, pair)
-
-    def _calculate_arb_ev(self, pair: Dict) -> bool:
-        from simulation.strategies.arbitrage import calculate_arb_ev
-        return calculate_arb_ev(self, pair)
-
-    def _size_arb_pair(self, price_a: float, price_b: float, score: int) -> tuple:
-        from simulation.strategies.arbitrage import size_arb_pair
-        return size_arb_pair(self, price_a, price_b, score)
-
-    def _scan_entries_arbitrage(self):
-        from simulation.strategies.arbitrage import scan_entries
-        scan_entries(self)
-
-    def _check_exits_arbitrage(self):
-        from simulation.strategies.arbitrage import check_exits
-        check_exits(self)
-
 
     def _execute_buy(
         self,
@@ -1465,20 +1273,11 @@ class SimulationEngine:
     # ══════════════════════════════════════════
 
     def _check_exits(self):
-        """전략 모드에 따라 청산 체크 분기. multi/regime_* 모드에서는 strategy_tag 기반 라우팅."""
+        """전략 모드에 따라 청산 체크 분기."""
         if self.strategy_mode == "multi" or self.strategy_mode in REGIME_STRATEGY_MODES:
             return self._check_exits_multi()
-        elif self.strategy_mode == "smc":
-            return self._check_exits_smc()
-        elif self.strategy_mode == "breakout_retest":
-            return self._check_exits_breakout_retest()
-        elif self.strategy_mode == "mean_reversion":
-            return self._check_exits_mean_reversion()
-        elif self.strategy_mode == "arbitrage":
-            return self._check_exits_arbitrage()
-        elif self.strategy_mode == "defensive":
-            return self._check_exits_defensive()
-        return self._check_exits_momentum()
+        module = _STRATEGY_MODULES.get(self.strategy_mode, strat_momentum)
+        module.check_exits(self)
 
     def _check_exits_multi(self):
         """멀티 전략 모드: 각 포지션의 strategy_tag에 따라 올바른 청산 로직 라우팅."""
@@ -1500,27 +1299,11 @@ class SimulationEngine:
             # 태그 필터 설정 — 각 exit 메서드가 해당 전략 포지션만 처리
             self._exit_tag_filter = tag
 
-            if tag == "smc":
-                self._check_exits_smc()
-            elif tag == "breakout_retest":
-                self._check_exits_breakout_retest()
-            elif tag == "mean_reversion":
-                self._check_exits_mean_reversion()
-            elif tag == "arbitrage":
-                self._check_exits_arbitrage()
-            elif tag == "defensive":
-                self._check_exits_defensive()
-            elif tag == "volatility":
-                self._check_exits_volatility()
-            else:  # momentum (default)
-                self._check_exits_momentum()
+            module = _STRATEGY_MODULES.get(tag, strat_momentum)
+            module.check_exits(self)
 
             self._exit_tag_filter = None
             self.strategy_mode = original_mode
-
-    def _check_exits_momentum(self):
-        from simulation.strategies.momentum import check_exits
-        check_exits(self)
 
     def _execute_partial_sell(self, pos: 'SimPosition', sell_qty: int, exit_code: str):
         """포지션의 일부만 청산 (BULL 이격도 분할 청산용).
