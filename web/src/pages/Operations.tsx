@@ -20,24 +20,24 @@ import { MARKETS } from '../lib/api';
 import './Operations.css';
 
 export function Operations() {
-    const { activeMarket, setActiveMarket, highlightedPosition, clearHighlight } = useAppState();
+    const { activeMarket, setActiveMarket, highlightedPosition, navigateToOperations } = useAppState();
     const [searchParams, setSearchParams] = useSearchParams();
     const { status: sseStatus } = useSSEStatus();
 
     // Read highlight from URL params (for direct links like /operations?highlight=AAPL)
     useEffect(() => {
         const urlHighlight = searchParams.get('highlight');
-        if (urlHighlight && !highlightedPosition) {
-            // Set highlight from URL and clear the param
-            clearHighlight();
-        }
         if (urlHighlight) {
-            // Clean up the URL param after reading
+            // Set highlight in context so it persists after URL cleanup
+            if (!highlightedPosition || highlightedPosition.ticker !== urlHighlight) {
+                navigateToOperations({ ticker: urlHighlight });
+            }
+            // Clean up the URL param after transferring to context
             setSearchParams({}, { replace: true });
         }
-    }, [searchParams, setSearchParams, highlightedPosition, clearHighlight]);
+    }, [searchParams, setSearchParams, highlightedPosition, navigateToOperations]);
 
-    const highlightTicker = highlightedPosition?.ticker || searchParams.get('highlight') || null;
+    const highlightTicker = highlightedPosition?.ticker || null;
 
     return (
         <div className="operations-page container">

@@ -27,7 +27,9 @@ S&P 500 선물지수 매매 신호 전략 (E-mini ES / Micro MES)
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass, field
+from datetime import date as date_type, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -43,6 +45,79 @@ logger = get_logger("sp500_futures")
 
 
 # ══════════════════════════════════════════
+# 롤오버 유틸리티
+# ══════════════════════════════════════════
+
+_CONTRACT_MONTH_CODES = {3: "H", 6: "M", 9: "U", 12: "Z"}
+
+
+def _third_friday(year: int, month: int) -> date_type:
+    """주어진 년/월의 셋째 금요일 계산."""
+    c = calendar.Calendar(firstweekday=calendar.MONDAY)
+    fridays = [
+        d for d in c.itermonthdays2(year, month)
+        if d[0] != 0 and d[1] == calendar.FRIDAY
+    ]
+    return date_type(year, month, fridays[2][0])
+
+
+def get_roll_schedule(year: int) -> List[dict]:
+    """해당 연도의 ES 선물 롤 스케줄 반환.
+
+    Returns:
+        [{"contract": "ESH26", "roll_date": "2026-03-16",
+          "expiry": "2026-03-20", "next_contract": "ESM26"}, ...]
+    """
+    months = [3, 6, 9, 12]
+    schedule = []
+    for i, month in enumerate(months):
+        expiry = _third_friday(year, month)
+        # 롤 데이트 = 만기 주 월요일 (만기 전)
+        days_to_monday = (expiry.weekday() - 0) % 7  # 금요일(4) → 4일 전이 월요일
+        roll_date = expiry - timedelta(days=days_to_monday)
+        if roll_date >= expiry:
+            roll_date -= timedelta(days=7)
+
+        code = _CONTRACT_MONTH_CODES[month]
+        yr_short = str(year)[-2:]
+        next_month = months[(i + 1) % len(months)]
+        next_year = year + 1 if next_month == 3 else year
+        next_code = _CONTRACT_MONTH_CODES[next_month]
+        next_yr_short = str(next_year)[-2:]
+
+        schedule.append({
+            "contract": f"ES{code}{yr_short}",
+            "roll_date": roll_date.isoformat(),
+            "expiry": expiry.isoformat(),
+            "next_contract": f"ES{next_code}{next_yr_short}",
+        })
+    return schedule
+
+
+def days_to_next_roll(current_date: Optional[date_type] = None) -> Optional[dict]:
+    """다음 롤까지 남은 일수와 계약 정보.
+
+    Returns:
+        {"contract": "ESH26→ESM26", "roll_date": "2026-03-16", "days_remaining": 3}
+        or None if no upcoming roll within 60 days.
+    """
+    if current_date is None:
+        current_date = date_type.today()
+
+    for year in [current_date.year, current_date.year + 1]:
+        for entry in get_roll_schedule(year):
+            roll_dt = date_type.fromisoformat(entry["roll_date"])
+            diff = (roll_dt - current_date).days
+            if 0 <= diff <= 60:
+                return {
+                    "contract": f"{entry['contract']}→{entry['next_contract']}",
+                    "roll_date": entry["roll_date"],
+                    "days_remaining": diff,
+                }
+    return None
+
+
+# ══════════════════════════════════════════
 # 내부 상태 관리
 # ══════════════════════════════════════════
 
@@ -55,6 +130,21 @@ class FuturesPositionState:
     lowest_since_entry: float = float("inf")  # 진입 이후 최저가 (숏)
     trailing_active: bool = False
     bars_held: int = 0
+    choch_confirm_count: int = 0        # CHoCH MACD 반전 연속 확인 카운터
+
+    def reset_for_entry(self, direction: str, entry_price: float):
+        """신규 진입 시 상태 초기화."""
+        self.direction = direction
+        self.entry_price = entry_price
+        self.bars_held = 0
+        self.trailing_active = False
+        self.choch_confirm_count = 0
+        if direction == "LONG":
+            self.highest_since_entry = entry_price
+            self.lowest_since_entry = float("inf")
+        else:
+            self.lowest_since_entry = entry_price
+            self.highest_since_entry = 0.0
 
 
 class SP500FuturesStrategy(BaseStrategy):
@@ -72,6 +162,10 @@ class SP500FuturesStrategy(BaseStrategy):
         self.config = config
         self.fc: SP500FuturesConfig = config.sp500_futures
         self._position_states: Dict[str, FuturesPositionState] = {}
+        # EV Engine + Dynamic Kelly (Phase 3)
+        self._trade_history: List[float] = []  # 최근 N건 PnL% 기록
+        # 연속 손절 추적 (Phase 4A)
+        self._consecutive_losses: int = 0
 
     # ══════════════════════════════════════════
     # 1. 기술적 지표 계산
@@ -237,9 +331,22 @@ class SP500FuturesStrategy(BaseStrategy):
         curr = df.iloc[-1]
         prev = df.iloc[-2]
 
+        # NaN 방어: 핵심 지표 검증
+        for col in ["atr", "zscore", "rsi", "adx", "macd_hist"]:
+            val = curr.get(col)
+            if val is not None and (pd.isna(val) or np.isinf(val)):
+                logger.warning("NaN/Inf in %s for %s, skipping entry", col, code)
+                return None
+
         price_data = current_prices.get(code)
         current_price = price_data.current_price if price_data else float(curr["close"])
         stock_name = price_data.stock_name if price_data else code
+
+        # ── EV 게이트 + 연속손절 체크 ──
+        if not self._check_ev_gate():
+            return None
+        if not self._check_consecutive_loss_halt():
+            return None
 
         # ── 방향 결정 (롱 vs 숏) ──
         direction = self._determine_direction(df)
@@ -258,8 +365,21 @@ class SP500FuturesStrategy(BaseStrategy):
         all_primaries = l1_signals + l2_signals
         all_confirms = l3_signals + l4_signals
 
+        # ── Market Regime 적용 ──
+        regime = self._determine_market_regime(df)
+        if regime == "BULL":
+            threshold = self.fc.regime_bull_entry_threshold
+            if not is_long:
+                total_score -= self.fc.regime_counter_bias_penalty
+        elif regime == "BEAR":
+            threshold = self.fc.regime_bear_entry_threshold
+            if is_long:
+                total_score -= self.fc.regime_counter_bias_penalty
+        else:
+            threshold = self.fc.entry_threshold
+
         # ── 진입 임계값 체크 ──
-        if total_score < self.fc.entry_threshold:
+        if total_score < threshold:
             return None
 
         # ── ATR 돌파 필터 ──
@@ -320,6 +440,12 @@ class SP500FuturesStrategy(BaseStrategy):
 
         curr = df.iloc[-1]
 
+        # ── EV 게이트 + 연속손절 체크 ──
+        if not self._check_ev_gate():
+            return None
+        if not self._check_consecutive_loss_halt():
+            return None
+
         direction = self._determine_direction(df)
         if direction == FuturesDirection.NEUTRAL:
             return None
@@ -332,7 +458,21 @@ class SP500FuturesStrategy(BaseStrategy):
         l4_score, l4_signals = self._score_volume(df, is_long)
 
         total_score = l1_score + l2_score + l3_score + l4_score
-        if total_score < self.fc.entry_threshold:
+
+        # ── Market Regime 적용 ──
+        regime = self._determine_market_regime(df)
+        if regime == "BULL":
+            threshold = self.fc.regime_bull_entry_threshold
+            if not is_long:
+                total_score -= self.fc.regime_counter_bias_penalty
+        elif regime == "BEAR":
+            threshold = self.fc.regime_bear_entry_threshold
+            if is_long:
+                total_score -= self.fc.regime_counter_bias_penalty
+        else:
+            threshold = self.fc.entry_threshold
+
+        if total_score < threshold:
             return None
 
         if not self._check_atr_breakout(df, is_long):
@@ -346,8 +486,16 @@ class SP500FuturesStrategy(BaseStrategy):
         zscore = float(curr.get("zscore", 0))
         sl, tp = self._calculate_sl_tp(current_price, atr, is_long, adx)
 
+        # Regime-adjusted holding/SL
+        if regime == "BEAR":
+            sl_hard = current_price * (1 - self.fc.regime_bear_sl_pct) if is_long else current_price * (1 + self.fc.regime_bear_sl_pct)
+            if is_long:
+                sl = max(sl, sl_hard)  # tighter SL in BEAR for longs
+            else:
+                sl = min(sl, sl_hard)
+
         rr_ratio = abs(tp - current_price) / abs(current_price - sl) if abs(current_price - sl) > 0 else 0
-        contracts = self._calculate_position_size(equity, current_price, sl)
+        contracts = self._calculate_position_size(equity, current_price, sl, total_score)
 
         return FuturesSignal(
             ticker=code,
@@ -371,6 +519,7 @@ class SP500FuturesStrategy(BaseStrategy):
                 "rsi": float(curr.get("rsi", 50)),
                 "macd_hist": float(curr.get("macd_hist", 0)),
                 "bb_squeeze": float(curr.get("bb_squeeze_ratio", 1)),
+                "regime": regime,
             },
         )
 
@@ -436,6 +585,112 @@ class SP500FuturesStrategy(BaseStrategy):
 
         return FuturesDirection.NEUTRAL
 
+    def _determine_market_regime(self, df: pd.DataFrame) -> str:
+        """
+        시장 레짐 판단: BULL / NEUTRAL / BEAR.
+
+        조건:
+          BULL: Price > MA200 & MA200 상승 & EMA 정배열
+          BEAR: Price < MA200 & MA200 하락 & EMA 역배열
+          NEUTRAL: 기타
+        """
+        if len(df) < self.fc.trend_slope_lookback + 1:
+            return "NEUTRAL"
+
+        curr = df.iloc[-1]
+        close = float(curr.get("close", 0))
+        ma_trend = float(curr.get("ma_trend", 0))
+        ema_fast = float(curr.get("ema_fast", 0))
+        ema_mid = float(curr.get("ema_mid", 0))
+        ema_slow = float(curr.get("ema_slow", 0))
+
+        if any(pd.isna(v) or v == 0 for v in [ma_trend, ema_fast, ema_mid, ema_slow]):
+            return "NEUTRAL"
+
+        # MA200 기울기 판단
+        lookback = self.fc.trend_slope_lookback
+        ma_trend_prev = float(df["ma_trend"].iloc[-lookback]) if len(df) >= lookback else ma_trend
+        ma200_rising = ma_trend > ma_trend_prev
+        ma200_falling = ma_trend < ma_trend_prev
+
+        # EMA 정배열/역배열
+        ema_bullish = ema_fast > ema_mid > ema_slow
+        ema_bearish = ema_fast < ema_mid < ema_slow
+
+        if close > ma_trend and ma200_rising and ema_bullish:
+            return "BULL"
+        elif close < ma_trend and ma200_falling and ema_bearish:
+            return "BEAR"
+
+        return "NEUTRAL"
+
+    # ══════════════════════════════════════════
+    # 3b. EV Engine + Dynamic Kelly + 연속손절
+    # ══════════════════════════════════════════
+
+    def record_trade_result(self, pnl_pct: float) -> None:
+        """트레이드 결과 기록 (EV/Kelly 계산 + 연속손절 추적)."""
+        self._trade_history.append(pnl_pct)
+        if len(self._trade_history) > self.fc.ev_lookback:
+            self._trade_history = self._trade_history[-self.fc.ev_lookback:]
+
+        if pnl_pct < 0:
+            self._consecutive_losses += 1
+        else:
+            self._consecutive_losses = 0
+
+    def _calculate_ev(self) -> Optional[float]:
+        """Expected Value 계산. 이력 부족 시 None."""
+        if len(self._trade_history) < self.fc.ev_min_trades:
+            return None
+        wins = [t for t in self._trade_history if t > 0]
+        losses = [t for t in self._trade_history if t <= 0]
+        if not wins and not losses:
+            return None
+        p_win = len(wins) / len(self._trade_history)
+        avg_win = sum(wins) / len(wins) if wins else 0
+        avg_loss = abs(sum(losses) / len(losses)) if losses else 0
+        return p_win * avg_win - (1 - p_win) * avg_loss
+
+    def _calculate_dynamic_kelly(self) -> float:
+        """Dynamic Kelly 계산. 이력 부족 시 고정 kelly_fraction."""
+        if len(self._trade_history) < self.fc.kelly_min_trades:
+            return self.fc.kelly_fraction
+        wins = [t for t in self._trade_history if t > 0]
+        losses = [t for t in self._trade_history if t <= 0]
+        if not wins or not losses:
+            return self.fc.kelly_fraction
+        p = len(wins) / len(self._trade_history)
+        q = 1 - p
+        avg_win = sum(wins) / len(wins)
+        avg_loss = abs(sum(losses) / len(losses))
+        if avg_loss == 0:
+            return self.fc.kelly_fraction
+        b = avg_win / avg_loss
+        kelly = (b * p - q) / b
+        kelly *= self.fc.kelly_half_mult
+        return max(0.0, min(kelly, self.fc.kelly_max_fraction))
+
+    def _check_ev_gate(self) -> bool:
+        """EV 게이트. EV ≤ 0이면 진입 차단. 이력 부족 시 통과."""
+        ev = self._calculate_ev()
+        if ev is None:
+            return True
+        if ev <= 0:
+            logger.info("EV GATE BLOCKED | EV=%.4f | trades=%d", ev, len(self._trade_history))
+            return False
+        return True
+
+    def _check_consecutive_loss_halt(self) -> bool:
+        """연속 손절 정지 체크. 3회 이상 연속 손실 시 차단."""
+        if self._consecutive_losses >= self.fc.max_consecutive_losses:
+            logger.warning(
+                "CONSECUTIVE LOSS HALT | losses=%d | max=%d",
+                self._consecutive_losses, self.fc.max_consecutive_losses,
+            )
+            return False
+        return True
+
     # ══════════════════════════════════════════
     # 4. Layer별 스코어링
     # ══════════════════════════════════════════
@@ -443,48 +698,76 @@ class SP500FuturesStrategy(BaseStrategy):
     def _score_zscore(self, df: pd.DataFrame, is_long: bool) -> Tuple[float, List[str]]:
         """
         Layer 1: Z-Score 통계적 위치 (max weight_zscore점).
-        Z < -2.0: 통계적 과매도 (롱 유리)
-        Z > +2.0: 통계적 과매수 (숏 유리)
+
+        2-Mode 스코어링:
+          A) Mean-Reversion: Z < -2.0 → 롱 만점, Z > +2.0 → 숏 만점 (기존)
+          B) Trend-Continuation: 추세 방향에서 풀백(평균 회귀) 시 보간 점수
+             - LONG: Z ∈ [-1, +1] → 선형 보간 (평균 근처 = 추세 중 건강한 풀백)
+             - SHORT: Z ∈ [-1, +1] → 선형 보간
         """
+        if len(df) < 1:
+            return 0.0, []
         max_score = self.fc.weight_zscore
         curr = df.iloc[-1]
         zscore = float(curr.get("zscore", 0))
         signals = []
         score = 0.0
 
+        # 추세추종 보간 상한 (max_score의 비율)
+        trend_cont_max_pct = getattr(self.fc, 'zscore_trend_cont_max_pct', 0.6)
+        trend_cont_min_pct = getattr(self.fc, 'zscore_trend_cont_min_pct', 0.2)
+
         if is_long:
-            # 과매도일수록 롱 점수 증가
-            if zscore <= -3.0:
-                score = max_score
+            # A) Mean-Reversion: 과매도 영역 (기존 로직)
+            if zscore <= -self.fc.zscore_tier1:
+                score = max_score * self.fc.zscore_tier1_pct
                 signals.append("Z_EXTREME_OVERSOLD")
-            elif zscore <= -2.0:
-                score = max_score * 0.8
+            elif zscore <= -self.fc.zscore_tier2:
+                score = max_score * self.fc.zscore_tier2_pct
                 signals.append("Z_OVERSOLD")
-            elif zscore <= -1.5:
-                score = max_score * 0.5
+            elif zscore <= -self.fc.zscore_tier3:
+                score = max_score * self.fc.zscore_tier3_pct
                 signals.append("Z_MILD_OVERSOLD")
-            elif zscore <= -1.0:
-                score = max_score * 0.3
+            elif zscore <= -self.fc.zscore_tier4:
+                score = max_score * self.fc.zscore_tier4_pct
                 signals.append("Z_BELOW_MEAN")
-            # 과매수 영역에서 롱은 감점
-            elif zscore >= 2.0:
+            # B) Trend-Continuation: Z ∈ (-1, +1.5] → 추세 중 풀백/평균 진입
+            elif -self.fc.zscore_tier4 < zscore <= 1.5:
+                # Z=-1 → max_pct, Z=+1.5 → min_pct (선형 보간)
+                t = (zscore - (-self.fc.zscore_tier4)) / (1.5 - (-self.fc.zscore_tier4))
+                t = max(0.0, min(1.0, t))
+                pct = trend_cont_max_pct * (1 - t) + trend_cont_min_pct * t
+                score = max_score * pct
+                signals.append("Z_TREND_PULLBACK")
+            # C) 과매수 극단 → 롱 차단
+            elif zscore >= self.fc.zscore_block_threshold:
                 score = 0
+                signals.append("Z_OVERBOUGHT_BLOCK")
         else:
-            # 과매수일수록 숏 점수 증가
-            if zscore >= 3.0:
-                score = max_score
+            # A) Mean-Reversion: 과매수 영역 (기존 로직)
+            if zscore >= self.fc.zscore_tier1:
+                score = max_score * self.fc.zscore_tier1_pct
                 signals.append("Z_EXTREME_OVERBOUGHT")
-            elif zscore >= 2.0:
-                score = max_score * 0.8
+            elif zscore >= self.fc.zscore_tier2:
+                score = max_score * self.fc.zscore_tier2_pct
                 signals.append("Z_OVERBOUGHT")
-            elif zscore >= 1.5:
-                score = max_score * 0.5
+            elif zscore >= self.fc.zscore_tier3:
+                score = max_score * self.fc.zscore_tier3_pct
                 signals.append("Z_MILD_OVERBOUGHT")
-            elif zscore >= 1.0:
-                score = max_score * 0.3
+            elif zscore >= self.fc.zscore_tier4:
+                score = max_score * self.fc.zscore_tier4_pct
                 signals.append("Z_ABOVE_MEAN")
-            elif zscore <= -2.0:
+            # B) Trend-Continuation: Z ∈ [-1.5, +1) → 추세 중 풀백/평균 진입
+            elif -1.5 <= zscore < self.fc.zscore_tier4:
+                t = (self.fc.zscore_tier4 - zscore) / (self.fc.zscore_tier4 - (-1.5))
+                t = max(0.0, min(1.0, t))
+                pct = trend_cont_max_pct * (1 - t) + trend_cont_min_pct * t
+                score = max_score * pct
+                signals.append("Z_TREND_PULLBACK")
+            # C) 과매도 극단 → 숏 차단
+            elif zscore <= -self.fc.zscore_block_threshold:
                 score = 0
+                signals.append("Z_OVERSOLD_BLOCK")
 
         return round(score, 1), signals
 
@@ -493,6 +776,8 @@ class SP500FuturesStrategy(BaseStrategy):
         Layer 2: 추세/구조 (max weight_trend점).
         EMA 정렬 + MA200 방향 + 가격 위치.
         """
+        if len(df) < 1:
+            return 0.0, []
         max_score = self.fc.weight_trend
         curr = df.iloc[-1]
         signals = []
@@ -507,45 +792,47 @@ class SP500FuturesStrategy(BaseStrategy):
         if not all([ema_fast, ema_mid, ema_slow, ma_trend]):
             return 0, []
 
+        lookback = self.fc.trend_slope_lookback
+
         if is_long:
             # EMA 정배열: fast > mid > slow
             if ema_fast > ema_mid > ema_slow:
-                score += max_score * 0.4
+                score += max_score * self.fc.trend_ema_full_pct
                 signals.append("EMA_BULL_ALIGNED")
             elif ema_fast > ema_mid:
-                score += max_score * 0.2
+                score += max_score * self.fc.trend_ema_partial_pct
                 signals.append("EMA_PARTIAL_BULL")
 
             # MA200 위
             if close > ma_trend:
-                score += max_score * 0.3
+                score += max_score * self.fc.trend_ma200_pos_pct
                 signals.append("ABOVE_MA200")
 
             # MA200 기울기 상승
-            if len(df) >= 5:
-                ma_trend_prev = df["ma_trend"].iloc[-5]
+            if len(df) >= lookback:
+                ma_trend_prev = df["ma_trend"].iloc[-lookback]
                 if pd.notna(ma_trend_prev) and ma_trend > ma_trend_prev:
-                    score += max_score * 0.3
+                    score += max_score * self.fc.trend_ma200_slope_pct
                     signals.append("MA200_RISING")
         else:
             # EMA 역배열: fast < mid < slow
             if ema_fast < ema_mid < ema_slow:
-                score += max_score * 0.4
+                score += max_score * self.fc.trend_ema_full_pct
                 signals.append("EMA_BEAR_ALIGNED")
             elif ema_fast < ema_mid:
-                score += max_score * 0.2
+                score += max_score * self.fc.trend_ema_partial_pct
                 signals.append("EMA_PARTIAL_BEAR")
 
             # MA200 아래
             if close < ma_trend:
-                score += max_score * 0.3
+                score += max_score * self.fc.trend_ma200_pos_pct
                 signals.append("BELOW_MA200")
 
             # MA200 기울기 하락
-            if len(df) >= 5:
-                ma_trend_prev = df["ma_trend"].iloc[-5]
+            if len(df) >= lookback:
+                ma_trend_prev = df["ma_trend"].iloc[-lookback]
                 if pd.notna(ma_trend_prev) and ma_trend < ma_trend_prev:
-                    score += max_score * 0.3
+                    score += max_score * self.fc.trend_ma200_slope_pct
                     signals.append("MA200_FALLING")
 
         return round(min(score, max_score), 1), signals
@@ -555,6 +842,8 @@ class SP500FuturesStrategy(BaseStrategy):
         Layer 3: 모멘텀 (max weight_momentum점).
         MACD 크로스/히스토그램 + ADX 강도 + RSI 확인.
         """
+        if len(df) < 2:
+            return 0.0, []
         max_score = self.fc.weight_momentum
         curr = df.iloc[-1]
         prev = df.iloc[-2]
@@ -571,50 +860,50 @@ class SP500FuturesStrategy(BaseStrategy):
         if is_long:
             # MACD 히스토그램 양전환
             if macd_hist_prev <= 0 < macd_hist:
-                score += max_score * 0.3
+                score += max_score * self.fc.momentum_macd_cross_pct
                 signals.append("MACD_BULL_CROSS")
             elif macd_hist > 0 and macd_hist > macd_hist_prev:
-                score += max_score * 0.2
+                score += max_score * self.fc.momentum_macd_hist_pct
                 signals.append("MACD_HIST_RISING")
 
             # ADX + DI 확인
             if adx > self.fc.adx_threshold and plus_di > minus_di:
-                score += max_score * 0.3
+                score += max_score * self.fc.momentum_adx_trend_pct
                 signals.append("ADX_BULL_TREND")
                 if adx > self.fc.adx_strong:
-                    score += max_score * 0.1
+                    score += max_score * self.fc.momentum_adx_bonus_pct
                     signals.append("ADX_STRONG")
 
             # RSI 적정 범위 (과매도 반등 OR 추세 중 적정)
             if self.fc.rsi_long_range[0] <= rsi <= self.fc.rsi_long_range[1]:
-                score += max_score * 0.2
+                score += max_score * self.fc.momentum_rsi_ok_pct
                 signals.append("RSI_LONG_OK")
             elif rsi < self.fc.rsi_oversold:
-                score += max_score * 0.15
+                score += max_score * self.fc.momentum_rsi_extreme_pct
                 signals.append("RSI_OVERSOLD_BOUNCE")
         else:
             # MACD 히스토그램 음전환
             if macd_hist_prev >= 0 > macd_hist:
-                score += max_score * 0.3
+                score += max_score * self.fc.momentum_macd_cross_pct
                 signals.append("MACD_BEAR_CROSS")
             elif macd_hist < 0 and macd_hist < macd_hist_prev:
-                score += max_score * 0.2
+                score += max_score * self.fc.momentum_macd_hist_pct
                 signals.append("MACD_HIST_FALLING")
 
             # ADX + DI 확인
             if adx > self.fc.adx_threshold and minus_di > plus_di:
-                score += max_score * 0.3
+                score += max_score * self.fc.momentum_adx_trend_pct
                 signals.append("ADX_BEAR_TREND")
                 if adx > self.fc.adx_strong:
-                    score += max_score * 0.1
+                    score += max_score * self.fc.momentum_adx_bonus_pct
                     signals.append("ADX_STRONG")
 
             # RSI 과매수 또는 적정 범위
             if self.fc.rsi_short_range[0] <= rsi <= self.fc.rsi_short_range[1]:
-                score += max_score * 0.2
+                score += max_score * self.fc.momentum_rsi_ok_pct
                 signals.append("RSI_SHORT_OK")
             elif rsi > self.fc.rsi_overbought:
-                score += max_score * 0.15
+                score += max_score * self.fc.momentum_rsi_extreme_pct
                 signals.append("RSI_OVERBOUGHT_DROP")
 
         return round(min(score, max_score), 1), signals
@@ -624,6 +913,8 @@ class SP500FuturesStrategy(BaseStrategy):
         Layer 4: 거래량/OBV (max weight_volume점).
         거래량 확인 + OBV 추세 일치.
         """
+        if len(df) < 1:
+            return 0.0, []
         max_score = self.fc.weight_volume
         curr = df.iloc[-1]
         signals = []
@@ -636,25 +927,25 @@ class SP500FuturesStrategy(BaseStrategy):
 
         # 거래량 확인 (돌파 시 거래량 증가)
         if vol_ratio >= self.fc.volume_confirm_mult:
-            score += max_score * 0.35
+            score += max_score * self.fc.volume_surge_pct
             signals.append("VOL_SURGE")
-        elif vol_ratio >= 1.2:
-            score += max_score * 0.15
+        elif vol_ratio >= self.fc.volume_above_avg_ratio:
+            score += max_score * self.fc.volume_above_avg_pct
             signals.append("VOL_ABOVE_AVG")
 
         # OBV 추세 확인
         if is_long:
             if obv_fast > obv_slow:
-                score += max_score * 0.35
+                score += max_score * self.fc.volume_obv_pct
                 signals.append("OBV_BULL")
         else:
             if obv_fast < obv_slow:
-                score += max_score * 0.35
+                score += max_score * self.fc.volume_obv_pct
                 signals.append("OBV_BEAR")
 
         # BB 스퀴즈 (변동성 수축 → 폭발 잠재)
         if bb_squeeze < self.fc.bb_squeeze_ratio:
-            score += max_score * 0.3
+            score += max_score * self.fc.volume_squeeze_pct
             signals.append("BB_SQUEEZE")
 
         return round(min(score, max_score), 1), signals
@@ -694,7 +985,7 @@ class SP500FuturesStrategy(BaseStrategy):
 
         # 저거래량 체크
         vol_ratio = float(curr.get("volume_ratio", 1.0))
-        if vol_ratio < 0.8:
+        if vol_ratio < self.fc.fakeout_min_vol_ratio:
             return False
 
         # 위크 트랩 체크
@@ -704,16 +995,16 @@ class SP500FuturesStrategy(BaseStrategy):
         lo = float(curr["low"])
         body = abs(c - o)
 
-        if body < 0.001:  # 도지 캔들은 통과 (별도 판단)
+        if body < self.fc.doji_body_threshold:  # 도지 캔들은 통과 (별도 판단)
             return True
 
         if is_long:
             upper_wick = h - max(o, c)
-            if upper_wick / body > 1.5:
+            if body > 0 and upper_wick / body > self.fc.fakeout_max_wick_ratio:
                 return False
         else:
             lower_wick = min(o, c) - lo
-            if lower_wick / body > 1.5:
+            if body > 0 and lower_wick / body > self.fc.fakeout_max_wick_ratio:
                 return False
 
         return True
@@ -740,7 +1031,7 @@ class SP500FuturesStrategy(BaseStrategy):
         tp_mult = self.fc.tp_atr_mult  # 3.0
 
         if atr <= 0:
-            atr = entry_price * 0.01  # fallback: 1%
+            atr = entry_price * self.fc.atr_fallback_pct
 
         if is_long:
             sl_atr = entry_price - atr * sl_mult
@@ -756,11 +1047,14 @@ class SP500FuturesStrategy(BaseStrategy):
         return round(sl, 2), round(tp, 2)
 
     def _calculate_position_size(
-        self, equity: float, entry_price: float, stop_loss: float
+        self, equity: float, entry_price: float, stop_loss: float,
+        signal_strength: float = 60.0,
     ) -> int:
         """
-        Kelly Criterion 기반 포지션 사이징.
-        contracts = (Equity × Risk%) / (|Entry - SL| × Multiplier)
+        Kelly Criterion 기반 포지션 사이징 (스코어 비례).
+
+        contracts = (Equity × Risk%) / (|Entry - SL| × Multiplier) × strength_mult
+        strength_mult: 60점→0.4x, 80점→0.825x, 100점→1.25x
         """
         risk_amount = equity * self.fc.risk_per_trade_pct
         point_risk = abs(entry_price - stop_loss)
@@ -771,7 +1065,19 @@ class SP500FuturesStrategy(BaseStrategy):
         multiplier = 5.0 if self.fc.is_micro else self.fc.contract_multiplier
         dollar_risk_per_contract = point_risk * multiplier
 
-        contracts = int(risk_amount / dollar_risk_per_contract)
+        base_contracts = risk_amount / dollar_risk_per_contract
+
+        # 스코어 비례 배수
+        score_range = self.fc.sizing_score_range if self.fc.sizing_score_range > 0 else 40.0
+        mult_range = self.fc.sizing_max_mult - self.fc.sizing_base_mult
+        strength_mult = self.fc.sizing_base_mult + (signal_strength - self.fc.sizing_score_base) / score_range * mult_range
+        strength_mult = max(self.fc.sizing_base_mult, min(self.fc.sizing_max_mult, strength_mult))
+
+        # Dynamic Kelly 적용
+        kelly = self._calculate_dynamic_kelly()
+        kelly_ratio = kelly / self.fc.kelly_fraction if self.fc.kelly_fraction > 0 else 1.0
+
+        contracts = int(base_contracts * strength_mult * kelly_ratio)
         contracts = max(1, min(contracts, self.fc.max_contracts))
 
         return contracts
@@ -875,8 +1181,9 @@ class SP500FuturesStrategy(BaseStrategy):
                     exit_signals.append(exit_sig)
                     continue
 
-            # ── ES5: 최대 보유기간 ──
-            exit_sig = self._check_max_holding(pos, current_price, pnl_pct)
+            # ── ES5: 최대 보유기간 (레짐 조정) ──
+            exit_regime = self._determine_market_regime(df) if df is not None and not df.empty else "NEUTRAL"
+            exit_sig = self._check_max_holding(pos, current_price, pnl_pct, exit_regime)
             if exit_sig:
                 exit_signals.append(exit_sig)
                 continue
@@ -1021,19 +1328,32 @@ class SP500FuturesStrategy(BaseStrategy):
             return None
 
         state.trailing_active = True
-        trail_mult = self.fc.trailing_atr_mult
 
-        # PnL 구간별 타이트닝
-        if pnl_pct >= 0.06:  # +6% 이상
-            trail_mult = max(1.0, trail_mult - 0.5)
-        elif pnl_pct >= 0.04:  # +4% 이상
-            trail_mult = max(1.2, trail_mult - 0.3)
+        # Progressive Trailing 4-tier (CLAUDE.md §Exit ES3 사양)
+        # PnL 구간별 ATR 배수 + 최소 floor 적용
+        if pnl_pct >= self.fc.trailing_tier1_pnl:      # ≥15%
+            trail_mult = self.fc.trailing_tier1_atr
+            floor_pct = self.fc.trailing_tier1_floor
+        elif pnl_pct >= self.fc.trailing_tier2_pnl:    # ≥10%
+            trail_mult = self.fc.trailing_tier2_atr
+            floor_pct = self.fc.trailing_tier2_floor
+        elif pnl_pct >= self.fc.trailing_tier3_pnl:    # ≥7%
+            trail_mult = self.fc.trailing_tier3_atr
+            floor_pct = self.fc.trailing_tier3_floor
+        else:                                            # default
+            trail_mult = self.fc.trailing_default_atr
+            floor_pct = self.fc.trailing_default_floor
 
         if is_long:
             trail_stop = state.highest_since_entry - trail_mult * atr
+            # floor: 진입가 대비 최소 손실 한도 보장
+            floor_stop = entry_price * (1 + floor_pct)
+            trail_stop = max(trail_stop, floor_stop)
             triggered = current_price <= trail_stop
         else:
             trail_stop = state.lowest_since_entry + trail_mult * atr
+            floor_stop = entry_price * (1 - floor_pct)
+            trail_stop = min(trail_stop, floor_stop)
             triggered = current_price >= trail_stop
 
         if triggered:
@@ -1062,44 +1382,68 @@ class SP500FuturesStrategy(BaseStrategy):
         ES_CHOCH: 구조 반전 (MACD 데드/골든 크로스).
         롱 보유 중 MACD 데드크로스 → 청산
         숏 보유 중 MACD 골든크로스 → 청산
+
+        개선:
+        - PnL 게이트: 손실 < choch_pnl_gate_loss 또는 이익 > choch_pnl_gate_profit 일 때만 발동
+        - 연속 확인: choch_confirm_bars 봉 연속 반전 시에만 퇴출
         """
         if len(df) < 3:
             return None
 
+        # PnL 게이트: 중간 구간에서는 CHoCH 무시
+        if self.fc.choch_pnl_gate_loss <= pnl_pct <= self.fc.choch_pnl_gate_profit:
+            return None
+
         curr = df.iloc[-1]
-        prev = df.iloc[-2]
-
         macd_hist = float(curr.get("macd_hist", 0))
-        macd_hist_prev = float(prev.get("macd_hist", 0))
 
-        triggered = False
-        if is_long and macd_hist_prev >= 0 and macd_hist < 0:
-            triggered = True  # 데드크로스
-        elif not is_long and macd_hist_prev <= 0 and macd_hist > 0:
-            triggered = True  # 골든크로스
+        state = self._get_position_state(pos.stock_code)
 
-        if triggered:
-            current_price = float(curr["close"])
-            logger.info(
-                "EXIT ES_CHOCH | %s | %s | MACD reversal | pnl=%.2f%%",
-                pos.stock_name, "LONG" if is_long else "SHORT", pnl_pct * 100,
-            )
-            return ExitSignal(
-                stock_code=pos.stock_code,
-                stock_name=pos.stock_name,
-                position_id=getattr(pos, "position_id", ""),
-                exit_type=ExitReason.CHOCH_REVERSAL.value,
-                exit_reason="MACD_REVERSAL",
-                order_type="LIMIT",
-                current_price=current_price,
-                pnl_pct=pnl_pct,
-            )
-        return None
+        # 반전 감지
+        reversal_active = False
+        if is_long and macd_hist < 0:
+            reversal_active = True
+        elif not is_long and macd_hist > 0:
+            reversal_active = True
 
-    def _check_max_holding(self, pos, current_price: float, pnl_pct: float) -> Optional[ExitSignal]:
-        """ES5: 최대 보유기간 초과."""
+        if reversal_active:
+            state.choch_confirm_count += 1
+        else:
+            state.choch_confirm_count = 0
+            return None
+
+        # 연속 확인 봉수 미달
+        if state.choch_confirm_count < self.fc.choch_confirm_bars:
+            return None
+
+        current_price = float(curr["close"])
+        logger.info(
+            "EXIT ES_CHOCH | %s | %s | MACD reversal (%d bars) | pnl=%.2f%%",
+            pos.stock_name, "LONG" if is_long else "SHORT",
+            state.choch_confirm_count, pnl_pct * 100,
+        )
+        state.choch_confirm_count = 0
+        return ExitSignal(
+            stock_code=pos.stock_code,
+            stock_name=pos.stock_name,
+            position_id=getattr(pos, "position_id", ""),
+            exit_type=ExitReason.CHOCH_REVERSAL.value,
+            exit_reason="MACD_REVERSAL",
+            order_type="LIMIT",
+            current_price=current_price,
+            pnl_pct=pnl_pct,
+        )
+
+    def _check_max_holding(self, pos, current_price: float, pnl_pct: float, regime: str = "NEUTRAL") -> Optional[ExitSignal]:
+        """ES5: 최대 보유기간 초과 (레짐별 조정)."""
         holding = getattr(pos, "holding_days", 0) or 0
-        if holding > self.fc.max_holding_days:
+        if regime == "BULL":
+            max_days = self.fc.regime_bull_max_holding
+        elif regime == "BEAR":
+            max_days = self.fc.regime_bear_max_holding
+        else:
+            max_days = self.fc.max_holding_days
+        if holding > max_days:
             logger.info(
                 "EXIT ES5 MAX_HOLDING | %s | days=%d | pnl=%.2f%%",
                 pos.stock_name, holding, pnl_pct * 100,

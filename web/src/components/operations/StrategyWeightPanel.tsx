@@ -37,7 +37,7 @@ export function StrategyWeightPanel({ market }: Props) {
     useEffect(() => { loadData(); }, [loadData]);
 
     // 60초 폴링
-    const polling = usePolling(fetchMarketIntelligence, { interval: 60000, enabled: true });
+    const polling = usePolling(fetchMarketIntelligence, { interval: 60000, enabled: true, cacheKey: 'market-intelligence' });
     const polledIntel = polling.data?.[market] ?? null;
     const data = polledIntel || intel;
 

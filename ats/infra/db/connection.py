@@ -4,7 +4,7 @@ SQLite 데이터베이스 연결 관리
 """
 
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from infra.db.models import Base
@@ -25,6 +25,13 @@ class Database:
             echo=False,
             connect_args={"check_same_thread": False},
         )
+        # SQLite FK 제약 활성화
+        @event.listens_for(self.engine, "connect")
+        def _set_sqlite_pragma(dbapi_conn, connection_record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
         self._session_factory = sessionmaker(bind=self.engine)
         logger.info("Database connected | path=%s", db_path)
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List
+from typing import Dict, Optional, List
 
 
 # ──────────────────────────────────────────────
@@ -74,6 +74,30 @@ class ExitSignal:
     order_type: str              # "MARKET" | "LIMIT"
     current_price: float = 0.0
     pnl_pct: float = 0.0
+    metadata: dict = field(default_factory=dict)
+    timestamp: str = ""
+
+    def __post_init__(self):
+        if not self.timestamp:
+            self.timestamp = datetime.now().isoformat()
+
+
+@dataclass
+class FuturesSignal:
+    """선물 매매 시그널"""
+    ticker: str = ""
+    direction: str = "NEUTRAL"
+    signal_strength: float = 0.0
+    entry_price: float = 0.0
+    stop_loss: float = 0.0
+    take_profit: float = 0.0
+    atr: float = 0.0
+    z_score: float = 0.0
+    primary_signals: List[str] = field(default_factory=list)
+    confirmation_filters: List[str] = field(default_factory=list)
+    risk_reward_ratio: float = 0.0
+    position_size_contracts: int = 0
+    metadata: dict = field(default_factory=dict)
     timestamp: str = ""
 
     def __post_init__(self):
@@ -136,6 +160,7 @@ class Portfolio:
     mdd: float = 0.0
     peak_value: float = 0.0
     today_sold_codes: List[str] = field(default_factory=list)
+    position_weights: Dict[str, float] = field(default_factory=dict)  # stock_code → 현재 비중
 
 
 # ──────────────────────────────────────────────

@@ -48,6 +48,7 @@ class RateLimiter:
 
     def acquire(self):
         """호출 가능할 때까지 대기한다."""
+        sleep_time = 0.0
         with self._lock:
             now = time.monotonic()
             # 기간 밖의 오래된 호출 제거
@@ -55,10 +56,13 @@ class RateLimiter:
 
             if len(self._calls) >= self.max_calls:
                 sleep_time = self.period - (now - self._calls[0])
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-                self._calls = self._calls[1:]
 
+        # 락 밖에서 대기 — 다른 스레드 블로킹 방지
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
+        with self._lock:
+            self._calls = [t for t in self._calls if time.monotonic() - t < self.period]
             self._calls.append(time.monotonic())
 
 

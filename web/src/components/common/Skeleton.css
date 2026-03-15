@@ -1,0 +1,81 @@
+/* ── Skeleton Loading ── */
+
+@keyframes skeleton-shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+@keyframes skeleton-wave-move {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.skeleton-bar {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
+  background-size: 200px 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+.skeleton-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 1.5rem;
+  min-height: 400px;
+}
+
+.skeleton-chart-area {
+  flex: 1;
+  background: rgba(255,255,255,0.02);
+  border-radius: 8px;
+  overflow: hidden;
+  position: relative;
+}
+
+.skeleton-wave {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent);
+  animation: skeleton-wave-move 2s infinite;
+}
+
+.skeleton-table {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 1rem;
+}
+
+.skeleton-row {
+  display: flex;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.skeleton-header {
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+}
+
+.skeleton-card {
+  padding: 1rem;
+  border-radius: 8px;
+  min-height: 80px;
+}
+
+.skeleton-score-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 768px) {
+  .skeleton-score-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

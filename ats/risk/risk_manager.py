@@ -38,15 +38,20 @@ class RiskManager:
             return RiskCheckResult(passed=False, failed_gate="RG1", reason=reason)
 
         # ── RG2: 종목 비중 한도 ──
-        buy_amount = portfolio.total_capital * self.pc.max_weight_per_stock
+        # 기존 보유 비중 + 신규 매수 예정 비중이 한도를 초과하는지 체크
         if portfolio.total_capital > 0:
-            weight = buy_amount / portfolio.total_capital
-            if weight > self.pc.max_weight_per_stock:
-                reason = f"종목 비중 초과 ({weight:.1%} > {self.pc.max_weight_per_stock:.1%})"
+            existing_weight = 0.0
+            if hasattr(portfolio, 'position_weights') and portfolio.position_weights:
+                existing_weight = portfolio.position_weights.get(signal.stock_code, 0.0)
+            new_buy_weight = self.pc.max_weight_per_stock  # 1회 매수 최대 비중
+            total_weight = existing_weight + new_buy_weight
+            if total_weight > self.pc.max_weight_per_stock:
+                reason = f"종목 비중 초과 (기존 {existing_weight:.1%} + 신규 {new_buy_weight:.1%} = {total_weight:.1%} > {self.pc.max_weight_per_stock:.1%})"
                 logger.info("RG2 FAIL | %s | %s", signal.stock_code, reason)
                 return RiskCheckResult(passed=False, failed_gate="RG2", reason=reason)
 
         # ── RG3: 일일 매매금액 한도 ──
+        buy_amount = portfolio.total_capital * self.pc.max_weight_per_stock
         if self.rc.max_order_amount > 0:
             if portfolio.daily_buy_amount + buy_amount > self.rc.max_order_amount * self.pc.max_positions:
                 reason = f"일일 매매금액 한도 초과"
