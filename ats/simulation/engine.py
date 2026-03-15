@@ -901,6 +901,7 @@ class SimulationEngine:
         # 시장 데이터 캐시
         self._ohlcv_cache: Dict[str, pd.DataFrame] = {}
         self._current_prices: Dict[str, float] = {}
+        self._candle_score_cache: Dict[str, int] = {}  # P2: per-day candle score cache
         self._stock_names: Dict[str, str] = {w["code"]: w["name"] for w in self._watchlist}
 
         # 성과 추적
@@ -1244,6 +1245,7 @@ class SimulationEngine:
         """일일 PnL 리셋 (백테스트에서 매 거래일 시작 시 호출)."""
         self._daily_start_equity = self._get_total_equity()
         self._daily_trade_amount = 0.0
+        self._candle_score_cache.clear()  # P2: reset candle score cache per day
 
     def update_watchlist(self, new_watchlist: list):
         """동적 워치리스트 교체 (리밸런싱 시 호출)."""
@@ -2971,6 +2973,95 @@ class SimulationEngine:
             if code in self.positions:
                 del self.positions[code]
 
+    def _get_candle_score(self, code: str) -> int:
+        """P2: Quick candlestick pattern score from raw OHLCV, cached per day."""
+        cache_key = f"{code}_{self._backtest_date}"
+        if cache_key in self._candle_score_cache:
+            return self._candle_score_cache[cache_key]
+
+        df = self._ohlcv_cache.get(code)
+        if df is None or len(df) < 3:
+            return 0
+
+        score = 0
+        c = df['close'].values.astype(float)
+        o = df['open'].values.astype(float)
+        h = df['high'].values.astype(float)
+        lo = df['low'].values.astype(float)
+
+        # Last bar
+        body = c[-1] - o[-1]
+        prev_body = c[-2] - o[-2]
+        body_abs = abs(body)
+        prev_body_abs = abs(prev_body)
+
+        # Bullish Engulfing (+30)
+        if prev_body < 0 and body > 0 and o[-1] <= c[-2] and c[-1] >= o[-2]:
+            score += 30
+        # Bearish Engulfing (-30)
+        elif prev_body > 0 and body < 0 and o[-1] >= c[-2] and c[-1] <= o[-2]:
+            score -= 30
+
+        # Hammer (+25) — small body top, long lower shadow
+        lower_shadow = min(c[-1], o[-1]) - lo[-1]
+        upper_shadow = h[-1] - max(c[-1], o[-1])
+        if body_abs > 0 and lower_shadow >= 2 * body_abs and upper_shadow < body_abs:
+            # Check 3+ down bars context
+            down_count = 0
+            for i in range(2, min(6, len(c))):
+                if c[-i] < o[-i]:
+                    down_count += 1
+                else:
+                    break
+            if down_count >= 3:
+                score += 25
+
+        # Shooting Star (-25)
+        if body_abs > 0 and upper_shadow >= 2 * body_abs and lower_shadow < body_abs:
+            up_count = 0
+            for i in range(2, min(6, len(c))):
+                if c[-i] > o[-i]:
+                    up_count += 1
+                else:
+                    break
+            if up_count >= 3:
+                score -= 25
+
+        # Morning Star (+30) — 3-candle
+        if len(df) >= 3:
+            body_2 = c[-3] - o[-3]
+            body_1_abs = abs(c[-2] - o[-2])
+            hl_range_1 = h[-2] - lo[-2]
+            midpoint = o[-3] + body_2 / 2
+            if (body_2 < 0 and body > 0
+                    and hl_range_1 > 0 and body_1_abs < 0.1 * hl_range_1
+                    and c[-1] > midpoint):
+                score += 30
+
+        # Evening Star (-30)
+        if len(df) >= 3:
+            body_2 = c[-3] - o[-3]
+            body_1_abs = abs(c[-2] - o[-2])
+            hl_range_1 = h[-2] - lo[-2]
+            midpoint = o[-3] + body_2 / 2
+            if (body_2 > 0 and body < 0
+                    and hl_range_1 > 0 and body_1_abs < 0.1 * hl_range_1
+                    and c[-1] < midpoint):
+                score -= 30
+
+        # Doji (±15 based on shadow direction)
+        hl_range = h[-1] - lo[-1]
+        if hl_range > 0 and body_abs < 0.1 * hl_range:
+            if lower_shadow > 2 * upper_shadow:
+                score += 15  # Dragonfly Doji (bullish)
+            elif upper_shadow > 2 * lower_shadow:
+                score -= 15  # Gravestone Doji (bearish)
+
+        # Clamp
+        score = max(-100, min(100, score))
+        self._candle_score_cache[cache_key] = score
+        return score
+
     def _scan_entries_momentum(self):
         """
         6-Phase 통합 파이프라인 (기존 Momentum Swing):
@@ -3211,6 +3302,14 @@ class SimulationEngine:
             volume_bonus = min(int((vol_ratio - 1.5) * 10), 10) if vol_ratio > 1.5 else 0
             strength = min(max(base_strength + trend_bonus + stage_bonus + rsi_quality + volume_bonus, 10), 100)
 
+            # P2: Candlestick pattern bonus
+            candle_score = self._get_candle_score(code)
+            if candle_score > 20:
+                strength += 10
+            elif candle_score < -20:
+                strength -= 5  # Bearish candle near entry = reduce confidence
+            strength = min(max(strength, 10), 100)
+
             # B8: Minimum strength filter to reduce ES1 fires
             if strength < 45:
                 self._phase_stats.setdefault("b8_strength_blocks", 0)
@@ -3309,7 +3408,12 @@ class SimulationEngine:
             score_vol = self._score_volatility(df)
             score_obv = self._score_obv_signal(df)
             score_mom = self._score_momentum_signal(df)
-            total_score = score_smc + score_vol + score_obv + score_mom
+
+            # P2: Candlestick at OB/FVG zone confirmation
+            candle_score = self._get_candle_score(code)
+            candle_bonus = 15 if candle_score > 15 else 0  # Strong candlestick confirmation at SMC zone
+
+            total_score = score_smc + score_vol + score_obv + score_mom + candle_bonus
 
             if total_score < self._smc_entry_threshold:
                 self._phase_stats["phase3_no_primary"] += 1
@@ -3870,7 +3974,14 @@ class SimulationEngine:
             score_signal = self._score_mr_signal(df)
             score_vol = self._score_mr_volatility(df)
             score_confirm = self._score_mr_confirmation(df)
-            total_score = score_signal + score_vol + score_confirm
+
+            # P2: Reversal candle at oversold
+            candle_score = self._get_candle_score(code)
+            candle_bonus = 0
+            if candle_score > 15 and rsi < 40:  # Bullish candle at oversold
+                candle_bonus = 10
+
+            total_score = score_signal + score_vol + score_confirm + candle_bonus
 
             if total_score < self._mr_cfg.entry_threshold:
                 self._phase_stats["phase3_no_primary"] += 1
@@ -4537,7 +4648,10 @@ class SimulationEngine:
                 continue
 
             # ── 리테스트 진입 확인 ──
-            strength = min(state.get("breakout_score", 60) + zone_score // 2, 100)
+            # P2: Candlestick confirmation at retest zone
+            candle_score = self._get_candle_score(code)
+            candle_bonus = 10 if candle_score > 15 else 0
+            strength = min(state.get("breakout_score", 60) + zone_score // 2 + candle_bonus, 100)
             stock_name = self._stock_names.get(code, code)
 
             self._signal_counter += 1
