@@ -6,12 +6,13 @@ SQLAlchemy ORM 모델 (테이블 정의)
 from sqlalchemy import (
     Column,
     Float,
+    ForeignKey,
     Integer,
     String,
     Text,
     create_engine,
 )
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.orm import DeclarativeBase, relationship
 
 
 class Base(DeclarativeBase):
@@ -66,13 +67,17 @@ class Position(Base):
     created_at = Column(String(30), nullable=False)
     updated_at = Column(String(30), nullable=False)
 
+    # relationships
+    orders = relationship("Order", backref="position", lazy="dynamic")
+    trade_logs = relationship("TradeLog", backref="position", lazy="dynamic")
+
 
 class Order(Base):
     """주문 이력 (SAD §10.3)"""
     __tablename__ = "orders"
 
     order_id = Column(String(50), primary_key=True)
-    position_id = Column(String(50), nullable=False, index=True)
+    position_id = Column(String(50), ForeignKey("positions.position_id"), nullable=False, index=True)
     stock_code = Column(String(10), nullable=False)
 
     side = Column(String(10), nullable=False)
@@ -100,7 +105,7 @@ class TradeLog(Base):
     __tablename__ = "trade_logs"
 
     log_id = Column(Integer, primary_key=True, autoincrement=True)
-    position_id = Column(String(50), index=True)
+    position_id = Column(String(50), ForeignKey("positions.position_id"), index=True)
     stock_code = Column(String(10))
     event_type = Column(String(50), nullable=False, index=True)
     detail = Column(Text)  # JSON

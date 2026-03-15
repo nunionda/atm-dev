@@ -5,10 +5,10 @@
  */
 
 import type { AnalyticsData } from './api';
+import { fmt } from './indicators';
+export type { TrendBias } from './indicators';
 
 // --- Types ---
-
-export type TrendBias = 'STRONG_BULL' | 'BULL' | 'NEUTRAL' | 'BEAR' | 'STRONG_BEAR';
 export type VolatilityRegime = 'SQUEEZE' | 'LOW' | 'NORMAL' | 'HIGH' | 'EXTREME';
 export type SetupBias = 'LONG' | 'SHORT' | 'NEUTRAL';
 
@@ -82,13 +82,6 @@ export interface FuturesAnalysis {
     volatility: VolatilityAnalysis;
     levels: KeyLevels;
     setup: FuturesSetup;
-}
-
-// --- Helpers ---
-
-function fmt(v: number | null | undefined, decimals = 2): string {
-    if (v === null || v === undefined) return 'N/A';
-    return v.toLocaleString(undefined, { maximumFractionDigits: decimals });
 }
 
 // --- Trend Analysis ---

@@ -5,6 +5,9 @@
  */
 
 import type { AnalyticsData } from './api';
+import { fmt } from './indicators';
+export type { TrendBias } from './indicators';
+import type { TrendBias } from './indicators';
 
 // --- Types ---
 
@@ -33,10 +36,6 @@ export interface ExitLevels {
     deadCrossDetail: string;
     maxHoldingDays: number;
 }
-
-// --- Enhanced Types ---
-
-export type TrendBias = 'STRONG_BULL' | 'BULL' | 'NEUTRAL' | 'BEAR' | 'STRONG_BEAR';
 export type SMCBias = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
 
 export interface TrendFilter {
@@ -98,11 +97,6 @@ export interface EnhancedEntryAnalysis extends EntryAnalysis {
 }
 
 // --- Helpers ---
-
-function fmt(v: number | null, decimals = 0): string {
-    if (v === null || v === undefined) return 'N/A';
-    return v.toLocaleString(undefined, { maximumFractionDigits: decimals });
-}
 
 function fmtVol(v: number): string {
     if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;

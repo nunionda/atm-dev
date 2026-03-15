@@ -15,8 +15,15 @@ from fastapi import APIRouter, HTTPException, Query
 backtest_router = APIRouter()
 
 # 마켓별 캐시 & 락
-_backtest_in_progress: Dict[str, bool] = {}
+_backtest_locks: Dict[str, asyncio.Lock] = {}
 _backtest_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def _get_lock(market: str) -> asyncio.Lock:
+    """마켓별 asyncio.Lock을 반환 (lazy 생성)."""
+    if market not in _backtest_locks:
+        _backtest_locks[market] = asyncio.Lock()
+    return _backtest_locks[market]
 
 
 def _market_to_universe(market: str) -> str:
@@ -179,14 +186,6 @@ def _serialize_metrics(metrics: Any) -> Dict[str, Any]:
 
 def _run_backtest_sync(market: str, universe_id: str, start_date: str, end_date: str, strategy: str = "momentum") -> Any:
     """동기 백테스트 실행 (스레드에서 호출)."""
-    import sys
-    import os
-
-    # ats 디렉토리를 sys.path에 추가 (import 해결)
-    ats_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if ats_dir not in sys.path:
-        sys.path.insert(0, ats_dir)
-
     from backtest.historical_engine import HistoricalBacktester
 
     bt = HistoricalBacktester(
@@ -245,43 +244,42 @@ async def trigger_backtest(
 
     universe_id = _market_to_universe(market)
 
-    # 중복 실행 방지
-    if _backtest_in_progress.get(market, False):
+    # 중복 실행 방지 — asyncio.Lock으로 TOCTOU 경합 해결
+    lock = _get_lock(market)
+    if lock.locked():
         raise HTTPException(status_code=409, detail="Backtest already in progress for this market")
 
-    _backtest_in_progress[market] = True
+    async with lock:
+        try:
+            # asyncio.to_thread로 블로킹 백테스트를 스레드에서 실행
+            result = await asyncio.to_thread(
+                _run_backtest_sync, market, universe_id, start_date, end_date, strategy
+            )
 
-    try:
-        # asyncio.to_thread로 블로킹 백테스트를 스레드에서 실행
-        result = await asyncio.to_thread(
-            _run_backtest_sync, market, universe_id, start_date, end_date, strategy
-        )
+            # 결과 직렬화 + 캐시
+            serialized = _serialize_metrics(result)
+            serialized["market"] = market
+            serialized["strategy"] = strategy
+            serialized["start_date"] = _fmt_date(start_date)
+            serialized["end_date"] = _fmt_date(end_date)
 
-        # 결과 직렬화 + 캐시
-        serialized = _serialize_metrics(result)
-        serialized["market"] = market
-        serialized["strategy"] = strategy
-        serialized["start_date"] = _fmt_date(start_date)
-        serialized["end_date"] = _fmt_date(end_date)
+            _backtest_cache[market] = serialized
+            return serialized
 
-        _backtest_cache[market] = serialized
-        return serialized
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Backtest failed: {str(e)}")
-    finally:
-        _backtest_in_progress[market] = False
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Backtest failed: {str(e)}")
 
 
 @backtest_router.get("/rebalance/backtest/status")
 def get_backtest_status(market: str = Query("sp500")):
     """백테스트 진행 상태 조회."""
     cached = _backtest_cache.get(market)
+    lock = _backtest_locks.get(market)
     return {
         "market": market,
-        "is_running": _backtest_in_progress.get(market, False),
+        "is_running": lock.locked() if lock else False,
         "has_result": cached is not None,
         "start_date": cached.get("start_date") if cached else None,
         "end_date": cached.get("end_date") if cached else None,

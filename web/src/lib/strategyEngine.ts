@@ -12,6 +12,7 @@
 import type { AnalyticsData } from './api';
 import type { OHLC } from './scalpEngine';
 import type { FabioAnalysis } from './fabioEngine';
+import { computeMA, computeStdDev, computeATR, computeRSI, computeADXProxy, computeBBWidth } from './indicators';
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -164,91 +165,6 @@ export const STRATEGY_LABELS: Record<StrategyName, string> = {
   TREND_FOLLOWING: 'Trend Following',
   SCALP_MOMENTUM: 'Scalp / Momentum',
 };
-
-// ── Helper: compute indicators from OHLC (proxy for backtest) ─────────
-
-function computeMA(candles: OHLC[], end: number, period: number): number {
-  const start = Math.max(0, end - period + 1);
-  let sum = 0, cnt = 0;
-  for (let i = start; i <= end; i++) { sum += candles[i].c; cnt++; }
-  return cnt > 0 ? sum / cnt : candles[end].c;
-}
-
-function computeStdDev(candles: OHLC[], end: number, period: number): number {
-  const ma = computeMA(candles, end, period);
-  const start = Math.max(0, end - period + 1);
-  let sumSq = 0, cnt = 0;
-  for (let i = start; i <= end; i++) { sumSq += (candles[i].c - ma) ** 2; cnt++; }
-  return cnt > 1 ? Math.sqrt(sumSq / cnt) : 0;
-}
-
-function computeATR(candles: OHLC[], end: number, period: number): number {
-  let sum = 0, cnt = 0;
-  for (let i = Math.max(1, end - period + 1); i <= end; i++) {
-    const tr = Math.max(
-      candles[i].h - candles[i].l,
-      Math.abs(candles[i].h - candles[i - 1].c),
-      Math.abs(candles[i].l - candles[i - 1].c)
-    );
-    sum += tr; cnt++;
-  }
-  return cnt > 0 ? sum / cnt : 0;
-}
-
-/** RSI proxy from closes */
-function computeRSI(candles: OHLC[], end: number, period: number = 14): number | null {
-  if (end < period) return null;
-  let gains = 0, losses = 0;
-  for (let i = end - period + 1; i <= end; i++) {
-    const delta = candles[i].c - candles[i - 1].c;
-    if (delta > 0) gains += delta;
-    else losses -= delta;
-  }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - (100 / (1 + rs));
-}
-
-/** ADX proxy — simplified DI-based estimation */
-function computeADXProxy(candles: OHLC[], end: number, period: number = 14): {
-  adx: number; plusDI: number; minusDI: number;
-} | null {
-  if (end < period + 1) return null;
-
-  let plusDMSum = 0, minusDMSum = 0, trSum = 0;
-  for (let i = end - period + 1; i <= end; i++) {
-    const upMove = candles[i].h - candles[i - 1].h;
-    const downMove = candles[i - 1].l - candles[i].l;
-    const plusDM = upMove > downMove && upMove > 0 ? upMove : 0;
-    const minusDM = downMove > upMove && downMove > 0 ? downMove : 0;
-    const tr = Math.max(
-      candles[i].h - candles[i].l,
-      Math.abs(candles[i].h - candles[i - 1].c),
-      Math.abs(candles[i].l - candles[i - 1].c)
-    );
-    plusDMSum += plusDM;
-    minusDMSum += minusDM;
-    trSum += tr;
-  }
-
-  if (trSum === 0) return null;
-  const plusDI = (plusDMSum / trSum) * 100;
-  const minusDI = (minusDMSum / trSum) * 100;
-  const diSum = plusDI + minusDI;
-  const dx = diSum > 0 ? (Math.abs(plusDI - minusDI) / diSum) * 100 : 0;
-  // Simplified: use DX as ADX proxy (real ADX would use smoothed DX average)
-  return { adx: dx, plusDI, minusDI };
-}
-
-/** BB width as % of price */
-function computeBBWidth(candles: OHLC[], end: number, period: number = 20): number {
-  const ma = computeMA(candles, end, period);
-  const sd = computeStdDev(candles, end, period);
-  if (ma === 0) return 0;
-  return ((sd * 4) / ma) * 100;  // 2σ upper - 2σ lower = 4σ
-}
 
 // ── Regime Detection ──────────────────────────────────────────────────
 

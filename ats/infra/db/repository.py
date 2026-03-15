@@ -50,7 +50,7 @@ class Repository:
                         market: str = "KOSPI", sector: str = None):
         """유니버스 종목을 추가하거나 업데이트한다."""
         with self._session() as s:
-            existing = s.query(Universe).get(stock_code)
+            existing = s.get(Universe, stock_code)
             now = datetime.now().isoformat()
             if existing:
                 existing.stock_name = stock_name
@@ -84,7 +84,7 @@ class Repository:
     def get_position(self, position_id: str) -> Optional[Position]:
         """포지션을 ID로 조회한다."""
         with self._session() as s:
-            return s.query(Position).get(position_id)
+            return s.get(Position, position_id)
 
     def get_positions_by_status(self, status: str) -> List[Position]:
         """상태별 포지션 목록을 조회한다."""
@@ -119,7 +119,7 @@ class Repository:
     def update_position(self, position_id: str, **kwargs):
         """포지션 필드를 업데이트한다."""
         with self._session() as s:
-            pos = s.query(Position).get(position_id)
+            pos = s.get(Position, position_id)
             if not pos:
                 logger.warning("Position not found | id=%s", position_id)
                 return
@@ -154,6 +154,56 @@ class Repository:
             )
             return [p.stock_code for p in positions]
 
+    def create_position_with_order(
+        self, pos: Position, order: Order, event_detail: dict = None
+    ):
+        """포지션 + 주문 + 이벤트 로그를 단일 트랜잭션으로 생성한다."""
+        with self._session() as s:
+            s.add(pos)
+            s.add(order)
+            s.add(TradeLog(
+                position_id=pos.position_id,
+                stock_code=pos.stock_code,
+                event_type="ENTRY",
+                detail=json.dumps(event_detail or {}, ensure_ascii=False),
+                created_at=datetime.now().isoformat(),
+            ))
+            s.commit()
+            logger.info("Position+Order created (atomic) | id=%s | stock=%s",
+                        pos.position_id, pos.stock_code)
+
+    def close_position_with_order(
+        self, position_id: str, order: Order,
+        exit_price: float, exit_date: str, exit_reason: str,
+        pnl: float, pnl_pct: float, holding_days: int,
+        event_detail: dict = None,
+    ):
+        """포지션 청산 + 주문 + 이벤트 로그를 단일 트랜잭션으로 처리한다."""
+        with self._session() as s:
+            pos = s.get(Position, position_id)
+            if not pos:
+                logger.warning("close_position_with_order: Position not found | id=%s", position_id)
+                return
+            pos.status = PositionStatus.CLOSED.value
+            pos.exit_price = exit_price
+            pos.exit_date = exit_date
+            pos.exit_reason = exit_reason
+            pos.pnl = pnl
+            pos.pnl_pct = pnl_pct
+            pos.holding_days = holding_days
+            pos.updated_at = datetime.now().isoformat()
+            s.add(order)
+            s.add(TradeLog(
+                position_id=position_id,
+                stock_code=pos.stock_code,
+                event_type="EXIT",
+                detail=json.dumps(event_detail or {}, ensure_ascii=False),
+                created_at=datetime.now().isoformat(),
+            ))
+            s.commit()
+            logger.info("Position closed (atomic) | id=%s | reason=%s | pnl=%.2f%%",
+                        position_id, exit_reason, pnl_pct * 100)
+
     # ──────────────────────────────────────
     # Order
     # ──────────────────────────────────────
@@ -167,7 +217,7 @@ class Repository:
     def get_order(self, order_id: str) -> Optional[Order]:
         """주문을 ID로 조회한다."""
         with self._session() as s:
-            return s.query(Order).get(order_id)
+            return s.get(Order, order_id)
 
     def get_pending_orders(self, side: str = None) -> List[Order]:
         """미체결 주문을 조회한다."""
@@ -182,7 +232,7 @@ class Repository:
     def update_order(self, order_id: str, **kwargs):
         """주문 필드를 업데이트한다."""
         with self._session() as s:
-            order = s.query(Order).get(order_id)
+            order = s.get(Order, order_id)
             if not order:
                 return
             for key, val in kwargs.items():
@@ -349,7 +399,7 @@ class Repository:
     def get_replay_result(self, result_id: str) -> Optional[dict]:
         """리플레이 결과 상세 조회 (JSON blob 포함)."""
         with self._session() as s:
-            r = s.query(ReplayResult).get(result_id)
+            r = s.get(ReplayResult, result_id)
             if not r:
                 return None
             return {
@@ -375,7 +425,7 @@ class Repository:
     def delete_replay_result(self, result_id: str) -> bool:
         """리플레이 결과를 삭제한다."""
         with self._session() as s:
-            r = s.query(ReplayResult).get(result_id)
+            r = s.get(ReplayResult, result_id)
             if not r:
                 return False
             s.delete(r)

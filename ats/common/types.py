@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List
+from typing import Dict, Optional, List
 
 
 # ──────────────────────────────────────────────
@@ -160,6 +160,7 @@ class Portfolio:
     mdd: float = 0.0
     peak_value: float = 0.0
     today_sold_codes: List[str] = field(default_factory=list)
+    position_weights: Dict[str, float] = field(default_factory=dict)  # stock_code → 현재 비중
 
 
 # ──────────────────────────────────────────────
