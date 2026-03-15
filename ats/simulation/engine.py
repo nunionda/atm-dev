@@ -984,6 +984,7 @@ class SimulationEngine:
             # 종목별 레짐 통계
             "stock_regime_distribution": {},     # {regime: count} 마지막 사이클 분포
             "stock_regime_strategy_map": {},     # {"regime→strategy": count} 라우팅 이력
+            "es_mdd_guard": 0,                    # MDD 가드 강제 청산 횟수
         }
 
         # 에쿼티 히스토리 (프로그레시브 트레일링 기준용)
@@ -6051,7 +6052,7 @@ class SimulationEngine:
             for code, pos in list(self.positions.items()):
                 if pos.status == "ACTIVE" and pos.strategy_tag != "defensive":
                     self._rebalance_exit_codes.add(code)
-            self._phase_stats.es_mdd_guard += 1
+            self._phase_stats["es_mdd_guard"] += 1
         elif dd_pct <= -0.12:
             # Tighten all active stops to -2% from current price
             for code, pos in self.positions.items():
