@@ -979,6 +979,12 @@ class SimulationEngine:
         # 리밸런스 청산 대상 (ES7)
         self._rebalance_exit_codes: set = set()
 
+        # --- 리밸런싱 내장 (Step 1) ---
+        self._rebalance_mgr = None
+        self._rebalance_history: list = []
+        self._pending_rebalance = None
+        self._full_universe_ohlcv = None
+
         # ── Tactical 전용 포트폴리오 배분 (Kelly Criterion) ──
         self._allocator: Optional['PortfolioAllocator'] = None
 
@@ -1227,6 +1233,71 @@ class SimulationEngine:
     def set_rebalance_exits(self, codes: set):
         """리밸런스 탈락 종목을 ES7 청산 대상으로 지정 (기존 코드와 병합)."""
         self._rebalance_exit_codes |= set(codes)
+
+    def set_full_universe_ohlcv(self, ohlcv: dict):
+        """전체 유니버스 OHLCV 주입 (BACKTEST 리밸런싱 스캔용).
+
+        _ohlcv_cache(워치리스트용)와 별도로 관리한다.
+        리밸런싱 스캔 시 전체 유니버스에서 종목을 선별하기 위해 사용.
+        """
+        self._full_universe_ohlcv = ohlcv
+
+    def init_rebalance_manager(self, scanner, rebalance_interval: int = 14):
+        """리밸런스 매니저를 엔진에 내장한다.
+
+        Args:
+            scanner: UniverseScanner 인스턴스
+            rebalance_interval: 리밸런싱 주기 (거래일 단위, 기본 14)
+        """
+        from backtest.rebalancer import RebalanceManager
+        self._rebalance_mgr = RebalanceManager(
+            scanner=scanner,
+            rebalance_interval=rebalance_interval,
+        )
+
+    def _check_rebalance_sync(self):
+        """BACKTEST 모드 전용 리밸런싱 체크 (동기 실행).
+
+        should_rebalance() → execute_rebalance() → tick() 순서를 유지한다.
+        현재 HistoricalBacktester의 실행 순서와 동일하게 유지하여 회귀를 방지.
+        """
+        if not self._rebalance_mgr:
+            return
+
+        if not self._rebalance_mgr.should_rebalance():
+            self._rebalance_mgr.tick()
+            return
+
+        # 전체 유니버스 데이터로 스캔 (없으면 워치리스트 데이터 폴백)
+        ohlcv_for_scan = self._full_universe_ohlcv or self._ohlcv_cache
+        active_positions = {
+            pos.stock_code: pos for pos in self.positions.values()
+            if pos.status == "ACTIVE"
+        }
+
+        event = self._rebalance_mgr.execute_rebalance(
+            ohlcv_map=ohlcv_for_scan,
+            current_date=self._backtest_date,
+            active_positions=active_positions,
+        )
+
+        self._apply_rebalance(event)
+        self._rebalance_mgr.tick()
+
+    def _apply_rebalance(self, event):
+        """리밸런싱 이벤트를 엔진에 적용한다.
+
+        update_watchlist()를 사용하여 _stock_names도 함께 갱신.
+        기존 regime 다운그레이드 퇴출 코드와 병합 (덮어쓰기 방지).
+        """
+        # 워치리스트 교체 + _stock_names 갱신
+        self.update_watchlist(event.new_watchlist)
+
+        # 기존 퇴출 코드와 병합
+        self._rebalance_exit_codes |= set(event.positions_force_exited)
+
+        # 이력 기록
+        self._rebalance_history.append(event)
 
     def _get_current_date_str(self) -> str:
         """현재 날짜 문자열. 백테스트 시 시뮬레이션 날짜, 실시간 시 오늘 날짜."""

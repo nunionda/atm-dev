@@ -111,3 +111,88 @@ class TestSetRebalanceExitsUnion:
 
         engine.set_rebalance_exits({"AAPL"})
         assert engine._rebalance_exit_codes == {"AAPL"}
+
+
+class TestEngineRebalanceIntegration:
+    """SimulationEngine._check_rebalance_sync() 통합 테스트."""
+
+    @pytest.fixture
+    def engine_with_rebalance(self):
+        """리밸런싱이 내장된 엔진."""
+        from simulation.engine import SimulationEngine
+
+        async def noop(t, d): pass
+
+        engine = SimulationEngine(on_event=noop, market_id="sp500")
+
+        scanner = MagicMock()
+        scanner.scan.return_value = [
+            {"code": "AAPL", "ticker": "AAPL", "name": "Apple", "sector": "Tech"},
+            {"code": "MSFT", "ticker": "MSFT", "name": "Microsoft", "sector": "Tech"},
+        ]
+
+        engine.init_rebalance_manager(scanner=scanner, rebalance_interval=3)
+        return engine
+
+    def test_no_rebalance_when_not_initialized(self):
+        """리밸런스 매니저가 없으면 아무것도 안 한다."""
+        from simulation.engine import SimulationEngine
+
+        async def noop(t, d): pass
+        engine = SimulationEngine(on_event=noop, market_id="sp500")
+
+        # 에러 없이 통과해야 함
+        engine._check_rebalance_sync()
+
+    def test_first_day_triggers_rebalance(self, engine_with_rebalance):
+        """첫 거래일에 리밸런싱이 발동한다 (초기 워치리스트 시딩)."""
+        engine = engine_with_rebalance
+        engine._backtest_date = "2024-01-02"
+
+        # 전체 유니버스 데이터 주입 (mock)
+        engine._full_universe_ohlcv = {"AAPL": MagicMock(), "MSFT": MagicMock(), "INTC": MagicMock()}
+
+        engine._check_rebalance_sync()
+
+        # 워치리스트가 스캔 결과로 교체됨
+        assert len(engine._watchlist) == 2
+        codes = {w["code"] for w in engine._watchlist}
+        assert codes == {"AAPL", "MSFT"}
+        assert len(engine._rebalance_history) == 1
+
+    def test_rebalance_not_triggered_before_interval(self, engine_with_rebalance):
+        """주기 도달 전에는 리밸런싱 안 함."""
+        engine = engine_with_rebalance
+        engine._backtest_date = "2024-01-02"
+        engine._full_universe_ohlcv = {"AAPL": MagicMock(), "MSFT": MagicMock()}
+
+        # 첫 리밸런싱
+        engine._check_rebalance_sync()
+        assert len(engine._rebalance_history) == 1
+
+        # 1일 후 — 아직 안 됨
+        engine._check_rebalance_sync()
+        assert len(engine._rebalance_history) == 1
+
+    def test_apply_rebalance_merges_exit_codes(self, engine_with_rebalance):
+        """_apply_rebalance()는 기존 퇴출 코드와 병합한다."""
+        engine = engine_with_rebalance
+
+        # 기존 레짐 다운그레이드 퇴출 코드
+        engine._rebalance_exit_codes = {"BA"}
+
+        from backtest.rebalancer import RebalanceEvent
+        event = RebalanceEvent(
+            date="2024-01-15",
+            cycle_number=1,
+            positions_force_exited=["INTC"],
+            new_watchlist=[
+                {"code": "AAPL", "ticker": "AAPL", "name": "Apple", "sector": "Tech"},
+            ],
+        )
+
+        engine._apply_rebalance(event)
+
+        # 병합 확인
+        assert engine._rebalance_exit_codes == {"BA", "INTC"}
+        assert len(engine._rebalance_history) == 1
