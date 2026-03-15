@@ -1201,6 +1201,10 @@ class SimulationEngine:
         # 포지션 현재가 갱신
         self._update_position_prices()
 
+        # Peak equity 갱신 (매일, entry scan과 무관하게)
+        equity = self._get_total_equity()
+        self._peak_equity = max(self._peak_equity, equity)
+
         # Phase 5: 청산 체크 (매수보다 선행)
         self._check_exits()
 
@@ -6037,8 +6041,30 @@ class SimulationEngine:
             return self._check_exits_defensive()
         return self._check_exits_momentum()
 
+    def _portfolio_mdd_guard(self):
+        """DD 12-15% 구간: 스탑 타이트닝, DD >= 15%: 비방어 포지션 강제 청산."""
+        equity = self._get_total_equity()
+        dd_pct = (equity - self._peak_equity) / self._peak_equity if self._peak_equity > 0 else 0
+
+        if dd_pct <= -0.15:
+            # Force liquidate all non-defensive positions
+            for code, pos in list(self.positions.items()):
+                if pos.status == "ACTIVE" and pos.strategy_tag != "defensive":
+                    self._rebalance_exit_codes.add(code)
+            self._phase_stats.es_mdd_guard += 1
+        elif dd_pct <= -0.12:
+            # Tighten all active stops to -2% from current price
+            for code, pos in self.positions.items():
+                if pos.status == "ACTIVE":
+                    tight_stop = pos.current_price * 0.98
+                    if tight_stop > pos.stop_loss:
+                        pos.stop_loss = tight_stop
+
     def _check_exits_multi(self):
         """멀티 전략 모드: 각 포지션의 strategy_tag에 따라 올바른 청산 로직 라우팅."""
+        # P0: Portfolio MDD Guard — DD 기반 강제 청산/스탑 타이트닝
+        self._portfolio_mdd_guard()
+
         # CRISIS 레짐: 비방어 포지션 즉시 청산 대상 지정
         overrides = REGIME_OVERRIDES.get(self._market_regime, {})
         if overrides.get("crisis_exit_immediate"):

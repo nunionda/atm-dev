@@ -107,6 +107,9 @@ class PhaseStats:
     regime_pyramid_entries: int = 0    # STRONG_BULL 피라미딩 횟수
     regime_sizing_reductions: int = 0  # 레짐별 사이징 감축 횟수
 
+    # MDD Guard (P0)
+    es_mdd_guard: int = 0             # DD>15% 비방어 포지션 강제 청산 횟수
+
     # 종목별 레짐 분류
     stock_regime_distribution: Dict[str, int] = field(default_factory=dict)
     stock_regime_strategy_map: Dict[str, int] = field(default_factory=dict)
