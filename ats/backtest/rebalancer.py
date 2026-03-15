@@ -126,6 +126,10 @@ class RebalanceManager:
         """매 거래일 호출. 리밸런스 카운터 증가."""
         self._trading_day_count += 1
 
+    def reset_counter(self):
+        """거부 시 카운터 리셋 — 다음 주기까지 대기."""
+        self._trading_day_count = 0
+
     def get_current_watchlist(self) -> List[Dict[str, str]]:
         """현재 활성 워치리스트 반환."""
         return self._current_watchlist
