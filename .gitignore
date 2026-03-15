@@ -32,3 +32,6 @@ dist/
 .DS_Store
 Thumbs.db
 temp.json
+
+# 런타임 PID 파일
+.pids/
