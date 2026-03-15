@@ -728,128 +728,12 @@ class SimulationEngine:
     # ══════════════════════════════════════════
 
     def _judge_market_regime(self) -> str:
-        """
-        Phase 0: 복합 지표 기반 시장 체제 판단 (4단계).
-
-        복합 점수 = breadth(40%) + ADX 평균(25%) + VIX(20%) + BB bandwidth(15%)
-        BULL ≥ 65 | NEUTRAL 40-65 | RANGE_BOUND 25-40 (ADX<20) | BEAR < 25
-
-        기존 breadth 단독 판단 대비 횡보장(RANGE_BOUND) 구분 추가.
-        """
-        above_count = 0
-        total_valid = 0
-        adx_values = []
-        bb_bandwidths = []
-
-        for w in self._watchlist:
-            code = w["code"]
-            df = self._ohlcv_cache.get(code)
-            if df is None or len(df) < 220:
-                continue
-
-            close = df["close"].astype(float)
-            ma200 = close.rolling(window=200).mean()
-
-            if pd.isna(ma200.iloc[-1]):
-                continue
-
-            total_valid += 1
-            if float(close.iloc[-1]) > float(ma200.iloc[-1]):
-                above_count += 1
-
-            # ADX 수집 (종목별 추세 강도)
-            if len(df) >= 30:
-                high = df["high"].astype(float) if "high" in df.columns else None
-                low = df["low"].astype(float) if "low" in df.columns else None
-                if high is not None and low is not None:
-                    try:
-                        adx, _, _ = _compute_adx(high, low, close, period=14)
-                        last_adx = adx.iloc[-1]
-                        if pd.notna(last_adx):
-                            adx_values.append(float(last_adx))
-                    except Exception:
-                        pass
-
-            # BB Bandwidth 수집 (변동성 폭)
-            if len(df) >= 30:
-                ma20 = close.rolling(window=20).mean()
-                std20 = close.rolling(window=20).std()
-                last_ma20 = ma20.iloc[-1]
-                last_std = std20.iloc[-1]
-                if pd.notna(last_ma20) and pd.notna(last_std) and last_ma20 > 0:
-                    bandwidth = float(last_std * 2 / last_ma20) * 100  # % 단위
-                    bb_bandwidths.append(bandwidth)
-
-        if total_valid < 3:
-            return self._market_regime  # 데이터 부족 → 현재 유지
-
-        # ── 복합 점수 계산 (0-100) ──
-
-        # 1. Breadth 점수 (40%): 0-100 → 0-40
-        breadth_pct = above_count / total_valid * 100
-        breadth_score = breadth_pct * 0.40  # 0~40
-
-        # 2. ADX 평균 점수 (25%): ADX 높을수록 추세 강 → 높은 점수
-        #    ADX < 15 = 0점, ADX 15-25 = 선형, ADX > 40 = 만점
-        if adx_values:
-            avg_adx = sum(adx_values) / len(adx_values)
-            adx_score = min(max((avg_adx - 15) / 25 * 25, 0), 25)  # 0~25
-        else:
-            avg_adx = 25.0  # 데이터 없으면 중립
-            adx_score = 10.0
-
-        # 3. VIX 점수 (20%): VIX 낮을수록 강세 → 높은 점수
-        #    VIX < 14 = 20점, VIX 14-30 = 선형 역, VIX > 30 = 0점
-        vix = self._vix_ema20
-        vix_score = min(max((30 - vix) / 16 * 20, 0), 20)  # 0~20
-
-        # 4. BB Bandwidth 점수 (15%): bandwidth 넓으면 추세/변동 → 점수 높음
-        #    좁으면(횡보) 점수 낮음
-        if bb_bandwidths:
-            avg_bw = sum(bb_bandwidths) / len(bb_bandwidths)
-            # 일반적 bandwidth: 2-10%. 좁은 < 3%, 넓은 > 6%
-            bw_score = min(max((avg_bw - 2) / 6 * 15, 0), 15)  # 0~15
-        else:
-            avg_bw = 4.0
-            bw_score = 7.5
-
-        composite_score = breadth_score + adx_score + vix_score + bw_score
-
-        # ── 레짐 결정 ──
-        if composite_score >= 65:
-            raw_regime = "BULL"
-        elif composite_score >= 40:
-            # NEUTRAL vs RANGE_BOUND 구분: ADX<20 AND BB bandwidth 하위20%
-            is_range_bound = (
-                adx_values
-                and avg_adx < 20
-                and bb_bandwidths
-                and avg_bw < 3.5  # 좁은 bandwidth
-            )
-            raw_regime = "RANGE_BOUND" if is_range_bound else "NEUTRAL"
-        elif composite_score >= 25:
-            raw_regime = "NEUTRAL" if breadth_pct > 45 else "BEAR"
-        else:
-            raw_regime = "BEAR"
-
-        return self._smooth_regime(raw_regime)
+        from simulation.regime import judge_market_regime
+        return judge_market_regime(self)
 
     def _smooth_regime(self, raw_regime: str) -> str:
-        """체제 전환 스무딩: N일 연속 동일 신호 시에만 전환."""
-        if raw_regime == self._market_regime:
-            self._regime_candidate = raw_regime
-            self._regime_candidate_days = 0
-            return self._market_regime
-
-        if raw_regime == self._regime_candidate:
-            self._regime_candidate_days += 1
-            if self._regime_candidate_days >= self._regime_confirmation_days:
-                return raw_regime  # 확인 완료 → 체제 전환
-        else:
-            self._regime_candidate = raw_regime
-            self._regime_candidate_days = 1
-
-        return self._market_regime  # 아직 미확인 → 현재 유지
+        from simulation.regime import smooth_regime
+        return smooth_regime(self, raw_regime)
 
     def _update_market_regime(self):
         """레짐 감지 + 레짐 고정 모드 오버라이드.
@@ -895,181 +779,12 @@ class SimulationEngine:
             self._index_ohlcv = self._index_ohlcv[-260:]
 
     def _analyze_index_trend(self) -> Dict:
-        """지수 OHLCV에서 추세 시그널 분석.
-
-        복합 지표: MA 정렬 + RSI + ADX + MACD + VIX
-        Returns:
-            {
-                "trend": "STRONG_BULL" | "BULL" | "NEUTRAL" | "RANGE_BOUND" | "BEAR" | "CRISIS",
-                "ma_alignment": "ALIGNED_BULL" | "ALIGNED_BEAR" | "MIXED",
-                "momentum_score": float (0-100),
-                "volatility_state": "LOW" | "NORMAL" | "HIGH" | "EXTREME",
-                "signals": List[str],
-            }
-        """
-        n = len(self._index_ohlcv)
-        if n < 50:
-            return {"trend": "NEUTRAL", "ma_alignment": "MIXED",
-                    "momentum_score": 50.0, "volatility_state": "NORMAL",
-                    "signals": ["지수 데이터 부족 (< 50일)"]}
-
-        closes = pd.Series([d["close"] for d in self._index_ohlcv])
-        highs = pd.Series([d["high"] for d in self._index_ohlcv])
-        lows = pd.Series([d["low"] for d in self._index_ohlcv])
-        signals = []
-
-        # ── MA Alignment ──
-        ma20 = closes.rolling(20).mean().iloc[-1] if n >= 20 else closes.mean()
-        ma50 = closes.rolling(50).mean().iloc[-1] if n >= 50 else closes.mean()
-        ma200 = closes.rolling(200).mean().iloc[-1] if n >= 200 else None
-        current_close = closes.iloc[-1]
-
-        if ma200 is not None and not pd.isna(ma200):
-            if current_close > ma50 > ma200:
-                ma_state = "ALIGNED_BULL"
-                signals.append(f"지수 MA 정렬: Close > MA50 > MA200")
-            elif current_close < ma50 < ma200:
-                ma_state = "ALIGNED_BEAR"
-                signals.append(f"지수 MA 정렬: Close < MA50 < MA200")
-            else:
-                ma_state = "MIXED"
-                signals.append(f"지수 MA 혼합")
-        elif current_close > ma50:
-            ma_state = "ALIGNED_BULL"
-            signals.append(f"지수 Close > MA50 (MA200 미계산)")
-        else:
-            ma_state = "MIXED"
-            signals.append(f"지수 MA 혼합 (MA200 미계산)")
-
-        # ── RSI(14) ──
-        delta = closes.diff()
-        gain = delta.where(delta > 0, 0.0).rolling(14).mean()
-        loss = (-delta.where(delta < 0, 0.0)).rolling(14).mean()
-        rs = gain.iloc[-1] / loss.iloc[-1] if loss.iloc[-1] > 0 else 100
-        rsi = 100.0 - (100.0 / (1.0 + rs))
-        signals.append(f"지수 RSI: {rsi:.1f}")
-
-        # ── ADX(14) ──
-        try:
-            adx_series, _, _ = _compute_adx(highs, lows, closes, period=14)
-            adx = float(adx_series.iloc[-1]) if pd.notna(adx_series.iloc[-1]) else 20.0
-        except Exception:
-            adx = 20.0
-        signals.append(f"지수 ADX: {adx:.1f}")
-
-        # ── MACD(12, 26, 9) ──
-        ema12 = closes.ewm(span=12, adjust=False).mean()
-        ema26 = closes.ewm(span=26, adjust=False).mean()
-        macd_line = ema12 - ema26
-        signal_line = macd_line.ewm(span=9, adjust=False).mean()
-        macd_hist = macd_line.iloc[-1] - signal_line.iloc[-1]
-        macd_positive = macd_hist > 0
-        signals.append(f"지수 MACD 히스토그램: {macd_hist:.2f} ({'양' if macd_positive else '음'})")
-
-        # ── Momentum Score (0-100) ──
-        # RSI 정규화: 30-70 → 0-100 (중립 = 50)
-        rsi_norm = min(max((rsi - 30) / 40 * 40, 0), 40)  # 0~40
-        # ADX 정규화: 0-50 → 0-35
-        adx_norm = min(max(adx / 50 * 35, 0), 35)  # 0~35
-        # MACD 보너스: 양전환 +25, 음전환 0
-        macd_bonus = 25 if macd_positive else 0
-        momentum_score = rsi_norm + adx_norm + macd_bonus
-        momentum_score = min(max(momentum_score, 0), 100)
-
-        # ── Volatility State (VIX 기반) ──
-        vix = self._vix_ema20
-        if vix < 16:
-            volatility_state = "LOW"
-        elif vix < 22:
-            volatility_state = "NORMAL"
-        elif vix < 30:
-            volatility_state = "HIGH"
-        else:
-            volatility_state = "EXTREME"
-        signals.append(f"VIX EMA20: {vix:.1f} → {volatility_state}")
-
-        # ── Final Trend Classification ──
-        if ma_state == "ALIGNED_BULL" and adx > 30 and rsi > 55:
-            trend = "STRONG_BULL"
-        elif ma_state == "ALIGNED_BULL" or (
-            (ma200 is None or current_close > ma200) and momentum_score > 55
-        ):
-            trend = "BULL"
-        elif ma_state == "ALIGNED_BEAR" and volatility_state in ("HIGH", "EXTREME"):
-            trend = "CRISIS"
-        elif ma_state == "ALIGNED_BEAR":
-            trend = "BEAR"
-        elif adx < 20 and volatility_state in ("LOW", "NORMAL"):
-            trend = "RANGE_BOUND"  # 저추세 + 저변동성 = 박스권
-        else:
-            trend = "NEUTRAL"
-        signals.append(f"최종 지수 추세: {trend}")
-
-        return {
-            "trend": trend,
-            "ma_alignment": ma_state,
-            "momentum_score": round(momentum_score, 1),
-            "volatility_state": volatility_state,
-            "signals": signals,
-            "rsi": round(rsi, 1),
-            "adx": round(adx, 1),
-            "macd_value": round(float(macd_line.iloc[-1]), 2),
-            "macd_signal": round(float(signal_line.iloc[-1]), 2),
-        }
+        from simulation.regime import analyze_index_trend
+        return analyze_index_trend(self)
 
     def _update_strategy_weights_from_index(self):
-        """지수 추세 분석 → 전략 비중 동적 오버라이드.
-
-        레짐 고정 모드: 고정 레짐의 가중치 강제 적용 (자동 감지 건너뜀).
-        multi 모드: 지수 데이터 있으면 INDEX_TREND_STRATEGY_WEIGHTS 적용.
-        지수 데이터 부족하면 기존 REGIME_STRATEGY_WEIGHTS 유지 (fallback).
-        """
-        # 레짐 전략 모드: 고정 레짐 가중치 강제 적용
-        if self._regime_locked:
-            weights = INDEX_TREND_STRATEGY_WEIGHTS.get(
-                self._locked_regime,
-                INDEX_TREND_STRATEGY_WEIGHTS.get("NEUTRAL", {})
-            )
-            if self._strategy_allocator:
-                self._strategy_allocator.override_weights(weights)
-            # 지수 추세 분석은 여전히 실행 (표시용)
-            if len(self._index_ohlcv) >= 50:
-                self._index_trend = self._analyze_index_trend()
-            return
-
-        if len(self._index_ohlcv) < 50:
-            return  # 데이터 부족 → 기존 로직 유지
-
-        old_trend = self._index_trend.get("trend") if self._index_trend else None
-        old_weights = (
-            dict(self._strategy_allocator.weights)
-            if self._strategy_allocator else {}
-        )
-
-        self._index_trend = self._analyze_index_trend()
-        trend = self._index_trend.get("trend", "NEUTRAL")
-
-        weights = INDEX_TREND_STRATEGY_WEIGHTS.get(
-            trend, INDEX_TREND_STRATEGY_WEIGHTS["NEUTRAL"]
-        )
-
-        if self._strategy_allocator:
-            self._strategy_allocator.override_weights(weights)
-            self._phase_stats["index_trend_updates"] += 1
-
-        # 추세 변경 이력 기록
-        if old_trend != trend:
-            ts = self._backtest_date or datetime.now().strftime("%Y-%m-%d %H:%M")
-            self._index_trend_history.append({
-                "timestamp": ts,
-                "from_trend": old_trend,
-                "to_trend": trend,
-                "from_weights": old_weights,
-                "to_weights": dict(weights),
-                "trigger_signals": self._index_trend.get("signals", [])[-3:],
-            })
-            if len(self._index_trend_history) > 20:
-                self._index_trend_history = self._index_trend_history[-20:]
+        from simulation.regime import update_strategy_weights_from_index
+        update_strategy_weights_from_index(self)
 
     def get_market_intelligence(self) -> Dict:
         """프론트엔드용 마켓 인텔리전스 데이터 반환."""
@@ -1258,72 +973,8 @@ class SimulationEngine:
     # ══════════════════════════════════════════
 
     def _classify_stock_regime(self, df: pd.DataFrame) -> str:
-        """
-        종목 개별 레짐 분류 (0-100 복합 스코어).
-
-        기존 _confirm_trend(), _estimate_trend_stage() 결과를 종합하여
-        글로벌 레짐과 독립적으로 각 종목의 추세 상태를 6단계로 판정.
-
-        구성요소:
-          (1) MA 정렬 점수 (0-30): alignment_score 0~5 → 0~30
-          (2) ADX 방향 점수 (0-20): UP 추세 + ADX 강도
-          (3) RSI 위치 점수 (0-20): 강세/약세 위치
-          (4) Price vs MA200 (0-15): 장기 추세 위치
-          (5) Trend Stage 보너스 (0-15): EARLY/MID/LATE
-        """
-        if len(df) < 200:
-            return "NEUTRAL"
-
-        trend = self._confirm_trend(df)
-        stage = self._estimate_trend_stage(df)
-        curr = df.iloc[-1]
-        score = 0.0
-
-        # (1) MA 정렬 점수 (0-30): alignment_score 0~5 → 0~30
-        alignment = trend.get("alignment_score", 0)
-        score += alignment * 6  # 0, 6, 12, 18, 24, 30
-
-        # (2) ADX 방향 점수 (0-20)
-        adx = trend.get("adx", 0)
-        direction = trend.get("direction", "FLAT")
-        if direction == "UP":
-            score += min(adx / 50 * 20, 20)    # ADX 높을수록 가산
-        elif direction == "DOWN":
-            score += max(0, 5 - adx / 50 * 5)  # 하락+ADX 강 → 낮은 점수
-        else:
-            score += 10  # FLAT → 중립
-
-        # (3) RSI 위치 점수 (0-20)
-        rsi = float(curr.get("rsi", 50)) if pd.notna(curr.get("rsi")) else 50
-        if rsi >= 55:
-            score += min((rsi - 40) / 40 * 20, 20)   # RSI 55~80 → 7.5~20
-        elif rsi <= 35:
-            score += max(0, rsi / 35 * 5)             # RSI 0~35 → 0~5
-        else:
-            score += 10  # 35~55 → 중립
-
-        # (4) Price vs MA200 (0-15)
-        ma200 = float(curr.get("ma200", 0)) if pd.notna(curr.get("ma200")) else 0
-        price = float(curr["close"])
-        if ma200 > 0:
-            ratio = price / ma200
-            if ratio > 1.0:
-                score += min((ratio - 1.0) * 100, 15)  # 1%=1pt, max 15
-            else:
-                score += max(0, 15 - (1.0 - ratio) * 100)
-        else:
-            score += 7  # 데이터 없으면 중립
-
-        # (5) Trend Stage 보너스 (0-15)
-        stage_bonus = {"EARLY": 15, "MID": 8, "LATE": 2}
-        score += stage_bonus.get(stage, 8)
-
-        # 스코어 → 레짐 매핑
-        score = max(0, min(100, score))
-        for threshold, regime in STOCK_REGIME_THRESHOLDS:
-            if score >= threshold:
-                return regime
-        return "CRISIS"
+        from simulation.regime import classify_stock_regime
+        return classify_stock_regime(self, df)
 
     def _update_stock_regimes(self, force: bool = False):
         """워치리스트 종목의 개별 레짐 갱신. 성능을 위해 7일 주기로 실행."""
@@ -1355,76 +1006,8 @@ class SimulationEngine:
     # ══════════════════════════════════════════
 
     def _risk_gate_check(self) -> tuple:
-        """
-        Phase 4: 리스크 게이트. 하나라도 실패 시 (False, reason) 반환.
-
-        Phase 3.2 단계적 DD 대응:
-          DD > 10% → 포지션 사이즈 50% 감축 (dd_sizing_mult=0.5)
-          DD > 15% → 신규 진입 차단
-          DD > 20% → 전 포지션 청산, 시스템 정지
-        """
-        total_equity = self._get_total_equity()
-        daily_pnl_pct = (
-            (total_equity - self._daily_start_equity) / self._daily_start_equity * 100
-            if self._daily_start_equity > 0 else 0
-        )
-
-        # RG1: 일일 손실 -10% → 매매 중단
-        if daily_pnl_pct <= -10.0:
-            return False, "RG1: 일일 손실 -10% 도달"
-
-        # DD 단계적 대응 (Phase 3.2)
-        self._peak_equity = max(self._peak_equity, total_equity)
-        mdd = (
-            (total_equity - self._peak_equity) / self._peak_equity * 100
-            if self._peak_equity > 0 else 0
-        )
-
-        # RG2c: DD > 20% → 전 포지션 청산 + 시스템 정지
-        if mdd <= -20.0:
-            self._dd_level = 3
-            self._force_liquidate_all("DD>20% 시스템 정지")
-            return False, "RG2c: DD -20% — 전 포지션 청산, 시스템 정지"
-
-        # RG2b: DD > 15% → 신규 진입 차단 (기존 포지션은 유지)
-        if mdd <= -15.0:
-            self._dd_level = 2
-            return False, "RG2b: DD -15% — 신규 진입 차단"
-
-        # RG2a: DD > 10% → 사이징 50% 감축 (진입은 허용)
-        if mdd <= -10.0:
-            self._dd_level = 1
-            self._dd_sizing_mult = 0.5
-        else:
-            self._dd_level = 0
-            self._dd_sizing_mult = 1.0
-
-        # RG3: 최대 포지션 수 (regime별)
-        active_count = len([p for p in self.positions.values() if p.status == "ACTIVE"])
-        regime_params = REGIME_PARAMS.get(self._market_regime, REGIME_PARAMS["NEUTRAL"])
-        if active_count >= regime_params["max_positions"]:
-            return False, f"RG3: 최대 보유 {regime_params['max_positions']}종목 도달"
-
-        # RG4: 현금 비율 (활성 포지션 수에 따라 동적 적용)
-        cash_ratio = self.cash / total_equity if total_equity > 0 else 1.0
-        effective_rg4 = self.min_cash_ratio
-        if self._allocator:
-            ac = sum(1 for p in self.positions.values() if p.status == "ACTIVE")
-            if ac <= 2:
-                effective_rg4 = max(0.50, self.min_cash_ratio - 0.20)
-        # RG4b: 레짐별 현금 비율 오버라이드 (BEAR: 50%, CRISIS: 70%)
-        regime_cash = REGIME_OVERRIDES.get(self._market_regime, {}).get("min_cash_override")
-        if regime_cash is not None:
-            effective_rg4 = max(effective_rg4, regime_cash)
-
-        if cash_ratio < effective_rg4:
-            return False, f"RG4: 현금 비율 {effective_rg4*100:.0f}% 미만"
-
-        # RG5: VIX > 30 공포 구간 → 신규 진입 차단
-        if self._vix_ema20 > 30:
-            return False, f"RG5: VIX 공포구간 ({self._vix_ema20:.1f} > 30)"
-
-        return True, None
+        from simulation.risk_gates import risk_gate_check
+        return risk_gate_check(self)
 
     def _force_liquidate_all(self, reason: str):
         """DD>20% 시 모든 ACTIVE 포지션 강제 청산."""
@@ -1455,93 +1038,17 @@ class SimulationEngine:
         return {"positions_closed": len(closed), "details": closed}
 
     def _detect_bearish_divergence(self, df: pd.DataFrame, lookback: int = 10) -> bool:
-        """
-        베어리시 다이버전스 감지: 가격은 고점 갱신인데 RSI는 고점 하락.
-        True → 진입 차단 (모멘텀 약화 신호).
-        """
-        if len(df) < lookback + 2 or "rsi" not in df.columns:
-            return False
-
-        recent = df.iloc[-lookback:]
-        price = recent["close"].astype(float)
-        rsi = recent["rsi"]
-
-        if rsi.isna().any():
-            return False
-
-        price_peaks = []
-        rsi_at_peaks = []
-        for i in range(1, len(recent) - 1):
-            if float(price.iloc[i]) > float(price.iloc[i - 1]) and float(price.iloc[i]) > float(price.iloc[i + 1]):
-                price_peaks.append(float(price.iloc[i]))
-                rsi_at_peaks.append(float(rsi.iloc[i]))
-
-        if len(price_peaks) >= 2:
-            if price_peaks[-1] > price_peaks[-2] and rsi_at_peaks[-1] < rsi_at_peaks[-2]:
-                return True
-
-        return False
+        from simulation.risk_gates import detect_bearish_divergence
+        return detect_bearish_divergence(df, lookback)
 
     def _detect_support_resistance(self, df: pd.DataFrame, lookback: int = 40) -> dict:
-        """최근 N봉의 스윙 포인트를 클러스터링하여 S/R 레벨 반환.
-        RANGE_BOUND 레짐에서 MR 진입 시 가격이 지지선 근처인지 확인.
-        """
-        if len(df) < lookback:
-            return {"support": [], "resistance": []}
-
-        recent = df.tail(lookback)
-        levels: List[tuple] = []
-
-        # 3-candle 프랙탈 기반 스윙 포인트
-        highs = recent["high"].astype(float).values
-        lows = recent["low"].astype(float).values
-        for i in range(1, len(recent) - 1):
-            if highs[i] > highs[i - 1] and highs[i] > highs[i + 1]:
-                levels.append(("R", float(highs[i])))
-            if lows[i] < lows[i - 1] and lows[i] < lows[i + 1]:
-                levels.append(("S", float(lows[i])))
-
-        if not levels:
-            return {"support": [], "resistance": []}
-
-        # 1.5% 이내 레벨 클러스터링
-        clustered = self._cluster_levels(levels, tolerance=0.015)
-        return {
-            "support": [l for t, l in clustered if t == "S"],
-            "resistance": [l for t, l in clustered if t == "R"],
-        }
+        from simulation.risk_gates import detect_support_resistance
+        return detect_support_resistance(df, lookback)
 
     @staticmethod
     def _cluster_levels(levels: list, tolerance: float = 0.015) -> list:
-        """가격 레벨을 tolerance % 이내로 클러스터링.
-        각 클러스터에서 가장 빈번한 타입과 평균 가격을 반환.
-        """
-        if not levels:
-            return []
-
-        # 가격순 정렬
-        sorted_levels = sorted(levels, key=lambda x: x[1])
-        clusters: List[list] = [[sorted_levels[0]]]
-
-        for item in sorted_levels[1:]:
-            last_cluster = clusters[-1]
-            avg_price = sum(l[1] for l in last_cluster) / len(last_cluster)
-            if abs(item[1] - avg_price) / avg_price <= tolerance:
-                last_cluster.append(item)
-            else:
-                clusters.append([item])
-
-        # 각 클러스터에서 대표값 추출
-        result = []
-        for cluster in clusters:
-            avg_price = sum(l[1] for l in cluster) / len(cluster)
-            # 다수 타입 결정
-            s_count = sum(1 for t, _ in cluster if t == "S")
-            r_count = len(cluster) - s_count
-            dominant_type = "S" if s_count >= r_count else "R"
-            result.append((dominant_type, round(avg_price, 2)))
-
-        return result
+        from simulation.risk_gates import cluster_levels
+        return cluster_levels(levels, tolerance)
 
     # ══════════════════════════════════════════
     # 진입 시그널 스캔 (6-Phase 통합 파이프라인)
