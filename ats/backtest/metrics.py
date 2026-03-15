@@ -222,6 +222,17 @@ class ExtendedMetrics:
     mc_median_return: float = 0.0   # Median return across simulations
     mc_bankruptcy_prob: float = 0.0 # P(equity < 50% of peak)
 
+    # Benchmark comparison (P1)
+    benchmark_return: float = 0.0       # SPY/index total return over same period
+    benchmark_cagr: float = 0.0
+    alpha: float = 0.0                  # Jensen's alpha (annualized)
+    beta: float = 0.0                   # Portfolio beta vs benchmark
+    information_ratio: float = 0.0     # Excess return / tracking error
+    tracking_error: float = 0.0        # Annualized std of excess returns
+    excess_return: float = 0.0         # Portfolio return - Benchmark return
+    up_capture_ratio: float = 0.0      # Performance in up-benchmark markets
+    down_capture_ratio: float = 0.0    # Performance in down-benchmark markets
+
     # 원본 데이터 (차트용)
     equity_curve: List[DailyEquity] = field(default_factory=list)
     trades: List[TradeRecord] = field(default_factory=list)
@@ -239,9 +250,10 @@ class MetricsCollector:
         result = collector.calculate_all(engine)
     """
 
-    def __init__(self, initial_capital: float, scenario: BacktestScenario):
+    def __init__(self, initial_capital: float, scenario: BacktestScenario, benchmark_daily_returns: Optional[Dict[str, float]] = None):
         self.initial_capital = initial_capital
         self.scenario = scenario
+        self._benchmark_returns: Dict[str, float] = benchmark_daily_returns or {}
 
         # 일별 데이터
         self._equity_data: List[DailyEquity] = []
@@ -441,6 +453,10 @@ class MetricsCollector:
             result.mc_median_return = mc["median_return"]
             result.mc_bankruptcy_prob = mc["bankruptcy_prob"]
 
+        # 14. Benchmark comparison (P1)
+        if self._benchmark_returns:
+            self._calc_benchmark_metrics(result, daily_returns)
+
         return result
 
     def _run_monte_carlo(
@@ -509,6 +525,89 @@ class MetricsCollector:
             "median_return": round(median_return * 100, 2),
             "bankruptcy_prob": round(bankruptcy_prob * 100, 2),
         }
+
+    def _calc_benchmark_metrics(self, result: ExtendedMetrics, portfolio_daily_returns: List[float]):
+        """벤치마크 대비 알파/베타/정보비율 등 계산 (P1).
+
+        포트폴리오 일별 수익률과 벤치마크 일별 수익률을 날짜 기준으로 매칭하여 계산한다.
+        """
+        if not self._benchmark_returns or not self._equity_data:
+            return
+
+        # 날짜별 포트폴리오 수익률 매핑
+        port_by_date: Dict[str, float] = {}
+        for eq in self._equity_data:
+            port_by_date[eq.date] = eq.daily_return
+
+        # 양쪽 모두 존재하는 날짜만 매칭
+        common_dates = sorted(set(port_by_date.keys()) & set(self._benchmark_returns.keys()))
+        if len(common_dates) < 20:
+            return  # 최소 20일 데이터 필요
+
+        port_rets = [port_by_date[d] for d in common_dates]
+        bench_rets = [self._benchmark_returns[d] for d in common_dates]
+        n = len(common_dates)
+
+        # --- Benchmark total return ---
+        bench_cumulative = 1.0
+        for r in bench_rets:
+            bench_cumulative *= (1 + r)
+        result.benchmark_return = bench_cumulative - 1.0
+
+        # --- Benchmark CAGR ---
+        years = n / 252.0
+        if years > 0 and bench_cumulative > 0:
+            result.benchmark_cagr = bench_cumulative ** (1.0 / years) - 1.0
+
+        # --- Excess Return ---
+        result.excess_return = result.total_return - result.benchmark_return
+
+        # --- Beta = Cov(port, bench) / Var(bench) ---
+        port_mean = sum(port_rets) / n
+        bench_mean = sum(bench_rets) / n
+
+        cov_pb = sum((p - port_mean) * (b - bench_mean) for p, b in zip(port_rets, bench_rets)) / n
+        var_bench = sum((b - bench_mean) ** 2 for b in bench_rets) / n
+
+        if var_bench > 1e-12:
+            result.beta = cov_pb / var_bench
+        else:
+            result.beta = 0.0
+
+        # --- Alpha (Jensen's) = port_annual - (rf + beta * (bench_annual - rf)) ---
+        rf = 0.04  # risk-free rate
+        port_annual = result.cagr if result.cagr != 0 else result.total_return
+        bench_annual = result.benchmark_cagr if result.benchmark_cagr != 0 else result.benchmark_return
+        result.alpha = port_annual - (rf + result.beta * (bench_annual - rf))
+
+        # --- Tracking Error = annualized std of excess returns ---
+        excess_daily = [p - b for p, b in zip(port_rets, bench_rets)]
+        excess_mean = sum(excess_daily) / n
+        excess_var = sum((e - excess_mean) ** 2 for e in excess_daily) / n
+        result.tracking_error = math.sqrt(excess_var) * math.sqrt(252) if excess_var > 0 else 0.0
+
+        # --- Information Ratio = (port_annual - bench_annual) / tracking_error ---
+        if result.tracking_error > 1e-8:
+            result.information_ratio = (port_annual - bench_annual) / result.tracking_error
+        else:
+            result.information_ratio = 0.0
+
+        # --- Up/Down Capture ---
+        up_port = [p for p, b in zip(port_rets, bench_rets) if b > 0]
+        up_bench = [b for b in bench_rets if b > 0]
+        down_port = [p for p, b in zip(port_rets, bench_rets) if b < 0]
+        down_bench = [b for b in bench_rets if b < 0]
+
+        if up_bench:
+            avg_up_port = sum(up_port) / len(up_port)
+            avg_up_bench = sum(up_bench) / len(up_bench)
+            if abs(avg_up_bench) > 1e-12:
+                result.up_capture_ratio = (avg_up_port / avg_up_bench) * 100
+        if down_bench:
+            avg_down_port = sum(down_port) / len(down_port)
+            avg_down_bench = sum(down_bench) / len(down_bench)
+            if abs(avg_down_bench) > 1e-12:
+                result.down_capture_ratio = (avg_down_port / avg_down_bench) * 100
 
     def _convert_trades(self, engine: SimulationEngine) -> List[TradeRecord]:
         """SimTradeRecord → TradeRecord 변환."""

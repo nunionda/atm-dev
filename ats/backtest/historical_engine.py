@@ -463,9 +463,24 @@ class HistoricalBacktester:
             print(f"   → 워밍업 완료. 초기 체제: {self.engine._market_regime}\n")
 
         # ── 5. 메트릭 수집기 초기화 ──
+        # Benchmark daily returns for P1 alpha/beta metrics
+        benchmark_daily_returns: Dict[str, float] = {}
+        if self._index_by_date:
+            sorted_index_dates = sorted(self._index_by_date.keys())
+            for i in range(1, len(sorted_index_dates)):
+                prev_date = sorted_index_dates[i - 1]
+                curr_date = sorted_index_dates[i]
+                prev_close = self._index_by_date[prev_date]["close"]
+                curr_close = self._index_by_date[curr_date]["close"]
+                if prev_close > 0:
+                    benchmark_daily_returns[curr_date] = (curr_close - prev_close) / prev_close
+            if benchmark_daily_returns:
+                print(f"   → 벤치마크 일별 수익률: {len(benchmark_daily_returns)}일 (P1 alpha/beta)")
+
         self.collector = MetricsCollector(
             initial_capital=self.capital,
             scenario=self.scenario,
+            benchmark_daily_returns=benchmark_daily_returns,
         )
 
         # ── 6. 일별 루프 ──

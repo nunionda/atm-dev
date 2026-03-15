@@ -139,6 +139,16 @@ class ReportGenerator:
                 print(f"  최초 Sharpe6M : {r.rolling_sharpe_6m[sorted_months[0]]:>8.2f} ({sorted_months[0]})")
                 print(f"  최종 Sharpe6M : {r.rolling_sharpe_6m[sorted_months[-1]]:>8.2f} ({sorted_months[-1]})")
 
+        # Benchmark Comparison (P1)
+        if r.benchmark_return != 0.0 or r.alpha != 0.0:
+            print(f"\n  벤치마크 비교 (vs Index)")
+            print(f"  {'─'*40}")
+            print(f"  벤치 수익률 : {r.benchmark_return:>+8.2%}    Alpha   : {r.alpha:>+8.2%}")
+            print(f"  벤치 CAGR  : {r.benchmark_cagr:>+8.2%}    Beta    : {r.beta:>8.2f}")
+            print(f"  초과 수익률 : {r.excess_return:>+8.2%}    IR      : {r.information_ratio:>8.2f}")
+            print(f"  TE         : {r.tracking_error:>8.2%}    Up Cap  : {r.up_capture_ratio:>7.1f}%")
+            print(f"  {'':>30}    Dn Cap  : {r.down_capture_ratio:>7.1f}%")
+
         # Survivorship Bias
         if r.survivorship_score < 1.0 or r.survivorship_warning:
             print(f"\n  Survivorship Bias")
