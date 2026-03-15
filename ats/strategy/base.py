@@ -1,41 +1,50 @@
 """
-전략 추상 인터페이스
-모든 매매 전략은 이 인터페이스를 상속한다.
+전략 추상 클래스 (플러그인 인터페이스)
+문서: ATS-SAD-001 §5.2
+확장성: NFR-E01 전략 추가 용이
 """
 
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
-from typing import Dict, List
+from typing import List
 
 import pandas as pd
 
-from common.types import ExitSignal, PriceData, Signal
+from common.types import ExitSignal, Signal
 
 
 class BaseStrategy(ABC):
-
-    @abstractmethod
-    def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """OHLCV DataFrame에 기술적 지표를 추가한다."""
-        ...
+    """
+    전략 추상 클래스.
+    새로운 매매 전략을 추가할 때 이 인터페이스를 구현한다.
+    """
 
     @abstractmethod
     def scan_entry_signals(
         self,
         universe_codes: List[str],
-        ohlcv_data: Dict[str, pd.DataFrame],
-        current_prices: Dict[str, PriceData],
+        ohlcv_data: dict[str, pd.DataFrame],
+        current_prices: dict,
     ) -> List[Signal]:
-        """매수/매도 진입 시그널을 스캔한다."""
+        """
+        매수 시그널을 스캔한다 (UC-02).
+        Returns: 시그널 강도 내림차순 정렬된 Signal 리스트
+        """
         ...
 
     @abstractmethod
     def scan_exit_signals(
         self,
         positions: list,
-        ohlcv_data: Dict[str, pd.DataFrame],
-        current_prices: Dict[str, PriceData],
+        ohlcv_data: dict[str, pd.DataFrame],
+        current_prices: dict,
     ) -> List[ExitSignal]:
-        """보유 포지션의 청산 시그널을 스캔한다."""
+        """
+        청산 시그널을 스캔한다 (UC-04).
+        Returns: ExitSignal 리스트 (우선순위대로 하나만 반환)
+        """
+        ...
+
+    @abstractmethod
+    def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+        """기술적 지표를 계산하여 DataFrame에 컬럼을 추가한다."""
         ...
