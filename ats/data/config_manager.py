@@ -318,6 +318,89 @@ class SP500FuturesConfig:
 
 
 @dataclass
+class ESFIntradayConfig:
+    """ES-F 인트라데이 데이트레이딩 전략 설정."""
+    # 계약
+    ticker: str = "ES=F"
+    contract_multiplier: float = 50.0   # ES=$50/pt, MES=$5/pt
+    is_micro: bool = True               # 기본 MES
+
+    # 타임프레임
+    primary_interval: str = "15m"       # 실행 타임프레임
+    bias_interval: str = "1h"           # 바이어스 타임프레임
+    rth_start: str = "09:30"            # RTH 시작 (ET)
+    rth_end: str = "16:00"              # RTH 종료 (ET)
+    eod_close_minutes_before: int = 15  # EOD 강제 청산 (종료 N분 전)
+
+    # 지표 기간 (15m 바 기준)
+    ema_fast: int = 8
+    ema_mid: int = 21
+    ema_slow: int = 55
+    rsi_period: int = 14
+    atr_period: int = 20
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    zscore_window: int = 40             # ~10시간 RTH
+    bb_period: int = 20
+    bb_std: float = 2.0
+    adx_period: int = 14
+    adx_threshold: float = 25.0
+    volume_ma_period: int = 20
+
+    # Volume Profile
+    vp_session_bars: int = 26           # ~6.5hr RTH / 15m
+    vp_lookback_sessions: int = 3       # VP 산출에 사용할 세션 수
+    vp_value_area_pct: float = 0.70     # 가치 영역 비율
+
+    # 4-Layer 스코어링 가중치 (합계=100)
+    weight_amt_location: float = 30.0   # L1: AMT + Location
+    weight_zscore: float = 20.0         # L2: Z-Score 통계
+    weight_momentum: float = 25.0       # L3: Momentum
+    weight_volume_aggression: float = 25.0  # L4: Volume + Aggression
+
+    # Grade 임계값
+    grade_a_threshold: float = 55.0
+    grade_b_threshold: float = 45.0
+    grade_c_threshold: float = 35.0
+
+    # AMT 파라미터
+    amt_balance_ratio: float = 0.70     # VAH-VAL 내 봉 비율 ≥ 이면 BALANCE
+    amt_aggression_body_ratio: float = 0.65  # body/range 비율 (aggression 판단)
+    amt_aggression_vol_mult: float = 1.5     # volume surge 배수
+    amt_consecutive_bars: int = 3       # 연속 방향 봉 수
+
+    # 청산
+    sl_hard_pct: float = 0.015          # -1.5% 하드 손절
+    sl_atr_mult: float = 1.5            # ATR 기반 손절 배수
+    tp_atr_mult: float = 2.5            # ATR 기반 익절 배수 (R:R ~1.67:1)
+    trailing_activation_pct: float = 0.008  # +0.8%에서 트레일링 활성화
+    trailing_atr_mult: float = 1.0      # 트레일링 ATR 배수
+
+    # 리스크 관리
+    max_daily_trades: int = 5
+    max_daily_loss_dollars: float = 500.0   # MES 기준
+    max_consecutive_losses: int = 3
+    risk_per_trade_pct: float = 0.01    # 1% per trade
+    max_contracts: int = 5
+    kelly_fraction: float = 0.3         # Half-Kelly 선물용
+
+    # 거래 비용 (MES 기준)
+    slippage_ticks: int = 1             # 슬리피지 틱 수
+    commission_per_contract: float = 0.62   # MES 편도 수수료
+
+    # 증거금 (MES)
+    initial_margin: float = 1550.0
+    maintenance_margin: float = 1370.0
+
+    # RSI 범위
+    rsi_long_range_min: float = 40.0
+    rsi_long_range_max: float = 70.0
+    rsi_short_range_min: float = 30.0
+    rsi_short_range_max: float = 60.0
+
+
+@dataclass
 class ATSConfig:
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
     exit: ExitConfig = field(default_factory=ExitConfig)
@@ -327,6 +410,7 @@ class ATSConfig:
     smc_strategy: SMCStrategyConfig = field(default_factory=SMCStrategyConfig)
     breakout_retest: BreakoutRetestConfig = field(default_factory=BreakoutRetestConfig)
     sp500_futures: SP500FuturesConfig = field(default_factory=SP500FuturesConfig)
+    esf_intraday: ESFIntradayConfig = field(default_factory=ESFIntradayConfig)
 
     # System
     log_level: str = "INFO"
@@ -371,6 +455,7 @@ class ConfigManager:
             "smc_strategy": config.smc_strategy,
             "breakout_retest": config.breakout_retest,
             "sp500_futures": config.sp500_futures,
+            "esf_intraday": config.esf_intraday,
         }
 
         for section_name, section_obj in section_map.items():
@@ -453,4 +538,14 @@ class ConfigManager:
                 "zscore=%.1f, trend=%.1f, momentum=%.1f, volume=%.1f",
                 layer_sum, fc.weight_zscore, fc.weight_trend,
                 fc.weight_momentum, fc.weight_volume,
+            )
+
+        ec = config.esf_intraday
+        esf_sum = ec.weight_amt_location + ec.weight_zscore + ec.weight_momentum + ec.weight_volume_aggression
+        if abs(esf_sum - 100.0) > 0.1:
+            logger.warning(
+                "ESF intraday 4-Layer weights sum to %.1f (expected 100.0): "
+                "amt=%.1f, zscore=%.1f, momentum=%.1f, volume=%.1f",
+                esf_sum, ec.weight_amt_location, ec.weight_zscore,
+                ec.weight_momentum, ec.weight_volume_aggression,
             )

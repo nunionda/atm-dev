@@ -490,7 +490,7 @@ EV > 0 일 때만 진입.
 ### Dynamic ATR Multiplier
 
 ```
-mult = 2.0 if ADX < 20 else 1.5
+dynamicAtrMultiplier = 2.0 if ADX < 20 else 1.5
 ```
 
 ---

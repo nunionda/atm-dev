@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LineChart, BookOpen, Radio, Shield, BarChart3, ChevronRight, Activity, Calculator, RefreshCw } from 'lucide-react';
+import { LineChart, BookOpen, Radio, Shield, BarChart3, ChevronRight, Activity, Calculator, RefreshCw, Zap } from 'lucide-react';
 import './Navbar.css';
 
 export function Navbar() {
@@ -59,6 +59,13 @@ export function Navbar() {
                     >
                         <Activity size={18} />
                         <span>Futures</span>
+                    </Link>
+                    <Link
+                        to="/esf-scalping"
+                        className={`nav-link ${isActive('/esf-scalping') ? 'active' : ''}`}
+                    >
+                        <Zap size={18} />
+                        <span>ESF Scalp</span>
                     </Link>
                     <Link
                         to="/option-calculator"

@@ -22,6 +22,7 @@ from .rebalance_routes import rebalance_router
 from .backtest_routes import backtest_router
 from .replay_results_routes import replay_results_router
 from .futures_routes import futures_router
+from .esf_intraday_routes import esf_router
 from simulation.event_bus import SSEEventBus
 from simulation.controller import SimulationController
 
@@ -76,6 +77,7 @@ app.include_router(rebalance_router, prefix="/api/v1")
 app.include_router(backtest_router, prefix="/api/v1")
 app.include_router(replay_results_router, prefix="/api/v1")
 app.include_router(futures_router, prefix="/api/v1")
+app.include_router(esf_router, prefix="/api/v1")
 
 
 @app.get("/health")

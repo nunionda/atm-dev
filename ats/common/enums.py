@@ -63,6 +63,9 @@ class ExitReason(Enum):
     CIRCUIT_BREAKER = "ES_CB"
     ATR_STOP_LOSS = "ES_ATR_SL"
     ATR_TAKE_PROFIT = "ES_ATR_TP"
+    EOD_CLOSE = "ES_EOD"
+    SESSION_HALT = "ES_SESSION"
+    VP_ZONE_BREAK = "ES_VP_BREAK"
 
 
 class TradeEventType(Enum):
