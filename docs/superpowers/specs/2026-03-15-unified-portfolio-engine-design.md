@@ -207,11 +207,15 @@ async def _check_rebalance_async(self):
         if pos.status == "ACTIVE"
     }
 
-    # CPU-intensive 스캔을 스레드풀에서 실행
-    event = await asyncio.to_thread(
-        self._rebalance_mgr.execute_rebalance,
-        ohlcv_map=self._ohlcv_cache,  # PAPER/LIVE: 실시간 데이터
+    # CPU-intensive 스캔만 스레드풀에서 실행 (RebalanceManager 상태 변경은 메인 스레드)
+    scan_result = await asyncio.to_thread(
+        self._rebalance_mgr.scanner.scan,
+        ohlcv_map=self._ohlcv_cache,
         current_date=self._current_date,
+    )
+    # 상태 변경은 이벤트 루프 스레드에서 실행 (race condition 방지)
+    event = self._rebalance_mgr.apply_scan_result(
+        scan_result=scan_result,
         active_positions=active_positions,
     )
 
@@ -245,13 +249,31 @@ def _apply_rebalance(self, event: RebalanceEvent):
 
 ### 4.3 LIVE Approval
 
-`RebalanceManager`에 `reset_counter()` 메서드를 추가한다 (현재 미존재).
+`RebalanceManager`에 2개 메서드를 추가한다 (현재 미존재).
 
 ```python
 # RebalanceManager에 추가
 def reset_counter(self):
     """거부 시 카운터 리셋 — 다음 주기까지 대기"""
     self._trading_day_count = 0
+
+def apply_scan_result(self, scan_result, active_positions):
+    """PAPER/LIVE: 스캔 결과를 받아 상태 변경 (메인 스레드에서 호출)
+    execute_rebalance()의 상태 변경 부분만 분리한 버전"""
+    new_codes = {w["code"] for w in scan_result}
+    old_codes = self._current_watchlist_codes
+    added = list(new_codes - old_codes)
+    removed = list(old_codes - new_codes)
+    force_exit = list(active_positions.keys() & set(removed))
+    # 상태 업데이트
+    self._current_watchlist = scan_result
+    self._current_watchlist_codes = new_codes
+    self._cycle_count += 1
+    self._trading_day_count = 0
+    return RebalanceEvent(
+        stocks_added=added, stocks_removed=removed,
+        positions_force_exited=force_exit, new_watchlist=scan_result,
+    )
 
 # SimulationEngine
 def approve_rebalance(self):
@@ -405,11 +427,20 @@ class RebalanceApprover:
             ("⏰ 1시간 후", "rebal_defer_1h"),
         ])
         self._pending = event
+        self._requested_at = datetime.now()  # 타임아웃 계산용
 
-    async def handle_callback(self, action) -> str:
-        if action == "rebal_approve": return "approved"
-        elif action == "rebal_reject": return "rejected"
-        elif action == "rebal_defer_1h": return "deferred"
+    async def handle_callback(self, action: str, engine) -> str:
+        """텔레그램 콜백 라우터가 호출. engine에 직접 작용한다."""
+        if action == "rebal_approve":
+            engine.approve_rebalance()
+            self._pending = None
+            return "approved"
+        elif action == "rebal_reject":
+            engine.reject_rebalance()
+            self._pending = None
+            return "rejected"
+        elif action == "rebal_defer_1h":
+            return "deferred"
 
     def check_timeout(self) -> bool:
         if not self._pending:
@@ -648,8 +679,11 @@ class TradingScheduler:
 각 Step마다 회귀 검증을 통과해야 다음으로 진행한다.
 
 ### Step 1: RebalanceManager를 SimulationEngine에 내장
-- `_check_rebalance()`, `_apply_rebalance()` 추가
+- `_check_rebalance_sync()`, `_apply_rebalance()` 추가
 - `run_backtest_day()`에 리밸런싱 체크 삽입
+- 기존 `set_rebalance_exits()`를 union 방식으로 변경 (`self._rebalance_exit_codes |= codes`)
+  - Step 3 전까지 HistoricalBacktester가 여전히 `set_rebalance_exits()` 호출 → 덮어쓰기 방지
+- `RebalanceManager`에 `reset_counter()`, `apply_scan_result()` 메서드 추가
 - HistoricalBacktester의 리밸런싱 오케스트레이션 제거
 - **검증**: 기존 백테스트 결과 동일 (Sharpe 1.18, Return +28.4%, ±0.1%)
 
