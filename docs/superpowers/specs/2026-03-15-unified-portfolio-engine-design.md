@@ -1,7 +1,7 @@
 # Unified Portfolio Engine — Design Spec
 
 **Date**: 2026-03-15
-**Status**: Draft
+**Status**: Draft (Rev.2 — spec review 반영)
 **Scope**: SimulationEngine에 리밸런싱 내장 + 3-Mode 통합 (BACKTEST/PAPER/LIVE) + KIS 브로커 연동
 
 ---
@@ -54,13 +54,17 @@ class EngineMode(Enum):
 
 ### 3.2 Engine Constructor (변경)
 
+기존 `on_event: OnEventType` 파라미터는 유지한다. 이 콜백은 SSE 브로드캐스트에 필수이며 엔진 내부 ~30곳에서 호출된다.
+
 ```python
 class SimulationEngine:
-    def __init__(self, market_id, mode: EngineMode = EngineMode.BACKTEST,
+    def __init__(self, on_event: OnEventType, market_id: str,
+                 mode: EngineMode = EngineMode.BACKTEST,
                  executor: OrderExecutor = None,
                  notifier: TelegramNotifier = None,
                  approver: RebalanceApprover = None,
                  universe_config: dict = None):
+        self._on_event = on_event  # 기존 필수 파라미터 유지
         self._mode = mode
         self._executor = executor or VirtualExecutor()
         self._notifier = notifier
@@ -68,6 +72,9 @@ class SimulationEngine:
 
         # 리밸런싱 내장
         self._rebalance_mgr = None
+        self._rebalance_history: list[RebalanceEvent] = []
+        self._pending_rebalance = None
+        self._full_universe_ohlcv = None  # BACKTEST: 전체 유니버스 데이터 (별도 캐시)
         if universe_config:
             self._rebalance_mgr = RebalanceManager(
                 scanner=UniverseScanner(
@@ -77,6 +84,8 @@ class SimulationEngine:
                 rebalance_interval=universe_config.get("interval", 14),
             )
 ```
+
+**주의**: BACKTEST 모드에서 `on_event`는 기존대로 `_noop_event` (no-op 콜백)을 전달한다.
 
 ### 3.3 Unified Architecture Diagram
 
@@ -146,34 +155,87 @@ def _execute_day(self):
 
 ### 4.2 _check_rebalance() Logic
 
+**tick/check 순서**: 현재 코드와 동일하게 should_rebalance() → execute → tick 순서를 유지한다.
+이를 변경하면 첫 리밸런싱 타이밍이 1일 어긋나 백테스트 회귀 실패 위험이 있다.
+
+**데이터 소스**: `_ohlcv_cache`(워치리스트용)와 `_full_universe_ohlcv`(스캔용)는 별도 캐시이다.
+리밸런싱 스캔은 반드시 `_full_universe_ohlcv`를 사용해야 전체 유니버스에서 종목을 선별할 수 있다.
+
+**active_positions**: `execute_rebalance()`는 `Dict[str, Any]` (code → position)을 기대한다.
+
+**async/sync**: PAPER/LIVE의 `_run_cycle()`은 async이므로 `_check_rebalance()`도 async로 정의한다.
+BACKTEST의 `run_backtest_day()`에서는 동기 래퍼 `_check_rebalance_sync()`를 호출한다.
+CPU-intensive 스캔은 `asyncio.to_thread()`로 실행하여 이벤트 루프 블로킹을 방지한다.
+
 ```python
-def _check_rebalance(self):
+def _check_rebalance_sync(self):
+    """BACKTEST 모드 전용 (동기 실행)"""
     if not self._rebalance_mgr:
         return
 
-    self._rebalance_mgr.tick()
-
     if not self._rebalance_mgr.should_rebalance():
+        self._rebalance_mgr.tick()
         return
 
+    # 전체 유니버스 데이터로 스캔
+    ohlcv_for_scan = self._full_universe_ohlcv or self._ohlcv_cache
+    active_positions = {
+        pos.stock_code: pos for pos in self._positions.values()
+        if pos.status == "ACTIVE"
+    }
+
     event = self._rebalance_mgr.execute_rebalance(
-        ohlcv_map=self._ohlcv_cache,
+        ohlcv_map=ohlcv_for_scan,
         current_date=self._current_date,
-        active_positions=self._get_active_position_codes(),
+        active_positions=active_positions,
+    )
+
+    self._apply_rebalance(event)
+    self._rebalance_mgr.tick()  # execute 후 tick (현재 순서 유지)
+
+async def _check_rebalance_async(self):
+    """PAPER/LIVE 모드 전용 (비동기 실행)"""
+    if not self._rebalance_mgr:
+        return
+
+    if not self._rebalance_mgr.should_rebalance():
+        self._rebalance_mgr.tick()
+        return
+
+    active_positions = {
+        pos.stock_code: pos for pos in self._positions.values()
+        if pos.status == "ACTIVE"
+    }
+
+    # CPU-intensive 스캔을 스레드풀에서 실행
+    event = await asyncio.to_thread(
+        self._rebalance_mgr.execute_rebalance,
+        ohlcv_map=self._ohlcv_cache,  # PAPER/LIVE: 실시간 데이터
+        current_date=self._current_date,
+        active_positions=active_positions,
     )
 
     # LIVE: 텔레그램 승인 대기
-    if self._mode == EngineMode.LIVE:
+    if self._mode == EngineMode.LIVE and self._approver:
         self._pending_rebalance = event
-        self._request_rebalance_approval(event)
+        await self._approver.request_approval(event, {
+            "positions": active_positions,
+            "equity": self._total_equity,
+            "cash_ratio": self._cash / self._total_equity,
+        })
         return
 
-    # BACKTEST / PAPER: 즉시 실행
+    # PAPER: 즉시 실행
     self._apply_rebalance(event)
+    self._rebalance_mgr.tick()
 
 def _apply_rebalance(self, event: RebalanceEvent):
-    self._watchlist = event.new_watchlist
-    self._rebalance_exits = set(event.positions_force_exited)
+    # update_watchlist() 사용 — _stock_names도 함께 갱신
+    self.update_watchlist(event.new_watchlist)
+
+    # 기존 regime 다운그레이드 퇴출 코드와 병합 (덮어쓰기 방지)
+    existing_exits = getattr(self, '_rebalance_exit_codes', set())
+    self._rebalance_exit_codes = existing_exits | set(event.positions_force_exited)
 
     if self._mode != EngineMode.BACKTEST:
         self._emit_rebalance_event(event)
@@ -183,15 +245,24 @@ def _apply_rebalance(self, event: RebalanceEvent):
 
 ### 4.3 LIVE Approval
 
+`RebalanceManager`에 `reset_counter()` 메서드를 추가한다 (현재 미존재).
+
 ```python
+# RebalanceManager에 추가
+def reset_counter(self):
+    """거부 시 카운터 리셋 — 다음 주기까지 대기"""
+    self._trading_day_count = 0
+
+# SimulationEngine
 def approve_rebalance(self):
     if self._pending_rebalance:
         self._apply_rebalance(self._pending_rebalance)
         self._pending_rebalance = None
+        self._rebalance_mgr.tick()
 
 def reject_rebalance(self):
     self._pending_rebalance = None
-    self._rebalance_mgr.reset_counter()
+    self._rebalance_mgr.reset_counter()  # 새 메서드
 ```
 
 ### 4.4 SSE Rebalance Event
@@ -209,13 +280,27 @@ f"{market_id}:rebalance" → {
 
 ### 4.5 BACKTEST Data Access
 
-HistoricalBacktester가 전체 유니버스 OHLCV를 엔진에 주입한다. 엔진은 리밸런싱 스캔 시 이 데이터를 사용한다.
+**2개의 별도 캐시**를 사용한다:
+- `_ohlcv_cache`: 현재 워치리스트 종목의 일별 OHLCV (매매 판단용)
+- `_full_universe_ohlcv`: 전체 유니버스 OHLCV (리밸런싱 스캔용)
+
+HistoricalBacktester가 전체 유니버스 OHLCV를 `set_full_universe_ohlcv()`로 주입한다.
+`_check_rebalance_sync()`는 이 별도 캐시를 사용하여 스캔한다.
 
 ```python
-engine.set_full_ohlcv(full_universe_ohlcv)
-engine.run_backtest_day(date)
-# → 내부에서 _check_rebalance() → UniverseScanner.scan(ohlcv_cache)
+# SimulationEngine에 추가
+def set_full_universe_ohlcv(self, ohlcv: Dict[str, pd.DataFrame]):
+    """전체 유니버스 OHLCV 주입 (BACKTEST 리밸런싱 스캔용)"""
+    self._full_universe_ohlcv = ohlcv
+
+# HistoricalBacktester에서 호출
+engine.set_full_universe_ohlcv(full_universe_ohlcv)  # 110-stock 전체
+engine.run_backtest_day(date, ohlcv_cache, current_prices)  # 기존 시그니처 유지
+# → 내부에서 _check_rebalance_sync() → UniverseScanner.scan(_full_universe_ohlcv)
 ```
+
+**주의**: `run_backtest_day(date, ohlcv_cache, current_prices)` 기존 시그니처는 유지한다.
+Step 3(얇은 래퍼 리팩터) 전까지는 기존 호출 방식을 보존하여 회귀 위험을 최소화한다.
 
 ---
 
@@ -327,7 +412,10 @@ class RebalanceApprover:
         elif action == "rebal_defer_1h": return "deferred"
 
     def check_timeout(self) -> bool:
-        if self._pending and elapsed > self._timeout:
+        if not self._pending:
+            return False
+        elapsed_hours = (datetime.now() - self._requested_at).total_seconds() / 3600
+        if elapsed_hours > self._timeout:
             self._pending = None
             return True
         return False
@@ -335,7 +423,14 @@ class RebalanceApprover:
 
 ### 6.3 TelegramNotifier Extension
 
-기존 `send(message)` + 추가: `send_with_buttons(message, buttons)` + callback handler.
+기존 `send(message)` + 추가 필요:
+1. `send_with_buttons(message, buttons)` — `InlineKeyboardMarkup` JSON으로 전송
+2. **Callback 수신 인프라** — 2가지 방식 중 택 1:
+   - **방식 A (추천): Polling** — `python-telegram-bot` 라이브러리의 `Application.run_polling()` + `CallbackQueryHandler` 사용. FastAPI와 별도 스레드에서 실행.
+   - **방식 B: Webhook** — FastAPI에 `/telegram/callback` 엔드포인트 추가. Telegram Bot API의 `setWebhook`으로 등록. 외부 접근 가능한 URL 필요 (ngrok 등).
+3. **Callback 라우터** — `callback_data` ("rebal_approve" 등)를 `engine.approve_rebalance()` / `reject_rebalance()`로 매핑
+
+현재 `python-telegram-bot>=20.0`이 이미 설치되어 있으므로 방식 A가 가장 단순하다.
 
 ---
 
@@ -350,26 +445,38 @@ class HistoricalBacktester:
         ohlcv = self._download_universe_data()
         vix = self._load_vix()
         index = self._load_index()
+        arb_data = self._load_arbitrage_data() if self._has_arbitrage() else None
 
         # 2. 엔진 생성 (리밸런싱 설정 포함)
         engine = SimulationEngine(
+            on_event=_noop_event,  # BACKTEST: no-op 콜백
             market_id=self.market,
             mode=EngineMode.BACKTEST,
             executor=VirtualExecutor(),
-            universe_config={...} if self.universe_id else None,
+            universe_config={
+                "constituents": self.universe_constituents,
+                "top_n": self.top_n,
+                "interval": self.rebalance_days,
+            } if self.universe_id else None,
         )
 
-        # 3. 데이터 주입
-        engine.set_full_ohlcv(ohlcv)
+        # 3. 데이터 주입 (전체 유니버스 + VIX + Index + Arbitrage)
+        engine.set_full_universe_ohlcv(ohlcv)
         engine.set_vix_data(vix)
         engine.set_index_data(index)
+        if arb_data:
+            engine.set_arbitrage_data(arb_data)
 
         # 4. 날짜 루프 (단순)
         for date in trading_days:
-            engine.run_backtest_day(date)
+            engine.run_backtest_day(date, day_ohlcv, current_prices)
 
-        # 5. 메트릭 수집
-        return self._collect_metrics(engine)
+        # 5. 메트릭 수집 (리밸런스 통계 포함)
+        result = self._collect_metrics(engine)
+        if engine._rebalance_mgr:
+            result.total_rebalances = engine._rebalance_mgr.cycle_count
+            result.avg_turnover_pct = engine._rebalance_mgr.avg_turnover_pct
+        return result
 ```
 
 ### 7.2 Removed from HistoricalBacktester
@@ -377,14 +484,55 @@ class HistoricalBacktester:
 | 제거 항목 | 이동 위치 |
 |----------|----------|
 | RebalanceManager 생성 | SimulationEngine.__init__ |
-| should_rebalance() 체크 | SimulationEngine._check_rebalance |
+| should_rebalance() 체크 | SimulationEngine._check_rebalance_sync |
 | update_watchlist() 호출 | SimulationEngine._apply_rebalance |
 | set_rebalance_exits() 호출 | SimulationEngine._apply_rebalance |
 | 리밸런스 이벤트 추적 | SimulationEngine._rebalance_history |
 
+### 7.3 유지되는 항목
+
+| 항목 | 이유 |
+|------|------|
+| 데이터 다운로드/캐싱 | 엔진은 "데이터를 받아서 판단"만 함 |
+| Arbitrage 전략 데이터 (ETF pair, basis 등) | 별도 데이터 소스 필요 |
+| 날짜 루프 + 일별 데이터 슬라이싱 | 타임머신 역할 |
+| 메트릭 수집 + 리밸런스 통계 | engine._rebalance_mgr 접근 |
+
 ---
 
-## 8. PAPER/LIVE Pipeline
+## 8. Edge Cases
+
+### 8.1 Regime Downgrade + Rebalance 동시 발생
+
+같은 날 레짐 다운그레이드(`_reduce_positions_for_regime()`)와 리밸런싱이 모두 발생할 수 있다.
+두 로직 모두 `_rebalance_exit_codes`에 퇴출 종목을 추가한다.
+
+**해결**: `_apply_rebalance()`에서 기존 퇴출 코드에 **union** (병합)한다. 덮어쓰기 금지.
+
+```python
+# _apply_rebalance() 내부
+existing_exits = getattr(self, '_rebalance_exit_codes', set())
+self._rebalance_exit_codes = existing_exits | set(event.positions_force_exited)
+```
+
+**실행 순서** (run_backtest_day):
+1. `_check_exits()` — 기존 퇴출 코드 처리
+2. `_update_market_regime()` — 레짐 변경 감지
+3. `_reduce_positions_for_regime()` — 다운그레이드 시 퇴출 코드 추가
+4. `_check_rebalance()` — 리밸런싱 퇴출 코드 **병합** 추가
+5. `_scan_entries()` — 새 진입 (퇴출 종목 제외)
+
+### 8.2 PAPER/LIVE 리밸런싱 중 시세 데이터
+
+PAPER/LIVE에서 `UniverseScanner.scan()`은 실시간 시세 기반의 OHLCV가 필요하다.
+현재 워치리스트 종목만 시세를 가져오므로, 리밸런싱 스캔 시점에 전체 유니버스 시세를 가져와야 한다.
+
+**해결**: `_check_rebalance_async()`에서 스캔 전 `executor.get_current_prices(all_constituents)`로
+전체 유니버스 최신 시세를 가져온 후 스캔에 전달한다.
+
+---
+
+## 9. PAPER/LIVE Pipeline
 
 ### 8.1 Entry Points
 
@@ -452,7 +600,7 @@ class TradingScheduler:
 
 ---
 
-## 9. Safety Mechanisms
+## 10. Safety Mechanisms
 
 | 장치 | 동작 |
 |------|------|
@@ -465,7 +613,7 @@ class TradingScheduler:
 
 ---
 
-## 10. File Changes
+## 11. File Changes
 
 ### New Files
 
@@ -485,6 +633,7 @@ class TradingScheduler:
 | `ats/backtest/historical_engine.py` | 리밸런싱 오케스트레이션 제거, 얇은 래퍼로 축소 |
 | `ats/infra/notifier/telegram_notifier.py` | 인라인 버튼 + 콜백 핸들링 추가 |
 | `main.py` | `paper`, `live` 명령어 추가 |
+| `ats/backtest/rebalancer.py` | `reset_counter()` 메서드 추가 |
 
 ### Moved (import 유지)
 
@@ -494,7 +643,7 @@ class TradingScheduler:
 
 ---
 
-## 11. Implementation Steps (Bottom-Up)
+## 12. Implementation Steps (Bottom-Up)
 
 각 Step마다 회귀 검증을 통과해야 다음으로 진행한다.
 
