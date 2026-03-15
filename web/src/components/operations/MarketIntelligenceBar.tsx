@@ -122,7 +122,7 @@ interface MarketColumnProps {
     isActive: boolean;
 }
 
-function MarketColumn({ marketId, flag, label, intel, isActive }: MarketColumnProps) {
+function MarketColumn({ marketId: _marketId, flag, label, intel, isActive }: MarketColumnProps) {
     if (!intel) {
         return (
             <div className={`mib-col ${isActive ? 'mib-col--active' : ''}`}>

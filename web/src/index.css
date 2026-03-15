@@ -38,6 +38,53 @@
   --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Design Tokens ── */
+
+  /* Typography Scale */
+  --font-xs:   0.75rem;    /* 12px — timestamps, badges */
+  --font-sm:   0.8125rem;  /* 13px — table cells, small labels */
+  --font-base: 0.875rem;   /* 14px — body text */
+  --font-md:   1rem;       /* 16px — card titles */
+  --font-lg:   1.25rem;    /* 20px — section titles */
+  --font-xl:   1.5rem;     /* 24px — page titles */
+  --font-2xl:  2rem;       /* 32px — hero (Home only) */
+  --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  /* Spacing Scale (4px base) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  /* Border Radius Scale */
+  --radius-sm:   6px;   /* inputs, badges, pills */
+  --radius-md:   10px;  /* cards, panels */
+  --radius-lg:   14px;  /* modals, large panels */
+  --radius-full: 100px; /* buttons, tags */
+
+  /* Semantic Shadows */
+  --shadow-card:  0 2px 8px rgba(0,0,0,0.3);
+  --shadow-panel: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-float: 0 8px 24px rgba(0,0,0,0.5);
+
+  /* Component Tokens */
+  --card-bg:      rgba(255,255,255,0.03);
+  --card-border:  rgba(255,255,255,0.06);
+  --card-padding: var(--space-4);
+  --card-radius:  var(--radius-md);
+
+  --input-bg:      rgba(255,255,255,0.05);
+  --input-border:  rgba(255,255,255,0.1);
+  --input-radius:  var(--radius-sm);
+  --input-padding: 0.5rem 0.75rem;
+
+  --table-header-bg:    rgba(255,255,255,0.03);
+  --table-cell-padding: 0.625rem 0.75rem;
+  --table-border:       rgba(255,255,255,0.06);
 }
 
 * {
@@ -100,7 +147,7 @@ h1, h2, h3, h4, h5, h6 {
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--glass-border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
   transition: transform var(--transition-normal), box-shadow var(--transition-normal), border-color var(--transition-fast);
 }
@@ -210,3 +257,113 @@ h1, h2, h3, h4, h5, h6 {
 .animate-float {
   animation: float 6s ease-in-out infinite;
 }
+
+/* ── Common Component Classes ── */
+
+/* Card */
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
+  padding: var(--card-padding);
+}
+
+.card-header {
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-3);
+}
+
+/* Metric Display */
+.metric-value {
+  font-size: var(--font-lg);
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-label {
+  font-size: var(--font-xs);
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Data Table */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th {
+  padding: var(--table-cell-padding);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-align: left;
+  border-bottom: 1px solid var(--table-border);
+  background: var(--table-header-bg);
+}
+.data-table td {
+  padding: var(--table-cell-padding);
+  font-size: var(--font-sm);
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--table-border);
+}
+.data-table tbody tr:hover {
+  background: rgba(255,255,255,0.02);
+}
+
+/* Input Field */
+.input-field {
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  padding: var(--input-padding);
+  color: var(--text-primary);
+  font-size: var(--font-base);
+  font-family: inherit;
+  transition: border-color var(--transition-fast);
+}
+.input-field:focus {
+  border-color: var(--accent-primary);
+  outline: none;
+}
+
+/* Page Layout */
+.page-container {
+  max-width: 1400px;
+  margin: var(--space-6) auto;
+  padding: 0 var(--space-6);
+}
+.page-title {
+  font-size: var(--font-xl);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: var(--space-5);
+}
+.section-title {
+  font-size: var(--font-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: var(--space-3);
+}
+
+/* Badge / Pill */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+.badge--green  { background: rgba(34,197,94,0.15); color: #4ade80; }
+.badge--red    { background: rgba(239,68,68,0.15); color: #f87171; }
+.badge--yellow { background: rgba(234,179,8,0.15); color: #facc15; }
+.badge--blue   { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.badge--muted  { background: rgba(255,255,255,0.05); color: var(--text-secondary); }
+
+/* PnL Colors */
+.pnl-positive { color: #4ade80; }
+.pnl-negative { color: #f87171; }
+.pnl-neutral  { color: var(--text-secondary); }

@@ -5,7 +5,7 @@ import type {
     TrendChangeEntry,
     IndexTrend,
 } from '../../lib/api';
-import { fetchMarketIntelligence, getMarketConfig } from '../../lib/api';
+import { fetchMarketIntelligence } from '../../lib/api';
 import { usePolling } from '../../hooks/usePolling';
 import './IndexTrendTimeline.css';
 
@@ -68,8 +68,6 @@ export function IndexTrendTimeline({ market }: Props) {
     const polling = usePolling(fetchMarketIntelligence, { interval: 60000, enabled: true });
     const polledHistory = polling.data?.[market]?.trend_history ?? null;
     const entries = polledHistory || history;
-
-    const mktCfg = getMarketConfig(market);
 
     if (error && entries.length === 0) {
         return (

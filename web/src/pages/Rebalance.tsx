@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { RebalanceHeader } from '../components/rebalance/RebalanceHeader';
 import { RecommendationTable } from '../components/rebalance/RecommendationTable';
 import { ScanSummary } from '../components/rebalance/ScanSummary';
-import { BacktestSection } from '../components/rebalance/BacktestSection';
 import type { RebalanceResult, RebalanceStatus } from '../lib/api';
 import {
     MARKETS,
@@ -119,8 +118,6 @@ export function Rebalance() {
                 type="SELL"
                 currencySymbol={marketConfig.currencySymbol}
             />
-
-            <BacktestSection activeMarket={activeMarket} />
         </div>
     );
 }

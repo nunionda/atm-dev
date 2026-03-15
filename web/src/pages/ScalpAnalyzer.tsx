@@ -858,7 +858,7 @@ export function ScalpAnalyzer() {
                 </button>
               ))}
             </div>
-            <Link to="/scalp-analyzer/fabio" style={{
+            <Link to="/signals/futures/fabio" style={{
               padding: '6px 14px', borderRadius: 6, fontSize: 11, fontWeight: 700,
               fontFamily: F.mono, textDecoration: 'none', transition: 'all 0.15s',
               border: '1px solid #c2185b', background: 'rgba(194,24,91,0.10)', color: '#ff6b9d',

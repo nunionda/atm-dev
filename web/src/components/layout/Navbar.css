@@ -1,86 +1,227 @@
+/* === Navbar Base === */
 .navbar {
-    position: sticky;
-    top: 1.5rem;
-    z-index: 100;
-    margin: 1.5rem auto;
-    padding: 0.5rem 0;
-    border-radius: 100px;
-    max-width: 1200px;
-    width: calc(100% - 4rem);
+  position: sticky;
+  top: 1.5rem;
+  z-index: 100;
+  margin: 1.5rem auto;
+  padding: 0.5rem 0;
+  border-radius: 100px;
+  max-width: 1200px;
+  width: calc(100% - 4rem);
 }
 
 .nav-container {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 1rem;
 }
 
 .nav-logo {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    font-weight: 700;
-    font-size: 1.15rem;
-    letter-spacing: -0.02em;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
 }
 
 .logo-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    box-shadow: var(--shadow-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
 }
 
 .logo-text {
-    color: var(--text-primary);
+  color: var(--text-primary);
 }
 
-.logo-text .text-secondary {
-    font-weight: 400;
-    color: var(--text-muted);
-}
-
+/* === Nav Links === */
 .nav-links {
-    display: flex;
-    gap: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 .nav-link {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.95rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-    padding: 0.5rem 1rem;
-    border-radius: 100px;
-    transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  padding: 0.5rem 1rem;
+  border-radius: 100px;
+  transition: all var(--transition-fast);
+  background: none;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
 }
 
 .nav-link:hover,
 .nav-link.active {
-    color: var(--text-primary);
+  color: var(--text-primary);
 }
 
 .nav-link.active {
-    background: var(--border-light);
-    color: var(--text-primary);
+  background: var(--border-light);
 }
 
+/* === Group & Dropdown === */
+.nav-group {
+  position: relative;
+}
+
+.nav-chevron--open {
+  transform: rotate(180deg);
+}
+
+.nav-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  width: 180px;
+  padding: 0.5rem;
+  padding-top: 0.5rem;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 200;
+}
+
+.nav-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.nav-dropdown-item:hover {
+  background: var(--border-light);
+  color: var(--text-primary);
+}
+
+.nav-dropdown-item.active {
+  background: var(--border-light);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* === Theory icon === */
+.nav-theory {
+  padding: 0.5rem;
+  border-radius: 50%;
+}
+
+/* === Actions === */
 .nav-actions {
-    display: flex;
-    gap: 1rem;
-    align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
 }
 
-.nav-btn {
-    padding: 0.5rem 1.25rem;
-    font-size: 0.9rem;
-    border-radius: 100px;
+/* === Mobile === */
+.nav-mobile-toggle {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 0.5rem;
+}
+
+@media (max-width: 768px) {
+  .navbar {
+    border-radius: 16px;
+    top: 0.5rem;
+    margin: 0.5rem;
+    width: calc(100% - 1rem);
+  }
+
+  .nav-mobile-toggle {
+    display: flex;
+  }
+
+  .nav-links {
+    display: none;
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    padding: 1rem;
+    border-radius: 16px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-lg);
+    gap: 0.25rem;
+  }
+
+  .nav-links--open {
+    display: flex;
+  }
+
+  .nav-group {
+    width: 100%;
+  }
+
+  .nav-group-trigger {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .nav-dropdown {
+    position: static;
+    transform: none;
+    box-shadow: none;
+    border: none;
+    padding: 0 0 0 1rem;
+    min-width: auto;
+  }
+}
+
+/* === Sub Navigation === */
+.sub-nav {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  width: fit-content;
+}
+
+.sub-nav-tab {
+  padding: 0.4rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: 8px;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.sub-nav-tab:hover {
+  color: var(--text-primary);
+}
+
+.sub-nav-tab--active {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
 }

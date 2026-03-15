@@ -22,7 +22,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 12px 14px;
+    padding: var(--card-padding);
 }
 
 .ops-perf-icon {

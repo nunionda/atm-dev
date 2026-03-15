@@ -29,7 +29,7 @@
     align-items: center;
     padding: 0.5rem;
     gap: 0.5rem;
-    border-radius: 12px;
+    border-radius: var(--card-radius);
 }
 
 .search-box input {

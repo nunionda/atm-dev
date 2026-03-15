@@ -72,13 +72,13 @@
 
 .position-table th {
     text-align: left;
-    padding: 8px 10px;
+    padding: var(--table-cell-padding);
     color: var(--text-muted);
     font-weight: 500;
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--table-border);
     white-space: nowrap;
     position: sticky;
     top: 0;
@@ -91,7 +91,7 @@
 }
 
 .position-table td {
-    padding: 10px 10px;
+    padding: var(--table-cell-padding);
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
     white-space: nowrap;
 }

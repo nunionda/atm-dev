@@ -374,7 +374,7 @@ export function FabioStrategy() {
       <div className="fb-header">
         <div className="fb-header-inner">
           <div className="fb-logo">
-            <Link to="/scalp-analyzer" className="fb-back-btn">← Scalp</Link>
+            <Link to="/signals/futures" className="fb-back-btn">← Scalp</Link>
             <div className="fb-logo-icon">F</div>
             <div>
               <div className="fb-logo-title">Fabio Strategy Engine</div>

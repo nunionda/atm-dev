@@ -20,7 +20,7 @@ const AppStateContext = createContext<AppState | null>(null);
 export function AppStateProvider({ children }: { children: ReactNode }) {
     const [activeMarket, setActiveMarket] = useState<MarketId>('sp500');
     const [highlightedPosition, setHighlightedPosition] = useState<HighlightTarget | null>(null);
-    const highlightTimerRef = useRef<ReturnType<typeof setTimeout>>();
+    const highlightTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -43,11 +43,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         }
 
         const params = highlight?.ticker ? `?highlight=${encodeURIComponent(highlight.ticker)}` : '';
-        if (location.pathname === '/operations') {
+        if (location.pathname === '/trading/operations') {
             // Already on Operations — just set highlight, no navigate
             return;
         }
-        navigate(`/operations${params}`);
+        navigate(`/trading/operations${params}`);
     }, [navigate, location.pathname]);
 
     return (
