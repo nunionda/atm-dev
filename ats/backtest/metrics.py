@@ -111,6 +111,11 @@ class PhaseStats:
     stock_regime_distribution: Dict[str, int] = field(default_factory=dict)
     stock_regime_strategy_map: Dict[str, int] = field(default_factory=dict)
 
+    # B7: 종목별 레짐 성과 추적
+    stock_regime_win_rate: Dict[str, float] = field(default_factory=dict)
+    stock_regime_avg_pnl: Dict[str, float] = field(default_factory=dict)
+    stock_regime_entry_count: Dict[str, int] = field(default_factory=dict)
+
     @property
     def smc_avg_score(self) -> float:
         """SMC 평균 진입 스코어."""
@@ -393,8 +398,19 @@ class MetricsCollector:
         result.monthly_returns = self._calc_monthly_returns()
 
         # 9. Phase 통계
-        result.phase_stats = PhaseStats(**engine._phase_stats)
+        # B7: _stock_regime_pnls는 PhaseStats 필드가 아니므로 분리해서 처리
+        _phase_stats_copy = {k: v for k, v in engine._phase_stats.items() if k != "_stock_regime_pnls"}
+        result.phase_stats = PhaseStats(**_phase_stats_copy)
         result.phase_stats.total_commission_paid = engine._total_commission_paid
+
+        # B7: 종목별 레짐 성과 집계
+        sr_pnls = engine._phase_stats.get("_stock_regime_pnls", {})
+        for regime, data in sr_pnls.items():
+            count = data.get("count", 0)
+            result.phase_stats.stock_regime_entry_count[regime] = count
+            if count > 0:
+                result.phase_stats.stock_regime_win_rate[regime] = round(data["wins"] / count * 100, 1)
+                result.phase_stats.stock_regime_avg_pnl[regime] = round(data["total_pnl"] / count, 2)
 
         # 10. Regime
         result.regime_transitions = self._regime_transitions

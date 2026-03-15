@@ -167,6 +167,10 @@ def _serialize_metrics(metrics: Any) -> Dict[str, Any]:
         # 종목별 레짐 분류
         "stock_regime_distribution": ps.stock_regime_distribution,
         "stock_regime_strategy_map": ps.stock_regime_strategy_map,
+        # B7: 종목별 레짐 성과 추적
+        "stock_regime_win_rate": ps.stock_regime_win_rate,
+        "stock_regime_avg_pnl": ps.stock_regime_avg_pnl,
+        "stock_regime_entry_count": ps.stock_regime_entry_count,
     }
 
     # --- Monthly Returns ---

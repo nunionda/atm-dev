@@ -177,16 +177,29 @@ REGIME_PARAMS = {
     "CRISIS":      {"max_positions": 1,  "max_weight": 0.05},
 }
 
-# ── 종목별 레짐 분류 임계값 (0-100 복합 스코어 → 6단계) ──
+# ── 종목별 레짐 분류 임계값 (0-100 복합 스코어 → 5단계) ──
 STOCK_REGIME_THRESHOLDS: list = [
-    # (min_score, regime) — 내림차순 매칭
-    (80, "STRONG_BULL"),
-    (60, "BULL"),
-    (45, "NEUTRAL"),
-    (30, "RANGE_BOUND"),
-    (15, "BEAR"),
-    (0,  "CRISIS"),
+    # (min_score, regime) — 내림차순 매칭 (5단계)
+    (72, "STRONG_BULL"),   # Was 80 — capture more uptrending stocks
+    (55, "BULL"),          # Was 60 — wider bull band
+    (40, "NEUTRAL"),       # Was 45 — narrower neutral (was 83% clustering here)
+    (25, "BEAR"),          # Merges old RANGE_BOUND + BEAR
+    (0,  "STRONG_BEAR"),   # Merges old BEAR + CRISIS
 ]
+
+# ── 종목 레짐 레벨 (스무딩용: 2+ 레벨 하락 → 즉시 적용) ──
+_STOCK_REGIME_LEVEL = {
+    "STRONG_BULL": 4, "BULL": 3, "NEUTRAL": 2, "BEAR": 1, "STRONG_BEAR": 0
+}
+
+# ── 종목별 레짐 → 전략 스캔 친화도 (0.0=스킵, 1.0=풀스캔) ──
+STOCK_REGIME_STRATEGY_AFFINITY: Dict[str, Dict[str, float]] = {
+    "STRONG_BULL": {"momentum": 1.0, "breakout_retest": 0.8, "smc": 0.5, "mean_reversion": 0.0, "defensive": 0.0},
+    "BULL":        {"momentum": 0.8, "breakout_retest": 0.5, "smc": 0.6, "mean_reversion": 0.3, "defensive": 0.0},
+    "NEUTRAL":     {"mean_reversion": 1.0, "smc": 0.5, "momentum": 0.0, "breakout_retest": 0.0, "defensive": 0.3},
+    "BEAR":        {"defensive": 0.8, "mean_reversion": 0.5, "smc": 0.3, "momentum": 0.0, "breakout_retest": 0.0},
+    "STRONG_BEAR": {"defensive": 1.0, "mean_reversion": 0.2, "momentum": 0.0, "breakout_retest": 0.0, "smc": 0.0},
+}
 
 # ── 체제별 청산 파라미터 ──
 REGIME_EXIT_PARAMS = {
@@ -1766,6 +1779,19 @@ class SimulationEngine:
         if len(self._index_ohlcv) > 260:
             self._index_ohlcv = self._index_ohlcv[-260:]
 
+    def _get_index_return(self, days: int) -> float:
+        """최근 N일 지수 수익률 계산. 데이터 부족 시 0.0 반환."""
+        if not self._index_ohlcv or len(self._index_ohlcv) < days + 1:
+            return 0.0
+        try:
+            current = float(self._index_ohlcv[-1]["close"])
+            past = float(self._index_ohlcv[-days - 1]["close"])
+            if past > 0:
+                return (current - past) / past
+        except (KeyError, IndexError, ValueError):
+            pass
+        return 0.0
+
     def _analyze_index_trend(self) -> Dict:
         """지수 OHLCV에서 추세 시그널 분석.
 
@@ -1871,6 +1897,14 @@ class SimulationEngine:
             trend = "CRISIS"
         elif ma_state == "ALIGNED_BEAR":
             trend = "BEAR"
+        # ── Secondary bear detection (B6): momentum + VIX + short-term return ──
+        elif momentum_score < 35 and self._vix_ema20 > 22 and self._get_index_return(20) < -0.05:
+            trend = "BEAR"
+            signals.append("보조 약세 감지: momentum<35, VIX>22, 20일수익률<-5%")
+        # ── Secondary crisis detection (B6): 60-day deep drawdown ──
+        elif self._get_index_return(60) < -0.15:
+            trend = "CRISIS"
+            signals.append("보조 위기 감지: 60일수익률<-15%")
         elif adx < 20 and volatility_state in ("LOW", "NORMAL"):
             trend = "RANGE_BOUND"  # 저추세 + 저변동성 = 박스권
         else:
@@ -2131,17 +2165,18 @@ class SimulationEngine:
 
     def _classify_stock_regime(self, df: pd.DataFrame) -> str:
         """
-        종목 개별 레짐 분류 (0-100 복합 스코어).
+        종목 개별 레짐 분류 (0-100 복합 스코어, v2).
 
         기존 _confirm_trend(), _estimate_trend_stage() 결과를 종합하여
         글로벌 레짐과 독립적으로 각 종목의 추세 상태를 6단계로 판정.
 
         구성요소:
-          (1) MA 정렬 점수 (0-30): alignment_score 0~5 → 0~30
-          (2) ADX 방향 점수 (0-20): UP 추세 + ADX 강도
-          (3) RSI 위치 점수 (0-20): 강세/약세 위치
+          (1) MA 정렬 점수 (0-25): alignment_score 0~5 → 0~25
+          (2) ADX 방향+기울기 점수 (0-20): UP 추세 + ADX 강도
+          (3) RSI 위치 점수 (0-15): 강세/약세 위치 (reduced from 20)
           (4) Price vs MA200 (0-15): 장기 추세 위치
-          (5) Trend Stage 보너스 (0-15): EARLY/MID/LATE
+          (5) Trend Stage 보너스 (0-10): EARLY/MID/LATE (reduced from 15)
+          (6) Volume Trend — OBV 20일 기울기 (0-15): NEW
         """
         if len(df) < 200:
             return "NEUTRAL"
@@ -2151,11 +2186,11 @@ class SimulationEngine:
         curr = df.iloc[-1]
         score = 0.0
 
-        # (1) MA 정렬 점수 (0-30): alignment_score 0~5 → 0~30
+        # (1) MA 정렬 점수 (0-25): alignment_score 0~5 → 0~25
         alignment = trend.get("alignment_score", 0)
-        score += alignment * 6  # 0, 6, 12, 18, 24, 30
+        score += alignment * 5  # 0, 5, 10, 15, 20, 25
 
-        # (2) ADX 방향 점수 (0-20)
+        # (2) ADX 방향+기울기 점수 (0-20)
         adx = trend.get("adx", 0)
         direction = trend.get("direction", "FLAT")
         if direction == "UP":
@@ -2165,16 +2200,16 @@ class SimulationEngine:
         else:
             score += 10  # FLAT → 중립
 
-        # (3) RSI 위치 점수 (0-20)
+        # (3) RSI 위치 점수 (0-15) — reduced from 20
         rsi = float(curr.get("rsi", 50)) if pd.notna(curr.get("rsi")) else 50
         if rsi >= 55:
-            score += min((rsi - 40) / 40 * 20, 20)   # RSI 55~80 → 7.5~20
+            score += min((rsi - 40) / 40 * 15, 15)   # RSI 55~80 → 5.6~15
         elif rsi <= 35:
-            score += max(0, rsi / 35 * 5)             # RSI 0~35 → 0~5
+            score += max(0, rsi / 35 * 4)             # RSI 0~35 → 0~4
         else:
-            score += 10  # 35~55 → 중립
+            score += 7.5  # 35~55 → 중립
 
-        # (4) Price vs MA200 (0-15)
+        # (4) Price vs MA200 (0-15) — unchanged
         ma200 = float(curr.get("ma200", 0)) if pd.notna(curr.get("ma200")) else 0
         price = float(curr["close"])
         if ma200 > 0:
@@ -2186,19 +2221,43 @@ class SimulationEngine:
         else:
             score += 7  # 데이터 없으면 중립
 
-        # (5) Trend Stage 보너스 (0-15)
-        stage_bonus = {"EARLY": 15, "MID": 8, "LATE": 2}
-        score += stage_bonus.get(stage, 8)
+        # (5) Trend Stage 보너스 (0-10) — reduced from 15
+        stage_bonus = {"EARLY": 10, "MID": 5, "LATE": 1}
+        score += stage_bonus.get(stage, 5)
+
+        # (6) Volume Trend — OBV 20일 기울기 (0-15) NEW
+        obv_score = 7.5  # 기본값: 중립
+        try:
+            if len(df) >= 20 and "close" in df.columns and "volume" in df.columns:
+                # OBV가 이미 계산되어 있으면 사용, 아니면 인라인 계산
+                if "obv" in df.columns:
+                    obv_vals = df["obv"].iloc[-20:].dropna()
+                else:
+                    c = df["close"].iloc[-20:]
+                    v = df["volume"].iloc[-20:]
+                    obv_vals = (np.sign(c.diff()).fillna(0) * v).cumsum()
+                    obv_vals = obv_vals.dropna()
+
+                if len(obv_vals) >= 10:
+                    x = np.arange(len(obv_vals))
+                    slope, _ = np.polyfit(x, obv_vals.values.astype(float), 1)
+                    obv_mean = abs(float(obv_vals.mean()))
+                    if obv_mean > 0:
+                        norm_slope = slope / obv_mean * 100  # % change per day
+                        obv_score = max(0, min(15, 7.5 + norm_slope * 50))
+        except Exception:
+            obv_score = 7.5
+        score += obv_score
 
         # 스코어 → 레짐 매핑
         score = max(0, min(100, score))
         for threshold, regime in STOCK_REGIME_THRESHOLDS:
             if score >= threshold:
                 return regime
-        return "CRISIS"
+        return "STRONG_BEAR"
 
     def _update_stock_regimes(self, force: bool = False):
-        """워치리스트 종목의 개별 레짐 갱신. 성능을 위해 7일 주기로 실행."""
+        """워치리스트 종목의 개별 레짐 갱신. 성능을 위해 7일 주기로 실행. 2-cycle smoothing."""
         if self._stock_regimes_updated:
             return  # 이미 이번 사이클에서 갱신됨 → 스킵
         self._stock_regimes_updated = True
@@ -2208,19 +2267,54 @@ class SimulationEngine:
         if not force and self._stock_regimes and self._stock_regime_counter % 7 != 1:
             return  # 캐시된 결과 사용
 
+        # Initialize pending dict if not exists
+        if not hasattr(self, "_stock_regime_pending"):
+            self._stock_regime_pending: Dict[str, Tuple[str, int]] = {}
+
         for w in self._watchlist:
             code = w["code"]
             df = self._ohlcv_cache.get(code)
-            if df is not None and len(df) >= 200:
-                self._stock_regimes[code] = self._classify_stock_regime(df)
-            else:
+            if df is None or len(df) < 200:
                 self._stock_regimes[code] = "NEUTRAL"  # 데이터 부족 → 중립
+                continue
+
+            new_regime = self._classify_stock_regime(df)
+            current_regime = self._stock_regimes.get(code, "NEUTRAL")
+
+            if new_regime == current_regime:
+                # Same regime → clear any pending transition
+                self._stock_regime_pending.pop(code, None)
+                continue
+
+            # Check for rapid downgrade (2+ levels) → immediate change (crash protection)
+            curr_level = _STOCK_REGIME_LEVEL.get(current_regime, 2)
+            new_level = _STOCK_REGIME_LEVEL.get(new_regime, 2)
+            if curr_level - new_level >= 2:
+                self._stock_regimes[code] = new_regime
+                self._stock_regime_pending.pop(code, None)
+                continue
+
+            # Normal transition: require 2 consecutive cycles
+            pending = self._stock_regime_pending.get(code)
+            if pending and pending[0] == new_regime:
+                # Same pending regime for 2nd cycle → confirm transition
+                self._stock_regimes[code] = new_regime
+                self._stock_regime_pending.pop(code, None)
+            else:
+                # First cycle with new regime → mark as pending
+                self._stock_regime_pending[code] = (new_regime, 1)
 
         # 분포 집계 (PhaseStats)
         dist: Dict[str, int] = {}
         for regime in self._stock_regimes.values():
             dist[regime] = dist.get(regime, 0) + 1
         self._phase_stats["stock_regime_distribution"] = dist
+
+    def _get_stock_affinity(self, code: str, strategy: str) -> float:
+        """종목별 레짐에 따른 전략 친화도 반환 (0.0=스킵, 1.0=풀스캔)."""
+        stock_regime = self._stock_regimes.get(code, "NEUTRAL")
+        affinity_map = STOCK_REGIME_STRATEGY_AFFINITY.get(stock_regime, {})
+        return affinity_map.get(strategy, 0.5)  # 미정의 전략은 0.5 (기본)
 
     # ══════════════════════════════════════════
     # Phase 4: 리스크 게이트 (TradingLogicFlow.md)
@@ -2537,25 +2631,25 @@ class SimulationEngine:
         self._collect_mode = False
 
         # ── 2단계: 종목별 최적 시그널 선택 ──
-        # 글로벌 레짐 비중으로 라우팅 (종목별 레짐은 exit/sizing에만 사용)
+        # 종목별 레짐 친화도를 강도 배율로 적용하여 라우팅
         best_per_stock: Dict[str, tuple] = {}
         for sig_tuple in self._collected_signals:
             strategy, signal = sig_tuple[0], sig_tuple[1]
             code = signal.stock_code
 
+            # Apply per-stock regime affinity as strength multiplier
+            affinity = self._get_stock_affinity(code, strategy)
+            if affinity <= 0.0:
+                continue  # Skip zero-affinity signals
+            # Scale effective strength by affinity
+            effective_strength = signal.strength * affinity
+
             if code not in best_per_stock:
-                best_per_stock[code] = sig_tuple
+                best_per_stock[code] = (sig_tuple, effective_strength)
             else:
-                existing_strategy = best_per_stock[code][0]
-                existing_weight = allocator.weights.get(existing_strategy, 0)
-                new_weight = allocator.weights.get(strategy, 0)
-                # 비중 차이가 10%p 이상이면 비중 높은 전략 우선
-                if new_weight > existing_weight + 0.10:
-                    best_per_stock[code] = sig_tuple
-                elif abs(new_weight - existing_weight) <= 0.10:
-                    # 비중 비슷하면 strength 비교
-                    if signal.strength > best_per_stock[code][1].strength:
-                        best_per_stock[code] = sig_tuple
+                _, existing_eff = best_per_stock[code]
+                if effective_strength > existing_eff:
+                    best_per_stock[code] = (sig_tuple, effective_strength)
 
         dedup_skips = len(self._collected_signals) - len(best_per_stock)
         if dedup_skips > 0:
@@ -2566,10 +2660,11 @@ class SimulationEngine:
         # 비활성 전략 예산은 현금으로 유보 (자연스러운 포지션 사이징 제약)
 
         # ── 3단계: 선택된 시그널을 전략별 예산 한도 내에서 실행 ──
-        sorted_signals = sorted(best_per_stock.values(), key=lambda x: x[1].strength, reverse=True)
+        sorted_signals = sorted(best_per_stock.values(), key=lambda x: x[1], reverse=True)
 
         exec_count_per_strategy: Dict[str, int] = {}
-        for sig_tuple in sorted_signals:
+        for item in sorted_signals:
+            sig_tuple = item[0]
             strategy, signal, trend_str, trend_stage, align = sig_tuple
             if day_budgets.get(strategy, 0) <= 0:
                 continue
@@ -2901,6 +2996,10 @@ class SimulationEngine:
         for w in self._watchlist:
             code = w["code"]
 
+            # B5: 종목별 레짐 기반 전략 필터링
+            if self._get_stock_affinity(code, "momentum") <= 0.0:
+                continue
+
             # STRONG_BULL 피라미딩: 기존 보유 종목도 조건부 추가 매수 허용
             is_pyramid = False
             _pyr_ro = REGIME_OVERRIDES.get(self._market_regime, {})
@@ -3107,6 +3206,12 @@ class SimulationEngine:
             volume_bonus = min(int((vol_ratio - 1.5) * 10), 10) if vol_ratio > 1.5 else 0
             strength = min(max(base_strength + trend_bonus + stage_bonus + rsi_quality + volume_bonus, 10), 100)
 
+            # B8: Minimum strength filter to reduce ES1 fires
+            if strength < 45:
+                self._phase_stats.setdefault("b8_strength_blocks", 0)
+                self._phase_stats["b8_strength_blocks"] += 1
+                continue  # Skip weak signals that are likely to stop out
+
             current_price = self._current_prices.get(code, float(curr["close"]))
 
             self._signal_counter += 1
@@ -3175,6 +3280,9 @@ class SimulationEngine:
         for w in self._watchlist:
             code = w["code"]
 
+            # B5: 종목별 레짐 기반 전략 필터링
+            if self._get_stock_affinity(code, "smc") <= 0.0:
+                continue
 
             if code in self.positions and self.positions[code].status in ("ACTIVE", "PENDING"):
                 continue
@@ -3693,6 +3801,10 @@ class SimulationEngine:
 
         for w in self._watchlist:
             code = w["code"]
+
+            # B5: 종목별 레짐 기반 전략 필터링
+            if self._get_stock_affinity(code, "mean_reversion") <= 0.0:
+                continue
 
             # 기존 보유 종목 체크 — MR 수익 +3%, 3일+ 보유, 미스케일 → 추가 진입 허용
             is_scale = False
@@ -4280,6 +4392,9 @@ class SimulationEngine:
         for w in self._watchlist:
             code = w["code"]
 
+            # B5: 종목별 레짐 기반 전략 필터링
+            if self._get_stock_affinity(code, "breakout_retest") <= 0.0:
+                continue
 
             if code in self.positions and self.positions[code].status in ("ACTIVE", "PENDING"):
                 continue
@@ -5839,7 +5954,19 @@ class SimulationEngine:
 
         # ── 신규 포지션 생성 ──
         pos_id = f"sim-pos-{signal.stock_code}"
-        stop_loss = effective_price * (1 + self.stop_loss_pct)
+        # B8: Adaptive initial stop — tighter for low-vol stocks, capped at -5%
+        _df_for_stop = self._ohlcv_cache.get(signal.stock_code)
+        _atr_val = 0.0
+        if _df_for_stop is not None and "atr" in _df_for_stop.columns and len(_df_for_stop) > 0:
+            _last_atr = _df_for_stop.iloc[-1].get("atr")
+            if pd.notna(_last_atr):
+                _atr_val = float(_last_atr)
+        if _atr_val > 0:
+            atr_stop = effective_price - 2.0 * _atr_val
+            # Use tighter of ATR-based or -5%
+            stop_loss = max(atr_stop, effective_price * 0.95)  # Never wider than -5%
+        else:
+            stop_loss = effective_price * (1 + self.stop_loss_pct)
         take_profit = effective_price * (1 + self.take_profit_pct)
 
         self.positions[signal.stock_code] = SimPosition(
@@ -6303,6 +6430,18 @@ class SimulationEngine:
         )
         if not self._replay_mode and len(self.closed_trades) > 200:
             self.closed_trades = self.closed_trades[-200:]
+
+        # B7: Per-stock regime performance tracking
+        _entry_stock_regime = getattr(pos, "stock_regime", "NEUTRAL")
+        _sr_counts = self._phase_stats.setdefault("_stock_regime_pnls", {})
+        if _entry_stock_regime not in _sr_counts:
+            _sr_counts[_entry_stock_regime] = {"wins": 0, "losses": 0, "total_pnl": 0.0, "count": 0}
+        _sr_counts[_entry_stock_regime]["count"] += 1
+        _sr_counts[_entry_stock_regime]["total_pnl"] += pnl_pct_val
+        if pnl_pct_val > 0:
+            _sr_counts[_entry_stock_regime]["wins"] += 1
+        else:
+            _sr_counts[_entry_stock_regime]["losses"] += 1
 
         # Phase 3.4: Dynamic Kelly — 전략별 거래 결과 기록
         if self._strategy_allocator is not None:
