@@ -294,6 +294,8 @@ sp500_futures:
   rsi_period: 14
   rsi_oversold: 30.0                 # 과매도
   rsi_overbought: 70.0               # 과매수
+  rsi_long_range: [40.0, 70.0]       # 롱 진입 RSI 범위
+  rsi_short_range: [30.0, 60.0]      # 숏 진입 RSI 범위
 
   # 볼린저밴드
   bb_period: 20
@@ -302,7 +304,7 @@ sp500_futures:
 
   # ATR
   atr_period: 14
-  atr_breakout_mult: 0.5             # 돌파 필터: (High-PrevClose) > mult×ATR
+  atr_breakout_mult: 0.15            # 돌파 필터: 일일봉 최적화 (기존 0.75)
   atr_trend_mult: 1.5                # 추세 진입: Close > PrevClose ± mult×ATR
 
   # 거래량
@@ -314,12 +316,12 @@ sp500_futures:
   obv_ema_slow: 20
 
   # 진입 임계값
-  entry_threshold: 60.0              # 4-Layer 합산 최소 점수 (0-100)
+  entry_threshold: 50.0              # 4-Layer 합산 최소 점수 (일일봉 최적화, 기존 60)
 
   # 손절 설정 (ATR 기반 동적)
   sl_atr_mult: 2.0                   # ADX < 25 → 2.0×ATR
   sl_atr_mult_strong: 1.5            # ADX ≥ 25 → 1.5×ATR (타이트)
-  sl_hard_pct: 0.03                  # 하드 손절 3% (선물 특화)
+  sl_hard_pct: 0.05                  # 하드 손절 5% (선물 특화)
 
   # 익절 설정
   tp_atr_mult: 3.0                   # ATR ×3 익절
@@ -343,3 +345,133 @@ sp500_futures:
   weight_trend: 25.0                 # L2: 추세/구조
   weight_momentum: 25.0              # L3: 모멘텀 (MACD, ADX, RSI)
   weight_volume: 25.0                # L4: 거래량/OBV
+
+  # CHoCH 퇴출 확인
+  choch_confirm_bars: 2              # MACD 반전 확인 봉수
+  choch_pnl_gate_loss: -0.02         # CHoCH 손실 게이트 (-2%)
+  choch_pnl_gate_profit: 0.04        # CHoCH 이익 게이트 (+4%)
+
+  # 페이크아웃 필터
+  fakeout_min_vol_ratio: 0.5         # 최소 거래량 비율 (일일봉 최적화, 기존 0.8)
+  fakeout_max_wick_ratio: 2.0        # 최대 윅/바디 비율 (일일봉 최적화, 기존 1.5)
+
+  # Z-Score 추세추종 보간 파라미터
+  zscore_trend_cont_max_pct: 0.3     # 추세 중 풀백 시 최대 점수 비율
+  zscore_trend_cont_min_pct: 0.1     # 추세 중 확장 시 최소 점수 비율
+
+  # 레짐별 진입 임계값
+  regime_bull_entry_threshold: 50.0  # BULL 시 진입 임계값 (일일봉 최적화)
+
+  # 서킷브레이커 (시스템 레벨)
+  rg1_daily_loss_limit: -0.03        # 일일 손실 한도 (-3%)
+  rg2_mdd_limit: -0.10              # MDD 한도 (-10%)
+
+  # 거래소 서킷브레이커 (CME)
+  cb_level1_pct: 0.07               # -7% → 거래 중단
+  cb_level2_pct: 0.13               # -13% → 거래 중단
+  cb_level3_pct: 0.20               # -20% → 당일 종결
+  cb_overnight_limit: 0.07          # 야간 ±7%
+  exchange_cb_enabled: true
+
+  # 증거금
+  es_initial_margin: 15500.0        # ES 개시증거금 ($)
+  es_maintenance_margin: 13700.0    # ES 유지증거금 ($)
+  mes_initial_margin: 1550.0        # MES 개시증거금 ($)
+  mes_maintenance_margin: 1370.0    # MES 유지증거금 ($)
+  margin_call_enabled: true         # 증거금 시뮬레이션 토글
+
+  # 롤오버
+  roll_cost_per_contract: 12.50     # 캘린더 스프레드 비용 추정 ($)
+  roll_warning_days: 5              # 롤 접근 경고 일수
+
+  # 거래비용 (백테스트용)
+  futures_slippage_per_contract: 12.50   # 슬리피지/계약 ($, 1틱 ES)
+  futures_commission_per_contract: 4.62  # 라운드턴 커미션/계약 ($)
+  # 비용 세분화
+  es_exchange_fee: 1.40             # ES 거래소 수수료 ($)
+  es_broker_fee: 0.85               # ES 브로커 수수료 ($)
+  es_nfa_fee: 0.02                  # ES NFA 수수료 ($)
+  mes_exchange_fee: 0.35            # MES 거래소 수수료 ($)
+  mes_broker_fee: 0.25              # MES 브로커 수수료 ($)
+  mes_nfa_fee: 0.02                 # MES NFA 수수료 ($)
+
+# ── ES-F 인트라데이 데이트레이딩 전략 ──
+esf_intraday:
+  # 계약
+  ticker: "ES=F"
+  contract_multiplier: 50.0
+  is_micro: true                      # 기본 MES ($5/pt)
+
+  # 타임프레임
+  primary_interval: "15m"             # 실행 타임프레임
+  bias_interval: "1h"                 # 바이어스 타임프레임
+  rth_start: "09:30"                  # RTH 시작 (ET)
+  rth_end: "16:00"                    # RTH 종료 (ET)
+  eod_close_minutes_before: 15        # EOD 강제 청산 (종료 N분 전)
+
+  # 지표 기간 (15m 바 기준)
+  ema_fast: 8
+  ema_mid: 21
+  ema_slow: 55
+  rsi_period: 14
+  atr_period: 20
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  zscore_window: 40                   # ~10시간 RTH
+  bb_period: 20
+  bb_std: 2.0
+  adx_period: 14
+  adx_threshold: 25.0
+  volume_ma_period: 20
+
+  # Volume Profile
+  vp_session_bars: 26                 # ~6.5hr RTH / 15m
+  vp_lookback_sessions: 3
+  vp_value_area_pct: 0.70
+
+  # 4-Layer 스코어링 가중치 (합계=100)
+  weight_amt_location: 30.0           # L1: AMT + Location
+  weight_zscore: 20.0                 # L2: Z-Score
+  weight_momentum: 25.0               # L3: Momentum
+  weight_volume_aggression: 25.0      # L4: Volume + Aggression
+
+  # Grade 임계값
+  grade_a_threshold: 55.0
+  grade_b_threshold: 45.0
+  grade_c_threshold: 35.0
+
+  # AMT 파라미터
+  amt_balance_ratio: 0.70
+  amt_aggression_body_ratio: 0.65
+  amt_aggression_vol_mult: 1.5
+  amt_consecutive_bars: 3
+
+  # 청산
+  sl_hard_pct: 0.015                  # -1.5% 하드 손절
+  sl_atr_mult: 1.2                    # OPT-A3: 1.5→1.2 (Sharpe 2.29)
+  tp_atr_mult: 2.0                    # OPT-A3: 2.5→2.0, R:R 1.67:1
+  trailing_activation_pct: 0.008      # +0.8% 활성화
+  trailing_atr_mult: 1.0
+
+  # 리스크 관리
+  max_daily_trades: 5
+  max_daily_loss_dollars: 500.0       # MES 기준
+  max_consecutive_losses: 3
+  risk_per_trade_pct: 0.01
+  max_contracts: 5
+  kelly_fraction: 0.3
+
+  # 거래 비용 (MES)
+  slippage_ticks: 1
+  commission_per_contract: 0.62
+
+  # 증거금 (MES)
+  initial_margin: 1550.0
+  maintenance_margin: 1370.0
+
+  # RSI 범위
+  rsi_long_range_min: 40.0
+  rsi_long_range_max: 70.0
+  rsi_short_range_min: 30.0
+  rsi_short_range_max: 60.0

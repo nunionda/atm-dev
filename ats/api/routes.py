@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 import pandas as pd
 import numpy as np
 import datetime
@@ -19,9 +21,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ── Analyze 캐시 ──────────────────────────────────────────────────────
+_analyze_cache: dict[str, dict] = {}
+_analyze_cache_ts: dict[str, float] = {}
+ANALYZE_CACHE_TTL = 300  # 5분 (리프레시 최적화)
+
 # ── Quote 캐시 (경량 폴링용) ──────────────────────────────────────────
 _quote_cache: dict[str, dict] = {}
-QUOTE_CACHE_TTL = 30  # seconds
+QUOTE_CACHE_TTL = 300  # 5분 (리프레시 최적화)
 
 # ── Naver Finance 데이터 소스 (KRX 파생상품) ─────────────────────────
 
@@ -98,13 +105,22 @@ def _fetch_naver_ohlcv(naver_symbol: str, days: int = 100, max_retries: int = 3)
 # ── 메인 분석 엔드포인트 ─────────────────────────────────────────────
 
 @router.get("/analyze/{ticker}")
-def analyze_ticker(ticker: str, period: str = "1mo", interval: str = "1d"):
+async def analyze_ticker(ticker: str, period: str = "1mo", interval: str = "1d"):
     """
     특정 종목의 OHLCV 과거 데이터를 가져온 후 각종 기술적 지표를 계산하여 반환합니다.
     - yfinance: 글로벌 주식/지수/선물
     - Naver Finance: KRX 파생상품 (@KS200F, @KS200)
     """
     try:
+        # ── 캐시 확인 ──
+        cache_key = f"{ticker}:{period}:{interval}"
+        now = time.time()
+        if cache_key in _analyze_cache and (now - _analyze_cache_ts.get(cache_key, 0)) < ANALYZE_CACHE_TTL:
+            return JSONResponse(
+                content=_analyze_cache[cache_key],
+                headers={"Cache-Control": "no-cache"},
+            )
+
         # ── Naver Finance 경로 (@로 시작하는 KRX 티커) ──
         if ticker in NAVER_TICKER_MAP:
             naver_sym = NAVER_TICKER_MAP[ticker]
@@ -116,12 +132,15 @@ def analyze_ticker(ticker: str, period: str = "1mo", interval: str = "1d"):
 
             result_df = calculate_basic_indicators(data)
             records = result_df.to_dict(orient="records")
-            return {"ticker": ticker, "period": period, "interval": interval, "data": records}
+            result = {"ticker": ticker, "period": period, "interval": interval, "data": records}
+            _analyze_cache[cache_key] = result
+            _analyze_cache_ts[cache_key] = now
+            return result
 
-        # ── yfinance 경로 (기존) ──
+        # ── yfinance 경로 (async) ──
         ticker = resolve_ticker(ticker)
 
-        data = yf.download(ticker, period=period, interval=interval, progress=False)
+        data = await asyncio.to_thread(yf.download, ticker, period=period, interval=interval, progress=False)
 
         if data.empty:
             raise HTTPException(status_code=404, detail="Data not found for the given ticker")
@@ -179,12 +198,18 @@ def analyze_ticker(ticker: str, period: str = "1mo", interval: str = "1d"):
                and not (isinstance(r.get('close'), float) and np.isnan(r['close']))
         ]
 
-        return {
+        result = {
             "ticker": ticker,
             "period": period,
             "interval": interval,
             "data": records
         }
+        _analyze_cache[cache_key] = result
+        _analyze_cache_ts[cache_key] = now
+        return JSONResponse(
+            content=result,
+            headers={"Cache-Control": "no-cache"},
+        )
 
     except HTTPException:
         raise

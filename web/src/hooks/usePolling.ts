@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { getCached, setCache } from '../lib/cache';
 
 export type PollingStatus = 'idle' | 'polling' | 'error' | 'stale';
 
@@ -23,6 +24,8 @@ export interface PollingOptions {
   maxRetries?: number;
   /** 에러 시 간격 배수. 기본 1.5 */
   backoffMult?: number;
+  /** sessionStorage 캐시 키. 설정하면 캐시 연동 활성화 */
+  cacheKey?: string;
 }
 
 export interface PollingState<T> {
@@ -53,9 +56,12 @@ export function usePolling<T>(
     enabled: initEnabled = false,
     maxRetries = 3,
     backoffMult = 1.5,
+    cacheKey,
   } = options;
 
-  const [data, setData] = useState<T | null>(null);
+  const [data, setData] = useState<T | null>(() =>
+    cacheKey ? getCached<T>(`poll:${cacheKey}`) : null
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<PollingStatus>('idle');
@@ -90,6 +96,9 @@ export function usePolling<T>(
     }
   }, []);
 
+  const cacheKeyRef = useRef(cacheKey);
+  cacheKeyRef.current = cacheKey;
+
   const doFetch = useCallback(async () => {
     if (!mountedRef.current) return;
     setLoading(true);
@@ -102,6 +111,10 @@ export function usePolling<T>(
       errCountRef.current = 0;
       setLastUpdated(Date.now());
       setStatus('polling');
+      // 캐시에 저장 (다음 리프레시 대비)
+      if (cacheKeyRef.current) {
+        setCache(`poll:${cacheKeyRef.current}`, result);
+      }
     } catch (err: unknown) {
       if (!mountedRef.current) return;
       errCountRef.current += 1;
@@ -121,8 +134,11 @@ export function usePolling<T>(
       return;
     }
 
-    // 활성화 시 즉시 1회 fetch
-    doFetch();
+    // 캐시 데이터가 있으면 초기 즉시 fetch 스킵 (이중 요청 방지)
+    const hasCached = cacheKey ? getCached(`poll:${cacheKey}`) !== null : false;
+    if (!hasCached) {
+      doFetch();
+    }
 
     const schedule = () => {
       // backoff 적용

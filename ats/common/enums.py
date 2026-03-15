@@ -43,6 +43,13 @@ class OrderStatus(Enum):
     REJECTED = "REJECTED"
 
 
+class FuturesDirection(Enum):
+    """선물 매매 방향"""
+    LONG = "LONG"
+    SHORT = "SHORT"
+    NEUTRAL = "NEUTRAL"
+
+
 class ExitReason(Enum):
     """청산 사유 (BRD §2.4)"""
     STOP_LOSS = "ES1"
@@ -50,6 +57,15 @@ class ExitReason(Enum):
     TRAILING_STOP = "ES3"
     DEAD_CROSS = "ES4"
     MAX_HOLDING = "ES5"
+    CHOCH_REVERSAL = "ES_CHOCH"
+    CHANDELIER_EXIT = "ES_CHANDELIER"
+    HARD_STOP = "ES_HARD"
+    CIRCUIT_BREAKER = "ES_CB"
+    ATR_STOP_LOSS = "ES_ATR_SL"
+    ATR_TAKE_PROFIT = "ES_ATR_TP"
+    EOD_CLOSE = "ES_EOD"
+    SESSION_HALT = "ES_SESSION"
+    VP_ZONE_BREAK = "ES_VP_BREAK"
 
 
 class TradeEventType(Enum):

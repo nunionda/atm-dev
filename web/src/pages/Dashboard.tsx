@@ -10,6 +10,7 @@ import { MarketRegimePanel } from '../components/dashboard/MarketRegimePanel';
 import { SignalAnalysis } from '../components/dashboard/SignalAnalysis';
 import { AlertCircle } from 'lucide-react';
 import { ErrorBoundary } from '../components/ErrorBoundary';
+import { ChartSkeleton, ScoreCardsSkeleton } from '../components/common/Skeleton';
 import { aggregate4HCandles, computeHeikinAshi, type ChartType, type OverlayState } from '../lib/chartUtils';
 import type { DrawingToolType, Drawing } from '../lib/drawingTypes';
 import './Dashboard.css';
@@ -91,7 +92,11 @@ export function Dashboard() {
       () => fetchAnalyticsData(ticker, period, fetchInterval),
       [ticker, period, fetchInterval],
     );
-    const polling = usePolling<AnalyticsResponse>(pollingFetchFn, { interval: 30000, enabled: true });
+    const polling = usePolling<AnalyticsResponse>(pollingFetchFn, {
+      interval: 30000,
+      enabled: true,
+      cacheKey: `analytics:${ticker}:${period}:${fetchInterval}`,
+    });
 
     // Merge: polling data takes priority when available
     const data = polling.data ?? initialData;
@@ -198,9 +203,13 @@ export function Dashboard() {
             </div>
 
             {loading && !error && (
-                <div className="loading-state">
-                    <div className="badge-dot pulse-large"></div>
-                    <p>Processing quantitative models...</p>
+                <div className="dashboard-grid">
+                    <div className="chart-section">
+                        <ChartSkeleton height={450} />
+                    </div>
+                    <div className="analysis-section">
+                        <ScoreCardsSkeleton />
+                    </div>
                 </div>
             )}
 

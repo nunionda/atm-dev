@@ -65,7 +65,7 @@ export function IndexTrendTimeline({ market }: Props) {
     useEffect(() => { loadData(); }, [loadData]);
 
     // 60초 폴링
-    const polling = usePolling(fetchMarketIntelligence, { interval: 60000, enabled: true });
+    const polling = usePolling(fetchMarketIntelligence, { interval: 60000, enabled: true, cacheKey: 'market-intelligence' });
     const polledHistory = polling.data?.[market]?.trend_history ?? null;
     const entries = polledHistory || history;
 

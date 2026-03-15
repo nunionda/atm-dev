@@ -7,11 +7,6 @@ TC-FUT-001 ~ TC-FUT-020
 
 from __future__ import annotations
 
-import sys
-import os
-
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ats"))
-
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -38,6 +33,17 @@ def run_test(name: str, fn):
 
 
 # ── Fixtures ──
+
+def _make_price_data(code: str, name: str, price: float) -> "PriceData":
+    """테스트용 PriceData 생성 헬퍼."""
+    from common.types import PriceData
+    return PriceData(
+        stock_code=code, stock_name=name, current_price=price,
+        open_price=price, high_price=price, low_price=price,
+        prev_close=price, volume=100000, change_pct=0.0,
+        timestamp=datetime.now().isoformat(),
+    )
+
 
 def _make_config():
     from data.config_manager import ATSConfig, SP500FuturesConfig
@@ -275,7 +281,7 @@ def test_suite_sp500_futures():
     def test_hard_stop_long():
         pos = MockPosition(entry_price=5500.0, direction="LONG")
         prices = {
-            "ES=F": PriceData("ES=F", "E-mini S&P 500", 5310.0),  # -3.45%
+            "ES=F": _make_price_data("ES=F", "E-mini S&P 500", 5310.0),  # -3.45%
         }
         exits = strategy.scan_exit_signals([pos], {}, prices)
         assert len(exits) == 1, f"Expected 1 exit, got {len(exits)}"
@@ -339,17 +345,19 @@ def test_suite_sp500_futures():
 
     run_test("TC-FUT-014: ES_CHANDELIER 샹들리에 청산", test_chandelier_exit)
 
-    # ── TC-FUT-015: ES3 트레일링 스탑 ──
+    # ── TC-FUT-015: ES3 트레일링 스탑 (4-tier) ──
     def test_trailing_stop():
         pos = MockPosition(entry_price=5400.0, direction="LONG")
         state = FuturesPositionState()
         state.highest_since_entry = 5600.0
 
-        # pnl = (5540-5400)/5400 = 2.59% ≥ 2% → 활성화
-        # trail_stop = 5600 - 2.0*25 = 5550 → 5540 < 5550 → 트리거!
+        # pnl = (5520-5400)/5400 = 2.22% ≥ 2% → 활성화 (default tier)
+        # default: trail_mult=3.0, trail_stop = 5600 - 3.0*25 = 5525
+        # floor_stop = 5400 * (1 + (-0.04)) = 5184 → trail_stop = max(5525, 5184) = 5525
+        # 5520 < 5525 → 트리거!
         exit_sig = strategy._check_trailing_stop(
-            pos, current_price=5540.0, entry_price=5400.0,
-            atr=25.0, pnl_pct=(5540.0 - 5400.0) / 5400.0,
+            pos, current_price=5520.0, entry_price=5400.0,
+            atr=25.0, pnl_pct=(5520.0 - 5400.0) / 5400.0,
             is_long=True, state=state,
         )
         assert exit_sig is not None, "Trailing stop should trigger"
@@ -357,19 +365,30 @@ def test_suite_sp500_futures():
 
     run_test("TC-FUT-015: ES3 트레일링 스탑", test_trailing_stop)
 
-    # ── TC-FUT-016: ES_CHOCH MACD 반전 청산 ──
+    # ── TC-FUT-016: ES_CHOCH MACD 반전 청산 (2-bar 확인) ──
     def test_macd_reversal():
         pos = MockPosition(entry_price=5400.0, direction="LONG")
 
-        # MACD 히스토그램 양→음 전환 데이터 생성
-        df = pd.DataFrame({
-            "close": [5410.0, 5420.0, 5415.0],
-            "macd_hist": [3.0, 5.0, -2.0],  # 양→음 전환
-        })
+        # CHoCH는 choch_confirm_bars=2 연속 반전 + PnL 게이트 외 필요
+        # PnL gate: pnl < -2% 또는 pnl > +4% 일 때만 발동
+        # pnl = -5% → gate 통과
+        pnl_pct = -0.05
 
-        pnl_pct = (5420.0 - 5400.0) / 5400.0
-        exit_sig = strategy._check_structure_reversal(pos, df, pnl_pct, is_long=True)
-        assert exit_sig is not None, "MACD reversal should trigger"
+        # 1봉째 반전: 카운터 1 → 미달
+        df1 = pd.DataFrame({
+            "close": [5410.0, 5420.0, 5130.0],
+            "macd_hist": [3.0, 5.0, -2.0],
+        })
+        exit_sig = strategy._check_structure_reversal(pos, df1, pnl_pct, is_long=True)
+        assert exit_sig is None, "1-bar reversal should NOT trigger"
+
+        # 2봉째 반전: 카운터 2 → 발동
+        df2 = pd.DataFrame({
+            "close": [5410.0, 5350.0, 5130.0],
+            "macd_hist": [3.0, -1.0, -3.0],
+        })
+        exit_sig = strategy._check_structure_reversal(pos, df2, pnl_pct, is_long=True)
+        assert exit_sig is not None, "2-bar MACD reversal should trigger"
         assert exit_sig.exit_type == ExitReason.CHOCH_REVERSAL.value
 
     run_test("TC-FUT-016: ES_CHOCH MACD 반전 청산", test_macd_reversal)
@@ -378,7 +397,7 @@ def test_suite_sp500_futures():
     def test_max_holding():
         pos = MockPosition(entry_price=5400.0, holding_days=25, direction="LONG")
         prices = {
-            "ES=F": PriceData("ES=F", "E-mini S&P 500", 5450.0),
+            "ES=F": _make_price_data("ES=F", "E-mini S&P 500", 5450.0),
         }
         exits = strategy.scan_exit_signals([pos], {}, prices)
         assert len(exits) == 1
@@ -424,7 +443,7 @@ def test_suite_sp500_futures():
             entry_price=5500.0, holding_days=3, direction="LONG",
         )
         prices = {
-            "ES=F": PriceData("ES=F", "E-mini S&P 500", 5510.0),
+            "ES=F": _make_price_data("ES=F", "E-mini S&P 500", 5510.0),
         }
         exits = strategy.scan_exit_signals([pos], {}, prices)
         assert len(exits) == 0, f"Expected 0 exits (HOLD), got {len(exits)}"

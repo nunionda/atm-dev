@@ -39,7 +39,9 @@ export interface AnalyticsResponse {
     data: AnalyticsData[];
 }
 
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+import { getCached, setCache } from './cache';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
 export async function fetchAnalyticsData(
     ticker: string,
@@ -47,9 +49,11 @@ export async function fetchAnalyticsData(
     interval: string = '1d',
     signal?: AbortSignal,
 ): Promise<AnalyticsResponse> {
+    const cacheKey = `analytics:${ticker}:${period}:${interval}`;
+    const cached = getCached<AnalyticsResponse>(cacheKey);
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
-    // Allow external abort (e.g., from useAnalyticsData cleanup)
     if (signal) signal.addEventListener('abort', () => controller.abort());
 
     try {
@@ -59,11 +63,15 @@ export async function fetchAnalyticsData(
         );
         clearTimeout(timeout);
         if (!response.ok) {
+            if (cached) return cached; // 실패 시 캐시 폴백
             throw new Error(`Failed to fetch analytics for ${ticker}. Status: ${response.status}`);
         }
-        return await response.json();
+        const data = await response.json();
+        setCache(cacheKey, data);
+        return data;
     } catch (error) {
         clearTimeout(timeout);
+        if (cached) return cached; // 네트워크 에러 시 캐시 폴백
         throw error;
     }
 }
@@ -182,6 +190,7 @@ export interface MarketOverview {
 }
 
 export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketOverview | null> {
+    const cacheKey = 'market-overview';
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
     if (signal) signal.addEventListener('abort', () => controller.abort());
@@ -191,17 +200,17 @@ export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketO
         clearTimeout(timeout);
         if (!response.ok) {
             console.error(`[API] market-overview HTTP ${response.status}`);
-            return null;
+            return getCached<MarketOverview>(cacheKey);
         }
         const data = await response.json();
+        setCache(cacheKey, data);
         console.log(`[API] market-overview loaded: ${data.indices?.length} indices`);
         return data;
     } catch (error: any) {
         clearTimeout(timeout);
-        // Silently handle abort (React Strict Mode, component unmount, etc.)
         if (error?.name === 'AbortError') return null;
         console.error('[API] market-overview fetch failed:', error);
-        return null;
+        return getCached<MarketOverview>(cacheKey);
     }
 }
 
@@ -879,5 +888,572 @@ export async function fetchBacktestStatus(market: MarketId): Promise<BacktestSta
         start_date: null,
         end_date: null,
     }));
+}
+
+
+// ══════════════════════════════════════════
+// Futures Trading API
+// ══════════════════════════════════════════
+
+export interface FuturesLayerScore {
+    score: number;
+    max_score: number;
+    signals: string[];
+}
+
+export interface FuturesAnalysis {
+    ticker: string;
+    direction: 'LONG' | 'SHORT' | 'NEUTRAL';
+    total_score: number;
+    entry_threshold: number;
+    signal_active: boolean;
+    layers: {
+        zscore: FuturesLayerScore;
+        trend: FuturesLayerScore;
+        momentum: FuturesLayerScore;
+        volume: FuturesLayerScore;
+    };
+    indicators: {
+        zscore: number;
+        rsi: number;
+        adx: number;
+        macd_hist: number;
+        atr: number;
+        bb_squeeze_ratio: number;
+        volume_ratio: number;
+    };
+    entry_price: number;
+    stop_loss: number;
+    take_profit: number;
+    risk_reward_ratio: number;
+    position_size_contracts: number;
+    last_updated: string;
+}
+
+export interface FuturesSignalData {
+    ticker: string;
+    direction: string;
+    signal_strength: number;
+    entry_price: number;
+    stop_loss: number;
+    take_profit: number;
+    atr: number;
+    z_score: number;
+    risk_reward_ratio: number;
+    position_size_contracts: number;
+    primary_signals: string[];
+    confirmation_filters: string[];
+    metadata: Record<string, number>;
+    timestamp: string;
+}
+
+export interface FuturesTickerInfo {
+    ticker: string;
+    name: string;
+    multiplier: number;
+    micro: string | null;
+}
+
+export interface FuturesMonteCarloResult {
+    var_95: number;
+    cvar_99: number;
+    worst_mdd: number;
+    median_return: number;
+    bankruptcy_prob: number;
+    return_distribution: { bin: number; count: number }[];
+    mdd_distribution: { bin: number; count: number }[];
+    return_percentiles: { p5: number; p25: number; p50: number; p75: number; p95: number };
+}
+
+export interface FuturesBacktestMetrics {
+    total_return_pct: number;
+    sharpe_ratio: number;
+    sortino_ratio: number;
+    calmar_ratio: number;
+    cagr: number;
+    max_drawdown_pct: number;
+    mdd_duration_days: number;
+    total_trades: number;
+    win_rate: number;
+    profit_factor: number;
+    avg_win: number;
+    avg_loss: number;
+    avg_rr: number;
+    total_pnl: number;
+    total_costs: number;
+    long_trades: number;
+    short_trades: number;
+    long_win_rate: number;
+    short_win_rate: number;
+    avg_holding_days: number;
+    max_consecutive_wins: number;
+    max_consecutive_losses: number;
+    best_trade_pct: number;
+    worst_trade_pct: number;
+    exit_reasons: Record<string, number>;
+    monte_carlo: FuturesMonteCarloResult;
+    // 증거금/CB/롤오버
+    margin_call_count: number;
+    max_effective_leverage: number;
+    avg_margin_utilization: number;
+    cb_event_count: number;
+    cb_events_detail: { date: string; level: string; pct_change: number }[];
+    roll_count: number;
+    total_roll_costs: number;
+}
+
+export interface FuturesTrade {
+    entry_date: string;
+    exit_date: string;
+    direction: string;
+    entry_price: number;
+    exit_price: number;
+    contracts: number;
+    pnl_dollar: number;
+    pnl_pct: number;
+    holding_days: number;
+    exit_reason: string;
+}
+
+export interface FuturesBacktestResult {
+    ticker: string;
+    start_date: string;
+    end_date: string;
+    initial_equity: number;
+    final_equity: number;
+    metrics: FuturesBacktestMetrics;
+    equity_curve: { date: string; total_value: number; equity: number; drawdown_pct: number; margin_used: number; effective_leverage: number }[];
+    trades: FuturesTrade[];
+}
+
+export async function fetchFuturesTickers(): Promise<FuturesTickerInfo[]> {
+    const res = await fetch(`${API_BASE_URL}/futures/tickers`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.tickers || [];
+}
+
+export async function fetchFuturesAnalysis(ticker: string = 'ES=F', period: string = '1y'): Promise<FuturesAnalysis | null> {
+    const cacheKey = `futures:${ticker}:${period}`;
+    const isDefaultIndicators = (d: FuturesAnalysis) =>
+        d.indicators.adx === 0 && d.indicators.atr === 0 && d.indicators.rsi === 50;
+
+    try {
+        const res = await fetch(`${API_BASE_URL}/futures/analyze/${encodeURIComponent(ticker)}?period=${period}`);
+        if (!res.ok) return getCached<FuturesAnalysis>(cacheKey);
+        const data: FuturesAnalysis = await res.json();
+
+        // yfinance 동시 호출 시 첫 응답이 기본값을 반환할 수 있음 → 1회 재시도
+        if (isDefaultIndicators(data)) {
+            await new Promise(r => setTimeout(r, 2000));
+            const retry = await fetch(`${API_BASE_URL}/futures/analyze/${encodeURIComponent(ticker)}?period=${period}`);
+            if (retry.ok) {
+                const retryData: FuturesAnalysis = await retry.json();
+                if (!isDefaultIndicators(retryData)) {
+                    setCache(cacheKey, retryData);
+                    return retryData;
+                }
+            }
+        }
+
+        setCache(cacheKey, data);
+        return data;
+    } catch {
+        return getCached<FuturesAnalysis>(cacheKey);
+    }
+}
+
+export async function fetchFuturesSignal(ticker: string = 'ES=F', equity: number = 100000): Promise<{ signal: FuturesSignalData | null; message?: string }> {
+    try {
+        const res = await fetch(`${API_BASE_URL}/futures/signal/${encodeURIComponent(ticker)}?equity=${equity}`);
+        if (!res.ok) return { signal: null };
+        return res.json();
+    } catch {
+        return { signal: null };
+    }
+}
+
+export async function fetchFuturesQuote(ticker: string = 'ES=F') {
+    const res = await fetch(`${API_BASE_URL}/futures/quote/${encodeURIComponent(ticker)}`);
+    if (!res.ok) return null;
+    return res.json();
+}
+
+export async function triggerFuturesBacktest(
+    ticker: string,
+    startDate: string,
+    endDate: string,
+    equity: number = 100000,
+    isMicro: boolean = false,
+    overrides?: { entry_threshold?: number; sl_hard_pct?: number; max_holding_days?: number },
+): Promise<FuturesBacktestResult | null> {
+    try {
+        const params = new URLSearchParams({
+            ticker, start_date: startDate, end_date: endDate,
+            equity: String(equity), is_micro: String(isMicro),
+        });
+        if (overrides?.entry_threshold != null) params.set('entry_threshold', String(overrides.entry_threshold));
+        if (overrides?.sl_hard_pct != null) params.set('sl_hard_pct', String(overrides.sl_hard_pct));
+        if (overrides?.max_holding_days != null) params.set('max_holding_days', String(overrides.max_holding_days));
+        const res = await fetch(`${API_BASE_URL}/futures/backtest?${params}`, { method: 'POST' });
+        if (!res.ok) return null;
+        return res.json();
+    } catch {
+        return null;
+    }
+}
+
+export async function fetchFuturesBacktestStatus(): Promise<{ in_progress: boolean; has_result: boolean; progress: number }> {
+    try {
+        const res = await fetch(`${API_BASE_URL}/futures/backtest/status`);
+        if (!res.ok) return { in_progress: false, has_result: false, progress: 0 };
+        return res.json();
+    } catch {
+        return { in_progress: false, has_result: false, progress: 0 };
+    }
+}
+
+export async function fetchFuturesBacktestResult(): Promise<FuturesBacktestResult | null> {
+    try {
+        const res = await fetch(`${API_BASE_URL}/futures/backtest/result`);
+        if (res.status === 404) return null;
+        if (!res.ok) return null;
+        return res.json();
+    } catch {
+        return null;
+    }
+}
+
+// 롤오버 스케줄
+export interface RollScheduleEntry {
+    contract: string;
+    roll_date: string;
+    expiry: string;
+    next_contract: string;
+}
+
+export async function fetchRollSchedule(year: number = new Date().getFullYear()): Promise<{ schedule: RollScheduleEntry[]; next_roll: { contract: string; roll_date: string; days_remaining: number } | null }> {
+    try {
+        const res = await fetch(`${API_BASE_URL}/futures/roll-schedule?year=${year}`);
+        if (!res.ok) return { schedule: [], next_roll: null };
+        return res.json();
+    } catch {
+        return { schedule: [], next_roll: null };
+    }
+}
+
+// 상품 규격
+export interface ContractSpecs {
+    es: { multiplier: number; tick_size: number; tick_value: number; notional: number; initial_margin: number; maintenance_margin: number };
+    mes: { multiplier: number; tick_size: number; tick_value: number; notional: number; initial_margin: number; maintenance_margin: number };
+    current_session: { name: string; status: string; is_dst: boolean };
+    cost_breakdown: { es_round_trip: number; mes_round_trip: number; cost_pct_of_notional: number };
+}
+
+export async function fetchContractSpecs(): Promise<ContractSpecs | null> {
+    try {
+        const res = await fetch(`${API_BASE_URL}/futures/contract-specs`);
+        if (!res.ok) return null;
+        return res.json();
+    } catch {
+        return null;
+    }
+}
+
+// ══════════════════════════════════════════
+// ESF Intraday Types
+// ══════════════════════════════════════════
+
+export interface ESFAMTState {
+    market_state: 'BALANCE' | 'IMBALANCE_BULL' | 'IMBALANCE_BEAR';
+    market_state_score: number;
+    location: {
+        zone: 'AT_POC' | 'ABOVE_VAH' | 'BELOW_VAL' | 'IN_VALUE' | 'AT_LVN';
+        score: number;
+        poc: number;
+        vah: number;
+        val: number;
+    };
+    aggression: {
+        detected: boolean;
+        direction: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+        score: number;
+    };
+}
+
+export interface ESFLayerScore {
+    score: number;
+    max_score: number;
+    signals: string[];
+}
+
+export interface ESFAnalysis {
+    ticker: string;
+    session_status: string;
+    amt: ESFAMTState;
+    layers: {
+        amt_location: ESFLayerScore;
+        zscore: ESFLayerScore;
+        momentum: ESFLayerScore;
+        volume_aggression: ESFLayerScore;
+    };
+    total_score: number;
+    grade: 'A' | 'B' | 'C' | 'NO_TRADE';
+    direction: 'LONG' | 'SHORT' | 'NEUTRAL';
+    entry_price: number;
+    stop_loss: number;
+    take_profit: number;
+    risk_reward_ratio: number;
+    contracts: number;
+    z_score: number;
+    atr: number;
+    indicators: Record<string, number>;
+}
+
+export interface VolumeProfileNode {
+    price: number;
+    volume: number;
+}
+
+export interface VolumeProfileData {
+    poc: number;
+    vah: number;
+    val: number;
+    nodes: VolumeProfileNode[];
+    lvn_levels: number[];
+}
+
+export interface ESFSessionStatus {
+    is_rth: boolean;
+    current_time_et: string;
+    session: string;
+    rth_start: string;
+    rth_end: string;
+}
+
+export interface ESFCandle {
+    datetime: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+    rsi_14: number | null;
+    adx: number | null;
+    plus_di: number | null;
+    minus_di: number | null;
+    macd: number | null;
+    macd_signal: number | null;
+    macd_diff: number | null;
+    zscore: number | null;
+    atr_14: number | null;
+    bb_hband: number | null;
+    bb_lband: number | null;
+    bb_mavg: number | null;
+    ema_fast: number | null;
+    ema_mid: number | null;
+    ema_slow: number | null;
+}
+
+export interface IntradayTrade {
+    entry_time: string;
+    exit_time: string;
+    direction: string;
+    entry_price: number;
+    exit_price: number;
+    contracts: number;
+    pnl: number;
+    pnl_pct: number;
+    holding_bars: number;
+    exit_reason: string;
+    grade: string;
+}
+
+export interface SessionSummary {
+    date: string;
+    trades: number;
+    wins: number;
+    losses: number;
+    total_pnl: number;
+    max_drawdown: number;
+}
+
+export interface IntradayMetrics {
+    total_return_pct: number;
+    total_pnl: number;
+    sharpe_ratio: number;
+    sortino_ratio: number;
+    max_drawdown_pct: number;
+    win_rate: number;
+    profit_factor: number;
+    total_trades: number;
+    sessions_traded: number;
+    avg_trades_per_session: number;
+    best_session_pnl: number;
+    worst_session_pnl: number;
+    session_win_rate: number;
+    avg_holding_bars: number;
+    avg_holding_minutes: number;
+    max_consecutive_wins: number;
+    max_consecutive_losses: number;
+    exit_reason_distribution: Record<string, number>;
+    long_trades: number;
+    short_trades: number;
+    long_win_rate: number;
+    short_win_rate: number;
+}
+
+export interface ESFBacktestResult {
+    metrics: IntradayMetrics;
+    equity_curve: { timestamp: string; equity: number }[];
+    trades: IntradayTrade[];
+    sessions: SessionSummary[];
+    monte_carlo: {
+        var_95: number;
+        cvar_99: number;
+        worst_mdd: number;
+        bankruptcy_prob: number;
+        median_return: number;
+        paths_count: number;
+    };
+}
+
+export interface ESFBacktestParams {
+    ticker: string;
+    period: string;
+    initial_equity: number;
+    is_micro: boolean;
+}
+
+// ══════════════════════════════════════════
+// ESF Intraday API
+// ══════════════════════════════════════════
+
+export async function fetchESFTickers(): Promise<any[]> {
+    const res = await fetch(`${API_BASE_URL}/esf/tickers`);
+    if (!res.ok) throw new Error('Failed to fetch ESF tickers');
+    return res.json();
+}
+
+export async function fetchESFAnalysis(
+    ticker: string = 'ES=F',
+    interval: string = '15m',
+    period: string = '60d',
+): Promise<ESFAnalysis> {
+    const params = new URLSearchParams({ interval, period });
+    const res = await fetch(`${API_BASE_URL}/esf/analyze/${encodeURIComponent(ticker)}?${params}`);
+    if (!res.ok) throw new Error('Failed to fetch ESF analysis');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw: any = await res.json();
+
+    // API returns amt_state (different shape) — normalize to frontend ESFAnalysis type
+    const amtRaw = raw.amt_state || {};
+    const msRaw = amtRaw.market_state;
+    const amt: ESFAMTState = {
+        market_state: Array.isArray(msRaw) ? msRaw[0] : (msRaw || 'BALANCE'),
+        market_state_score: Array.isArray(msRaw) ? (msRaw[1] || 0) : 0,
+        location: {
+            zone: amtRaw.location?.zone || 'IN_VALUE',
+            score: amtRaw.location?.score || 0,
+            poc: raw.volume_profile?.poc || 0,
+            vah: raw.volume_profile?.vah || 0,
+            val: raw.volume_profile?.val || 0,
+        },
+        aggression: {
+            detected: amtRaw.aggression?.detected || false,
+            direction: amtRaw.aggression?.direction || 'NEUTRAL',
+            score: amtRaw.aggression?.score || 0,
+        },
+    };
+
+    return {
+        ticker: raw.ticker,
+        session_status: raw.session_status || '',
+        amt,
+        layers: raw.layers,
+        total_score: raw.total_score,
+        grade: raw.grade === 'D' ? 'NO_TRADE' : raw.grade,
+        direction: raw.direction,
+        entry_price: raw.indicators?.price || 0,
+        stop_loss: raw.stop_loss || 0,
+        take_profit: raw.take_profit || 0,
+        risk_reward_ratio: raw.rr_ratio || 0,
+        contracts: raw.contracts || 0,
+        z_score: raw.indicators?.zscore || 0,
+        atr: raw.indicators?.atr || 0,
+        indicators: raw.indicators || {},
+        signal_active: raw.signal_active || false,
+    } as ESFAnalysis;
+}
+
+export async function fetchESFSignal(
+    ticker: string = 'ES=F',
+    equity: number = 10000,
+    is_micro: boolean = true,
+): Promise<ESFAnalysis> {
+    const params = new URLSearchParams({ equity: equity.toString(), is_micro: is_micro.toString() });
+    const res = await fetch(`${API_BASE_URL}/esf/signal/${encodeURIComponent(ticker)}?${params}`);
+    if (!res.ok) throw new Error('Failed to fetch ESF signal');
+    return res.json();
+}
+
+export async function fetchESFSessionStatus(): Promise<ESFSessionStatus> {
+    const res = await fetch(`${API_BASE_URL}/esf/session-status`);
+    if (!res.ok) throw new Error('Failed to fetch session status');
+    return res.json();
+}
+
+export async function fetchESFVolumeProfile(
+    ticker: string = 'ES=F',
+    period: string = '5d',
+    interval: string = '15m',
+): Promise<VolumeProfileData> {
+    const params = new URLSearchParams({ period, interval });
+    const res = await fetch(`${API_BASE_URL}/esf/volume-profile/${encodeURIComponent(ticker)}?${params}`);
+    if (!res.ok) throw new Error('Failed to fetch volume profile');
+    return res.json();
+}
+
+export async function fetchESFCandles(
+    ticker: string = 'ES=F',
+    interval: string = '15m',
+    period: string = '5d',
+): Promise<{ ticker: string; interval: string; period: string; count: number; candles: ESFCandle[] }> {
+    const params = new URLSearchParams({ interval, period });
+    const res = await fetch(`${API_BASE_URL}/esf/candles/${encodeURIComponent(ticker)}?${params}`);
+    if (!res.ok) throw new Error('Failed to fetch ESF candles');
+    return res.json();
+}
+
+export async function triggerESFBacktest(params: ESFBacktestParams): Promise<{ status: string }> {
+    const res = await fetch(`${API_BASE_URL}/esf/backtest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+    });
+    if (!res.ok) throw new Error('Failed to start ESF backtest');
+    return res.json();
+}
+
+export async function fetchESFBacktestStatus(): Promise<{ status: string; progress: number }> {
+    const res = await fetch(`${API_BASE_URL}/esf/backtest/status`);
+    if (!res.ok) throw new Error('Failed to fetch backtest status');
+    return res.json();
+}
+
+export async function fetchESFBacktestResult(): Promise<ESFBacktestResult> {
+    const res = await fetch(`${API_BASE_URL}/esf/backtest/result`);
+    if (!res.ok) throw new Error('Failed to fetch backtest result');
+    const raw: any = await res.json();
+
+    // Normalize trade fields: backend uses pnl_dollar, frontend expects pnl
+    if (raw.trades) {
+        raw.trades = raw.trades.map((t: any) => ({
+            ...t,
+            pnl: t.pnl_dollar ?? t.pnl ?? 0,
+        }));
+    }
+
+    return raw as ESFBacktestResult;
 }
 
