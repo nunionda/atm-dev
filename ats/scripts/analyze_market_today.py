@@ -88,7 +88,7 @@ def analyze_index_trend(market: str):
 
     # ── ADX(14) ──
     try:
-        from simulation.engine import _compute_adx
+        from simulation.allocator import _compute_adx
         adx_s, _, _ = _compute_adx(
             pd.Series(highs.values), pd.Series(lows.values), pd.Series(closes.values), 14
         )
@@ -171,7 +171,7 @@ def analyze_index_trend(market: str):
 
 def show_strategy_weights(trend: str):
     """Part 2: 추세 → INDEX_TREND_STRATEGY_WEIGHTS 매핑."""
-    from simulation.engine import INDEX_TREND_STRATEGY_WEIGHTS, REGIME_STRATEGY_WEIGHTS
+    from simulation.constants import INDEX_TREND_STRATEGY_WEIGHTS, REGIME_STRATEGY_WEIGHTS
 
     print(f"\n{'=' * 70}")
     print(f"  Part 2: 전략 비중 결정 (INDEX_TREND_STRATEGY_WEIGHTS)")
