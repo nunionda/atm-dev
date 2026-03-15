@@ -1209,6 +1209,9 @@ class SimulationEngine:
         if regime_order.get(self._market_regime, 2) < regime_order.get(self._prev_regime, 2):
             self._reduce_positions_for_regime()
 
+        # 리밸런싱 체크 (regime 업데이트 후, entry 스캔 전)
+        self._check_rebalance_sync()
+
         # Phase 1~4 + 매수 실행
         self._scan_entries()
 
