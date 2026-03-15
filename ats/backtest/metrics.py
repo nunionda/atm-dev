@@ -113,6 +113,10 @@ class PhaseStats:
     # P4: SPY MA200 Gate (RG6)
     rg6_spy_blocks: int = 0           # SPY < MA200 → long strategy entry blocked
 
+    # P5: Signal Fusion
+    p5_conflict_reductions: int = 0    # P5: Signal conflict reductions applied
+    p5_threshold_adjustments: int = 0  # P5: Times adaptive threshold triggered
+
     # 종목별 레짐 분류
     stock_regime_distribution: Dict[str, int] = field(default_factory=dict)
     stock_regime_strategy_map: Dict[str, int] = field(default_factory=dict)

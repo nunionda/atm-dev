@@ -993,6 +993,9 @@ class SimulationEngine:
             "stock_regime_strategy_map": {},     # {"regime→strategy": count} 라우팅 이력
             "es_mdd_guard": 0,                    # MDD 가드 강제 청산 횟수
             "rg6_spy_blocks": 0,                  # P4: SPY < MA200 게이트 차단 횟수
+            # P5: Signal Fusion
+            "p5_conflict_reductions": 0,          # P5: Signal conflict reductions applied
+            "p5_threshold_adjustments": 0,        # P5: Times adaptive threshold triggered
         }
 
         # 에쿼티 히스토리 (프로그레시브 트레일링 기준용)
@@ -3046,6 +3049,41 @@ class SimulationEngine:
             if code in self.positions:
                 del self.positions[code]
 
+    def _get_adaptive_threshold(self, base_threshold: int, strategy: str = "") -> int:
+        """P5: Raise entry threshold when VIX high or portfolio in drawdown."""
+        adjustment = 0
+
+        # VIX adjustment: +0.5 per VIX point above 20
+        if self._vix_ema20 > 20:
+            adjustment += int((self._vix_ema20 - 20) * 0.5)
+
+        # Drawdown adjustment: +5 per 5% drawdown above 5%
+        if self._peak_equity > 0:
+            equity = self._get_total_equity()
+            dd_pct = (equity - self._peak_equity) / self._peak_equity
+            if dd_pct < -0.05:
+                adjustment += int(abs(dd_pct) * 50)  # -10% DD → +5 threshold
+
+        # Cap adjustment at +20 to avoid blocking all entries
+        adjustment = min(adjustment, 20)
+
+        if adjustment > 0:
+            self._phase_stats["p5_threshold_adjustments"] += 1
+
+        return min(base_threshold + adjustment, 90)
+
+    def _apply_signal_conflict(self, score: int, candle_score: int) -> int:
+        """P5: Reduce score when candlestick pattern conflicts with strategy signal direction."""
+        if score > 0 and candle_score < -20:
+            # Bullish score but bearish candle → reduce confidence by 30%
+            self._phase_stats["p5_conflict_reductions"] += 1
+            return int(score * 0.70)
+        elif score < 0 and candle_score > 20:
+            # Bearish score but bullish candle → reduce confidence by 30%
+            self._phase_stats["p5_conflict_reductions"] += 1
+            return int(score * 0.70)
+        return score
+
     def _get_candle_score(self, code: str) -> int:
         """P2: Quick candlestick pattern score from raw OHLCV, cached per day."""
         cache_key = f"{code}_{self._backtest_date}"
@@ -3480,8 +3518,11 @@ class SimulationEngine:
 
             strength = min(max(strength, 10), 100)
 
-            # B8: Minimum strength filter to reduce ES1 fires
-            if strength < 45:
+            # P5: Conflict resolution — bearish candle vs bullish momentum
+            strength = self._apply_signal_conflict(strength, candle_score)
+
+            # B8: Minimum strength filter to reduce ES1 fires (P5: adaptive threshold)
+            if strength < self._get_adaptive_threshold(45, "momentum"):
                 self._phase_stats.setdefault("b8_strength_blocks", 0)
                 self._phase_stats["b8_strength_blocks"] += 1
                 continue  # Skip weak signals that are likely to stop out
@@ -3590,7 +3631,10 @@ class SimulationEngine:
 
             total_score = score_smc + score_vol + score_obv + score_mom + candle_bonus
 
-            if total_score < self._smc_entry_threshold:
+            # P5: Conflict resolution — bearish candle vs bullish SMC score
+            total_score = self._apply_signal_conflict(total_score, candle_score)
+
+            if total_score < self._get_adaptive_threshold(self._smc_entry_threshold, "smc"):
                 self._phase_stats["phase3_no_primary"] += 1
                 continue
 
@@ -4164,7 +4208,10 @@ class SimulationEngine:
 
             total_score = score_signal + score_vol + score_confirm + candle_bonus + fib_bonus
 
-            if total_score < self._mr_cfg.entry_threshold:
+            # P5: Conflict resolution — bearish candle vs bullish MR score
+            total_score = self._apply_signal_conflict(total_score, candle_score)
+
+            if total_score < self._get_adaptive_threshold(self._mr_cfg.entry_threshold, "mean_reversion"):
                 self._phase_stats["phase3_no_primary"] += 1
                 continue
 
@@ -4836,7 +4883,7 @@ class SimulationEngine:
             if chart_pattern_score > 40:
                 zone_score += 10
 
-            if zone_score < self._brt_cfg.retest_zone_threshold:
+            if zone_score < self._get_adaptive_threshold(self._brt_cfg.retest_zone_threshold, "breakout_retest"):
                 continue
 
             # ── 리테스트 진입 확인 ──
@@ -4844,6 +4891,9 @@ class SimulationEngine:
             candle_score = self._get_candle_score(code)
             candle_bonus = 10 if candle_score > 15 else 0
             strength = min(state.get("breakout_score", 60) + zone_score // 2 + candle_bonus, 100)
+
+            # P5: Conflict resolution — bearish candle vs bullish BRT signal
+            strength = self._apply_signal_conflict(strength, candle_score)
             stock_name = self._stock_names.get(code, code)
 
             self._signal_counter += 1

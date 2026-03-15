@@ -348,3 +348,12 @@ benchmark_tuning:
   spy_ma200_gate: true          # P4 RG6: block long strategies when index < MA200
   spy_ma200_period: 200         # MA period for SPY gate
   qqq_rsi_threshold: 45         # QQQ RSI threshold for bearish filter
+
+signal_fusion:
+  enabled: true
+  adaptive_threshold: true
+  vix_threshold_bonus_per_point: 0.5   # +0.5 threshold per VIX point above 20
+  dd_threshold_bonus: 50               # +N per 1.0 dd_pct (so -10% → +5)
+  max_threshold_adjustment: 20         # Cap
+  conflict_resolution: true
+  conflict_reduction: 0.70             # Reduce score by 30% on conflict
