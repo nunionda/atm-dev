@@ -158,7 +158,7 @@ class TestEngineRebalanceIntegration:
         assert len(engine._watchlist) == 2
         codes = {w["code"] for w in engine._watchlist}
         assert codes == {"AAPL", "MSFT"}
-        assert len(engine._rebalance_history) == 1
+        assert len(engine.rebalance_history) == 1
 
     def test_rebalance_not_triggered_before_interval(self, engine_with_rebalance):
         """주기 도달 전에는 리밸런싱 안 함."""
@@ -168,11 +168,11 @@ class TestEngineRebalanceIntegration:
 
         # 첫 리밸런싱
         engine._check_rebalance_sync()
-        assert len(engine._rebalance_history) == 1
+        assert len(engine.rebalance_history) == 1
 
         # 1일 후 — 아직 안 됨
         engine._check_rebalance_sync()
-        assert len(engine._rebalance_history) == 1
+        assert len(engine.rebalance_history) == 1
 
     def test_apply_rebalance_merges_exit_codes(self, engine_with_rebalance):
         """_apply_rebalance()는 기존 퇴출 코드와 병합한다."""
@@ -195,4 +195,3 @@ class TestEngineRebalanceIntegration:
 
         # 병합 확인
         assert engine._rebalance_exit_codes == {"BA", "INTC"}
-        assert len(engine._rebalance_history) == 1

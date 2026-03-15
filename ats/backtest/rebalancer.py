@@ -84,12 +84,12 @@ class RebalanceManager:
         old_codes = self._current_watchlist_codes
 
         # 추가/제거 종목
-        added = list(new_codes - old_codes)
-        removed = list(old_codes - new_codes)
+        added = sorted(new_codes - old_codes)
+        removed = sorted(old_codes - new_codes)
 
         # 보유 중인 탈락 종목 → ES7 청산 대상
         active_codes = set(active_positions.keys()) if active_positions else set()
-        force_exit = list(active_codes & set(removed))
+        force_exit = sorted(active_codes & set(removed))
 
         # 모멘텀 점수 수집 (리포트용)
         scores: Dict[str, float] = {}

@@ -981,7 +981,6 @@ class SimulationEngine:
 
         # --- 리밸런싱 내장 (Step 1) ---
         self._rebalance_mgr = None
-        self._rebalance_history: list = []
         self._pending_rebalance = None
         self._full_universe_ohlcv = None
 
@@ -1245,6 +1244,13 @@ class SimulationEngine:
         """
         self._full_universe_ohlcv = ohlcv
 
+    @property
+    def rebalance_history(self) -> list:
+        """리밸런스 이력. _rebalance_mgr._history를 단일 소스로 사용."""
+        if self._rebalance_mgr:
+            return self._rebalance_mgr._history
+        return []
+
     def init_rebalance_manager(self, scanner, rebalance_interval: int = 14):
         """리밸런스 매니저를 엔진에 내장한다.
 
@@ -1257,6 +1263,14 @@ class SimulationEngine:
             scanner=scanner,
             rebalance_interval=rebalance_interval,
         )
+
+    def needs_full_universe_ohlcv(self) -> bool:
+        """리밸런싱 스캔을 위해 전체 유니버스 OHLCV가 필요한지 판단.
+
+        HistoricalBacktester가 이 메서드를 통해 데이터 주입 여부를 결정한다.
+        엔진 내부 상태를 직접 접근하지 않도록 캡슐화.
+        """
+        return bool(self._rebalance_mgr and self._rebalance_mgr.should_rebalance())
 
     def _check_rebalance_sync(self):
         """BACKTEST 모드 전용 리밸런싱 체크 (동기 실행).
@@ -1298,9 +1312,6 @@ class SimulationEngine:
 
         # 기존 퇴출 코드와 병합
         self._rebalance_exit_codes |= set(event.positions_force_exited)
-
-        # 이력 기록
-        self._rebalance_history.append(event)
 
     def _get_current_date_str(self) -> str:
         """현재 날짜 문자열. 백테스트 시 시뮬레이션 날짜, 실시간 시 오늘 날짜."""

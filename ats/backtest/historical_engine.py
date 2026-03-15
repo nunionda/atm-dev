@@ -471,7 +471,6 @@ class HistoricalBacktester:
         # ── 6. 일별 루프 ──
         print("🚀 백테스트 시작...\n")
         total_days = len(backtest_dates)
-        active_watchlist = self.watchlist  # 현재 활성 워치리스트
         rebal_printed = 0  # 출력 완료된 리밸런싱 이벤트 수
 
         for i, date in enumerate(backtest_dates):
@@ -481,13 +480,13 @@ class HistoricalBacktester:
             self.engine.reset_daily_state()
 
             # ── 리밸런싱: 전체 유니버스 OHLCV 주입 (엔진 내부에서 자동 처리) ──
-            if self.engine._rebalance_mgr and self.engine._rebalance_mgr.should_rebalance():
+            if self.engine.needs_full_universe_ohlcv():
                 full_ohlcv = self.provider.get_ohlcv_up_to_date(download_watchlist)
                 self.engine.set_full_universe_ohlcv(full_ohlcv)
 
-            # 데이터 주입 + 6-Phase 실행
-            day_ohlcv = self.provider.get_ohlcv_up_to_date(active_watchlist)
-            day_prices = self.provider.get_current_prices(active_watchlist)
+            # 데이터 주입 + 6-Phase 실행 (엔진 내부 워치리스트 사용)
+            day_ohlcv = self.provider.get_ohlcv_up_to_date(self.engine._watchlist or self.watchlist)
+            day_prices = self.provider.get_current_prices(self.engine._watchlist or self.watchlist)
 
             # v5: Arbitrage 전용 — Fixed pair ETF + Basis instrument 데이터 주입
             if self.strategy_mode == "arbitrage" and hasattr(self, '_arb_extra_watchlist'):
@@ -519,9 +518,9 @@ class HistoricalBacktester:
             )
 
             # 리밸런싱 진단 출력 (엔진 내부에서 실행된 리밸런싱 이벤트)
-            if self.engine._rebalance_history and len(self.engine._rebalance_history) > rebal_printed:
-                event = self.engine._rebalance_history[-1]
-                active_watchlist = event.new_watchlist  # 워치리스트 갱신 추적
+            rebal_history = self.engine.rebalance_history
+            if rebal_history and len(rebal_history) > rebal_printed:
+                event = rebal_history[-1]
                 cycle = event.cycle_number
                 added = len(event.stocks_added)
                 removed = len(event.stocks_removed)
@@ -530,7 +529,7 @@ class HistoricalBacktester:
                     f"\r   🔄 리밸런스 #{cycle} ({_fmt_date(date)}): "
                     f"+{added} -{removed} 종목, ES7 청산 {forced}건\n"
                 )
-                rebal_printed = len(self.engine._rebalance_history)
+                rebal_printed = len(rebal_history)
 
             # 메트릭 수집
             self.collector.record_daily(date, self.engine)
