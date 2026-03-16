@@ -177,16 +177,29 @@ REGIME_PARAMS = {
     "CRISIS":      {"max_positions": 1,  "max_weight": 0.05},
 }
 
-# ── 종목별 레짐 분류 임계값 (0-100 복합 스코어 → 6단계) ──
+# ── 종목별 레짐 분류 임계값 (0-100 복합 스코어 → 5단계) ──
 STOCK_REGIME_THRESHOLDS: list = [
-    # (min_score, regime) — 내림차순 매칭
-    (80, "STRONG_BULL"),
-    (60, "BULL"),
-    (45, "NEUTRAL"),
-    (30, "RANGE_BOUND"),
-    (15, "BEAR"),
-    (0,  "CRISIS"),
+    # (min_score, regime) — 내림차순 매칭 (5단계)
+    (72, "STRONG_BULL"),   # Was 80 — capture more uptrending stocks
+    (55, "BULL"),          # Was 60 — wider bull band
+    (40, "NEUTRAL"),       # Was 45 — narrower neutral (was 83% clustering here)
+    (25, "BEAR"),          # Merges old RANGE_BOUND + BEAR
+    (0,  "STRONG_BEAR"),   # Merges old BEAR + CRISIS
 ]
+
+# ── 종목 레짐 레벨 (스무딩용: 2+ 레벨 하락 → 즉시 적용) ──
+_STOCK_REGIME_LEVEL = {
+    "STRONG_BULL": 4, "BULL": 3, "NEUTRAL": 2, "BEAR": 1, "STRONG_BEAR": 0
+}
+
+# ── 종목별 레짐 → 전략 스캔 친화도 (0.0=스킵, 1.0=풀스캔) ──
+STOCK_REGIME_STRATEGY_AFFINITY: Dict[str, Dict[str, float]] = {
+    "STRONG_BULL": {"momentum": 1.0, "breakout_retest": 0.8, "smc": 0.5, "mean_reversion": 0.0, "defensive": 0.0},
+    "BULL":        {"momentum": 0.8, "breakout_retest": 0.5, "smc": 0.6, "mean_reversion": 0.3, "defensive": 0.0},
+    "NEUTRAL":     {"mean_reversion": 1.0, "smc": 0.5, "momentum": 0.0, "breakout_retest": 0.0, "defensive": 0.3},
+    "BEAR":        {"defensive": 0.8, "mean_reversion": 0.5, "smc": 0.3, "momentum": 0.0, "breakout_retest": 0.0},
+    "STRONG_BEAR": {"defensive": 1.0, "mean_reversion": 0.2, "momentum": 0.0, "breakout_retest": 0.0, "smc": 0.0},
+}
 
 # ── 체제별 청산 파라미터 ──
 REGIME_EXIT_PARAMS = {
@@ -888,6 +901,7 @@ class SimulationEngine:
         # 시장 데이터 캐시
         self._ohlcv_cache: Dict[str, pd.DataFrame] = {}
         self._current_prices: Dict[str, float] = {}
+        self._candle_score_cache: Dict[str, int] = {}  # P2: per-day candle score cache
         self._stock_names: Dict[str, str] = {w["code"]: w["name"] for w in self._watchlist}
 
         # 성과 추적
@@ -929,6 +943,17 @@ class SimulationEngine:
         self._index_ohlcv: List[Dict] = []   # [{open, high, low, close, volume}, ...]
         self._index_trend: Dict = {}          # _analyze_index_trend() 결과 캐시
         self._index_trend_history: List[Dict] = []  # 추세 변경 이력 (max 20)
+        # Index Trend 스무딩 (가중치 플리핑 방지)
+        self._index_trend_confirmed: str = "NEUTRAL"  # 확인된 추세
+        self._index_trend_candidate: str = "NEUTRAL"  # 전환 후보
+        self._index_trend_candidate_days: int = 0     # 후보 연속 일수
+        self._index_trend_confirm_days: int = 3       # 전환 확인 필요 일수 (최적)
+
+        # P4: SPY MA200 gate — SPY(^GSPC) 200일 이평선 하회 시 공격적 전략 차단
+        self._spy_below_ma200: bool = False
+        self._qqq_bearish: bool = False        # P4: QQQ bearish filter (index RSI < 45)
+        self._rs_tech_leading: Optional[bool] = None  # P4: tech RS ratio (None=unknown)
+        self._spy_ma200_gate_enabled: bool = True  # P4: config flag (default enabled)
 
         self._backtest_date: Optional[str] = None  # 백테스트 시 시뮬레이션 날짜
         self._cycle_count = 0
@@ -971,6 +996,11 @@ class SimulationEngine:
             # 종목별 레짐 통계
             "stock_regime_distribution": {},     # {regime: count} 마지막 사이클 분포
             "stock_regime_strategy_map": {},     # {"regime→strategy": count} 라우팅 이력
+            "es_mdd_guard": 0,                    # MDD 가드 강제 청산 횟수
+            "rg6_spy_blocks": 0,                  # P4: SPY < MA200 게이트 차단 횟수
+            # P5: Signal Fusion
+            "p5_conflict_reductions": 0,          # P5: Signal conflict reductions applied
+            "p5_threshold_adjustments": 0,        # P5: Times adaptive threshold triggered
         }
 
         # 에쿼티 히스토리 (프로그레시브 트레일링 기준용)
@@ -978,6 +1008,11 @@ class SimulationEngine:
 
         # 리밸런스 청산 대상 (ES7)
         self._rebalance_exit_codes: set = set()
+
+        # --- 리밸런싱 내장 (Step 1) ---
+        self._rebalance_mgr = None
+        self._pending_rebalance = None
+        self._full_universe_ohlcv = None
 
         # ── Tactical 전용 포트폴리오 배분 (Kelly Criterion) ──
         self._allocator: Optional['PortfolioAllocator'] = None
@@ -1096,6 +1131,19 @@ class SimulationEngine:
         if self.strategy_mode == "multi" or self.strategy_mode in REGIME_STRATEGY_MODES:
             self._phase_stats.setdefault("multi_dedup_skips", 0)
 
+        # P4: benchmark_tuning 설정 로드 (최초 1회)
+        if not hasattr(self, '_benchmark_tuning_loaded'):
+            self._benchmark_tuning_loaded = True
+            try:
+                from data.config_manager import ConfigManager
+                _cfg_mgr = ConfigManager()
+                _full_cfg = _cfg_mgr.load()
+                bt_cfg = getattr(_full_cfg, "benchmark_tuning", None)
+                if bt_cfg is not None:
+                    self._spy_ma200_gate_enabled = bool(getattr(bt_cfg, "spy_ma200_gate", True))
+            except Exception:
+                pass  # 기본값 True 유지
+
     # ══════════════════════════════════════════
     # 메인 루프
     # ══════════════════════════════════════════
@@ -1183,6 +1231,10 @@ class SimulationEngine:
         # 포지션 현재가 갱신
         self._update_position_prices()
 
+        # Peak equity 갱신 (매일, entry scan과 무관하게)
+        equity = self._get_total_equity()
+        self._peak_equity = max(self._peak_equity, equity)
+
         # Phase 5: 청산 체크 (매수보다 선행)
         self._check_exits()
 
@@ -1194,6 +1246,9 @@ class SimulationEngine:
         self._stock_regimes_updated = False
         self._update_stock_regimes()
 
+        # P4: SPY/QQQ benchmark signals (RG6 gate)
+        self._update_spy_qqq_signals()
+
         # Phase 0.5: 지수 추세 기반 전략 비중 동적 조정 (multi/레짐 모드)
         if (self.strategy_mode == "multi" or self.strategy_mode in REGIME_STRATEGY_MODES) and self._index_ohlcv:
             self._update_strategy_weights_from_index()
@@ -1202,6 +1257,9 @@ class SimulationEngine:
         regime_order = {"BULL": 3, "NEUTRAL": 2, "RANGE_BOUND": 1, "BEAR": 0}
         if regime_order.get(self._market_regime, 2) < regime_order.get(self._prev_regime, 2):
             self._reduce_positions_for_regime()
+
+        # 리밸런싱 체크 (regime 업데이트 후, entry 스캔 전)
+        self._check_rebalance_sync()
 
         # Phase 1~4 + 매수 실행
         self._scan_entries()
@@ -1218,6 +1276,7 @@ class SimulationEngine:
         """일일 PnL 리셋 (백테스트에서 매 거래일 시작 시 호출)."""
         self._daily_start_equity = self._get_total_equity()
         self._daily_trade_amount = 0.0
+        self._candle_score_cache.clear()  # P2: reset candle score cache per day
 
     def update_watchlist(self, new_watchlist: list):
         """동적 워치리스트 교체 (리밸런싱 시 호출)."""
@@ -1225,8 +1284,85 @@ class SimulationEngine:
         self._stock_names = {w["code"]: w["name"] for w in new_watchlist}
 
     def set_rebalance_exits(self, codes: set):
-        """리밸런스 탈락 종목을 ES7 청산 대상으로 지정."""
-        self._rebalance_exit_codes = set(codes)
+        """리밸런스 탈락 종목을 ES7 청산 대상으로 지정 (기존 코드와 병합)."""
+        self._rebalance_exit_codes |= set(codes)
+
+    def set_full_universe_ohlcv(self, ohlcv: dict):
+        """전체 유니버스 OHLCV 주입 (BACKTEST 리밸런싱 스캔용).
+
+        _ohlcv_cache(워치리스트용)와 별도로 관리한다.
+        리밸런싱 스캔 시 전체 유니버스에서 종목을 선별하기 위해 사용.
+        """
+        self._full_universe_ohlcv = ohlcv
+
+    @property
+    def rebalance_history(self) -> list:
+        """리밸런스 이력. _rebalance_mgr._history를 단일 소스로 사용."""
+        if self._rebalance_mgr:
+            return self._rebalance_mgr._history
+        return []
+
+    def init_rebalance_manager(self, scanner, rebalance_interval: int = 14):
+        """리밸런스 매니저를 엔진에 내장한다.
+
+        Args:
+            scanner: UniverseScanner 인스턴스
+            rebalance_interval: 리밸런싱 주기 (거래일 단위, 기본 14)
+        """
+        from backtest.rebalancer import RebalanceManager
+        self._rebalance_mgr = RebalanceManager(
+            scanner=scanner,
+            rebalance_interval=rebalance_interval,
+        )
+
+    def needs_full_universe_ohlcv(self) -> bool:
+        """리밸런싱 스캔을 위해 전체 유니버스 OHLCV가 필요한지 판단.
+
+        HistoricalBacktester가 이 메서드를 통해 데이터 주입 여부를 결정한다.
+        엔진 내부 상태를 직접 접근하지 않도록 캡슐화.
+        """
+        return bool(self._rebalance_mgr and self._rebalance_mgr.should_rebalance())
+
+    def _check_rebalance_sync(self):
+        """BACKTEST 모드 전용 리밸런싱 체크 (동기 실행).
+
+        should_rebalance() → execute_rebalance() → tick() 순서를 유지한다.
+        현재 HistoricalBacktester의 실행 순서와 동일하게 유지하여 회귀를 방지.
+        """
+        if not self._rebalance_mgr:
+            return
+
+        if not self._rebalance_mgr.should_rebalance():
+            self._rebalance_mgr.tick()
+            return
+
+        # 전체 유니버스 데이터로 스캔 (없으면 워치리스트 데이터 폴백)
+        ohlcv_for_scan = self._full_universe_ohlcv or self._ohlcv_cache
+        active_positions = {
+            pos.stock_code: pos for pos in self.positions.values()
+            if pos.status == "ACTIVE"
+        }
+
+        event = self._rebalance_mgr.execute_rebalance(
+            ohlcv_map=ohlcv_for_scan,
+            current_date=self._backtest_date,
+            active_positions=active_positions,
+        )
+
+        self._apply_rebalance(event)
+        self._rebalance_mgr.tick()
+
+    def _apply_rebalance(self, event):
+        """리밸런싱 이벤트를 엔진에 적용한다.
+
+        update_watchlist()를 사용하여 _stock_names도 함께 갱신.
+        기존 regime 다운그레이드 퇴출 코드와 병합 (덮어쓰기 방지).
+        """
+        # 워치리스트 교체 + _stock_names 갱신
+        self.update_watchlist(event.new_watchlist)
+
+        # 기존 퇴출 코드와 병합
+        self._rebalance_exit_codes |= set(event.positions_force_exited)
 
     def _get_current_date_str(self) -> str:
         """현재 날짜 문자열. 백테스트 시 시뮬레이션 날짜, 실시간 시 오늘 날짜."""
@@ -1638,6 +1774,29 @@ class SimulationEngine:
 
         return self._market_regime  # 아직 미확인 → 현재 유지
 
+    def _smooth_index_trend(self, raw_trend: str) -> str:
+        """Index Trend 스무딩: N일 연속 동일 신호 시에만 가중치 전환.
+
+        _smooth_regime()과 동일한 로직이지만 지수 추세(가중치 드라이버)에 적용.
+        진단 결과: 스무딩 미적용 시 250일 중 20+회 전환 → 전략 가중치 불안정 → Sharpe 손실.
+        """
+        if raw_trend == self._index_trend_confirmed:
+            # 현재 확인된 추세와 동일 → 후보 리셋
+            self._index_trend_candidate = raw_trend
+            self._index_trend_candidate_days = 0
+            return self._index_trend_confirmed
+
+        if raw_trend == self._index_trend_candidate:
+            self._index_trend_candidate_days += 1
+            if self._index_trend_candidate_days >= self._index_trend_confirm_days:
+                self._index_trend_confirmed = raw_trend
+                return raw_trend  # 확인 완료 → 추세 전환
+        else:
+            self._index_trend_candidate = raw_trend
+            self._index_trend_candidate_days = 1
+
+        return self._index_trend_confirmed  # 미확인 → 현재 유지
+
     def _update_market_regime(self):
         """레짐 감지 + 레짐 고정 모드 오버라이드.
 
@@ -1680,6 +1839,19 @@ class SimulationEngine:
         # 최대 260일 보관 (MA200 + buffer)
         if len(self._index_ohlcv) > 260:
             self._index_ohlcv = self._index_ohlcv[-260:]
+
+    def _get_index_return(self, days: int) -> float:
+        """최근 N일 지수 수익률 계산. 데이터 부족 시 0.0 반환."""
+        if not self._index_ohlcv or len(self._index_ohlcv) < days + 1:
+            return 0.0
+        try:
+            current = float(self._index_ohlcv[-1]["close"])
+            past = float(self._index_ohlcv[-days - 1]["close"])
+            if past > 0:
+                return (current - past) / past
+        except (KeyError, IndexError, ValueError):
+            pass
+        return 0.0
 
     def _analyze_index_trend(self) -> Dict:
         """지수 OHLCV에서 추세 시그널 분석.
@@ -1786,6 +1958,14 @@ class SimulationEngine:
             trend = "CRISIS"
         elif ma_state == "ALIGNED_BEAR":
             trend = "BEAR"
+        # ── Secondary bear detection (B6): momentum + VIX + short-term return ──
+        elif momentum_score < 35 and self._vix_ema20 > 22 and self._get_index_return(20) < -0.05:
+            trend = "BEAR"
+            signals.append("보조 약세 감지: momentum<35, VIX>22, 20일수익률<-5%")
+        # ── Secondary crisis detection (B6): 60-day deep drawdown ──
+        elif self._get_index_return(60) < -0.15:
+            trend = "CRISIS"
+            signals.append("보조 위기 감지: 60일수익률<-15%")
         elif adx < 20 and volatility_state in ("LOW", "NORMAL"):
             trend = "RANGE_BOUND"  # 저추세 + 저변동성 = 박스권
         else:
@@ -1834,7 +2014,11 @@ class SimulationEngine:
         )
 
         self._index_trend = self._analyze_index_trend()
-        trend = self._index_trend.get("trend", "NEUTRAL")
+        raw_trend = self._index_trend.get("trend", "NEUTRAL")
+
+        # ── Index Trend 스무딩: N일 연속 동일 신호 시에만 전환 ──
+        # 가중치 플리핑 방지 (진단: 250일 중 20+회 전환 → Sharpe 손실)
+        trend = self._smooth_index_trend(raw_trend)
 
         weights = INDEX_TREND_STRATEGY_WEIGHTS.get(
             trend, INDEX_TREND_STRATEGY_WEIGHTS["NEUTRAL"]
@@ -2046,17 +2230,18 @@ class SimulationEngine:
 
     def _classify_stock_regime(self, df: pd.DataFrame) -> str:
         """
-        종목 개별 레짐 분류 (0-100 복합 스코어).
+        종목 개별 레짐 분류 (0-100 복합 스코어, v2).
 
         기존 _confirm_trend(), _estimate_trend_stage() 결과를 종합하여
         글로벌 레짐과 독립적으로 각 종목의 추세 상태를 6단계로 판정.
 
         구성요소:
-          (1) MA 정렬 점수 (0-30): alignment_score 0~5 → 0~30
-          (2) ADX 방향 점수 (0-20): UP 추세 + ADX 강도
-          (3) RSI 위치 점수 (0-20): 강세/약세 위치
+          (1) MA 정렬 점수 (0-25): alignment_score 0~5 → 0~25
+          (2) ADX 방향+기울기 점수 (0-20): UP 추세 + ADX 강도
+          (3) RSI 위치 점수 (0-15): 강세/약세 위치 (reduced from 20)
           (4) Price vs MA200 (0-15): 장기 추세 위치
-          (5) Trend Stage 보너스 (0-15): EARLY/MID/LATE
+          (5) Trend Stage 보너스 (0-10): EARLY/MID/LATE (reduced from 15)
+          (6) Volume Trend — OBV 20일 기울기 (0-15): NEW
         """
         if len(df) < 200:
             return "NEUTRAL"
@@ -2066,11 +2251,11 @@ class SimulationEngine:
         curr = df.iloc[-1]
         score = 0.0
 
-        # (1) MA 정렬 점수 (0-30): alignment_score 0~5 → 0~30
+        # (1) MA 정렬 점수 (0-25): alignment_score 0~5 → 0~25
         alignment = trend.get("alignment_score", 0)
-        score += alignment * 6  # 0, 6, 12, 18, 24, 30
+        score += alignment * 5  # 0, 5, 10, 15, 20, 25
 
-        # (2) ADX 방향 점수 (0-20)
+        # (2) ADX 방향+기울기 점수 (0-20)
         adx = trend.get("adx", 0)
         direction = trend.get("direction", "FLAT")
         if direction == "UP":
@@ -2080,16 +2265,16 @@ class SimulationEngine:
         else:
             score += 10  # FLAT → 중립
 
-        # (3) RSI 위치 점수 (0-20)
+        # (3) RSI 위치 점수 (0-15) — reduced from 20
         rsi = float(curr.get("rsi", 50)) if pd.notna(curr.get("rsi")) else 50
         if rsi >= 55:
-            score += min((rsi - 40) / 40 * 20, 20)   # RSI 55~80 → 7.5~20
+            score += min((rsi - 40) / 40 * 15, 15)   # RSI 55~80 → 5.6~15
         elif rsi <= 35:
-            score += max(0, rsi / 35 * 5)             # RSI 0~35 → 0~5
+            score += max(0, rsi / 35 * 4)             # RSI 0~35 → 0~4
         else:
-            score += 10  # 35~55 → 중립
+            score += 7.5  # 35~55 → 중립
 
-        # (4) Price vs MA200 (0-15)
+        # (4) Price vs MA200 (0-15) — unchanged
         ma200 = float(curr.get("ma200", 0)) if pd.notna(curr.get("ma200")) else 0
         price = float(curr["close"])
         if ma200 > 0:
@@ -2101,19 +2286,93 @@ class SimulationEngine:
         else:
             score += 7  # 데이터 없으면 중립
 
-        # (5) Trend Stage 보너스 (0-15)
-        stage_bonus = {"EARLY": 15, "MID": 8, "LATE": 2}
-        score += stage_bonus.get(stage, 8)
+        # (5) Trend Stage 보너스 (0-10) — reduced from 15
+        stage_bonus = {"EARLY": 10, "MID": 5, "LATE": 1}
+        score += stage_bonus.get(stage, 5)
+
+        # (6) Volume Trend — OBV 20일 기울기 (0-15) NEW
+        obv_score = 7.5  # 기본값: 중립
+        try:
+            if len(df) >= 20 and "close" in df.columns and "volume" in df.columns:
+                # OBV가 이미 계산되어 있으면 사용, 아니면 인라인 계산
+                if "obv" in df.columns:
+                    obv_vals = df["obv"].iloc[-20:].dropna()
+                else:
+                    c = df["close"].iloc[-20:]
+                    v = df["volume"].iloc[-20:]
+                    obv_vals = (np.sign(c.diff()).fillna(0) * v).cumsum()
+                    obv_vals = obv_vals.dropna()
+
+                if len(obv_vals) >= 10:
+                    x = np.arange(len(obv_vals))
+                    slope, _ = np.polyfit(x, obv_vals.values.astype(float), 1)
+                    obv_mean = abs(float(obv_vals.mean()))
+                    if obv_mean > 0:
+                        norm_slope = slope / obv_mean * 100  # % change per day
+                        obv_score = max(0, min(15, 7.5 + norm_slope * 50))
+        except Exception:
+            obv_score = 7.5
+        score += obv_score
 
         # 스코어 → 레짐 매핑
         score = max(0, min(100, score))
         for threshold, regime in STOCK_REGIME_THRESHOLDS:
             if score >= threshold:
                 return regime
-        return "CRISIS"
+        return "STRONG_BEAR"
+
+    def _update_spy_qqq_signals(self):
+        """P4: Update SPY MA200 gate and QQQ bearish filter from index OHLCV data.
+
+        Uses self._index_ohlcv (^GSPC / ^NDX) as SPY/QQQ proxy (correlation ~0.99).
+        Sets:
+          self._spy_below_ma200 — True when index < MA200 (or MA50 if <200 days available)
+          self._qqq_bearish    — True when index RSI(14) < 45 (broad market weakness)
+        """
+        if not self._index_ohlcv or len(self._index_ohlcv) < 30:
+            return
+
+        closes = [d["close"] for d in self._index_ohlcv]
+
+        # SPY MA200 gate: index < 200-day MA → restrict long strategies
+        if len(closes) >= 200:
+            ma200 = sum(closes[-200:]) / 200
+            self._spy_below_ma200 = closes[-1] < ma200
+        elif len(closes) >= 50:
+            # Fallback: use MA50 if fewer than 200 days available
+            ma_n = sum(closes[-50:]) / 50
+            self._spy_below_ma200 = closes[-1] < ma_n
+
+        # QQQ bearish: use RSI(14) of index as proxy
+        if len(closes) >= 15:
+            changes = [closes[i] - closes[i - 1] for i in range(max(1, len(closes) - 15), len(closes))]
+            gains = [max(0.0, c) for c in changes]
+            losses = [max(0.0, -c) for c in changes]
+            avg_gain = sum(gains) / len(gains) if gains else 0.0
+            avg_loss = sum(losses) / len(losses) if losses else 0.0
+            if avg_loss > 0:
+                rs = avg_gain / avg_loss
+                rsi = 100.0 - (100.0 / (1.0 + rs))
+            else:
+                rsi = 100.0
+            # QQQ bearish: RSI < 45 suggests broad market weakness
+            self._qqq_bearish = rsi < 45.0
+
+    def _strategy_allowed_by_rg6(self, strategy: str) -> bool:
+        """P4 RG6: If index is below MA200, only defensive/mean_reversion are allowed.
+
+        Long-only strategies (momentum, smc, breakout_retest) are blocked during
+        confirmed downtrends to avoid entries into bear market rallies.
+        """
+        if not self._spy_ma200_gate_enabled:
+            return True
+        if not self._spy_below_ma200:
+            return True
+        # Below MA200 → only counter-trend / defensive strategies
+        return strategy in ("defensive", "mean_reversion")
 
     def _update_stock_regimes(self, force: bool = False):
-        """워치리스트 종목의 개별 레짐 갱신. 성능을 위해 7일 주기로 실행."""
+        """워치리스트 종목의 개별 레짐 갱신. 성능을 위해 7일 주기로 실행. 2-cycle smoothing."""
         if self._stock_regimes_updated:
             return  # 이미 이번 사이클에서 갱신됨 → 스킵
         self._stock_regimes_updated = True
@@ -2123,19 +2382,54 @@ class SimulationEngine:
         if not force and self._stock_regimes and self._stock_regime_counter % 7 != 1:
             return  # 캐시된 결과 사용
 
+        # Initialize pending dict if not exists
+        if not hasattr(self, "_stock_regime_pending"):
+            self._stock_regime_pending: Dict[str, Tuple[str, int]] = {}
+
         for w in self._watchlist:
             code = w["code"]
             df = self._ohlcv_cache.get(code)
-            if df is not None and len(df) >= 200:
-                self._stock_regimes[code] = self._classify_stock_regime(df)
-            else:
+            if df is None or len(df) < 200:
                 self._stock_regimes[code] = "NEUTRAL"  # 데이터 부족 → 중립
+                continue
+
+            new_regime = self._classify_stock_regime(df)
+            current_regime = self._stock_regimes.get(code, "NEUTRAL")
+
+            if new_regime == current_regime:
+                # Same regime → clear any pending transition
+                self._stock_regime_pending.pop(code, None)
+                continue
+
+            # Check for rapid downgrade (2+ levels) → immediate change (crash protection)
+            curr_level = _STOCK_REGIME_LEVEL.get(current_regime, 2)
+            new_level = _STOCK_REGIME_LEVEL.get(new_regime, 2)
+            if curr_level - new_level >= 2:
+                self._stock_regimes[code] = new_regime
+                self._stock_regime_pending.pop(code, None)
+                continue
+
+            # Normal transition: require 2 consecutive cycles
+            pending = self._stock_regime_pending.get(code)
+            if pending and pending[0] == new_regime:
+                # Same pending regime for 2nd cycle → confirm transition
+                self._stock_regimes[code] = new_regime
+                self._stock_regime_pending.pop(code, None)
+            else:
+                # First cycle with new regime → mark as pending
+                self._stock_regime_pending[code] = (new_regime, 1)
 
         # 분포 집계 (PhaseStats)
         dist: Dict[str, int] = {}
         for regime in self._stock_regimes.values():
             dist[regime] = dist.get(regime, 0) + 1
         self._phase_stats["stock_regime_distribution"] = dist
+
+    def _get_stock_affinity(self, code: str, strategy: str) -> float:
+        """종목별 레짐에 따른 전략 친화도 반환 (0.0=스킵, 1.0=풀스캔)."""
+        stock_regime = self._stock_regimes.get(code, "NEUTRAL")
+        affinity_map = STOCK_REGIME_STRATEGY_AFFINITY.get(stock_regime, {})
+        return affinity_map.get(strategy, 0.5)  # 미정의 전략은 0.5 (기본)
 
     # ══════════════════════════════════════════
     # Phase 4: 리스크 게이트 (TradingLogicFlow.md)
@@ -2268,6 +2562,21 @@ class SimulationEngine:
                 return True
 
         return False
+
+    def _get_dynamic_atr_mult(self, adx: float, mode: str = 'stop') -> float:
+        """ADX 강도에 따라 ATR 배수 동적 조정."""
+        if mode == 'stop':
+            if adx < 20:
+                return 2.5   # 레인지: 와이드 스탑
+            elif adx < 35:
+                return 2.0   # 보통 추세: 표준
+            else:
+                return 1.5   # 강한 추세: 타이트
+        else:  # trail
+            if adx > 35:
+                return 3.5   # 강한 추세에서 위너 보호
+            else:
+                return 2.0   # 표준 트레일링
 
     def _detect_support_resistance(self, df: pd.DataFrame, lookback: int = 40) -> dict:
         """최근 N봉의 스윙 포인트를 클러스터링하여 S/R 레벨 반환.
@@ -2452,25 +2761,25 @@ class SimulationEngine:
         self._collect_mode = False
 
         # ── 2단계: 종목별 최적 시그널 선택 ──
-        # 글로벌 레짐 비중으로 라우팅 (종목별 레짐은 exit/sizing에만 사용)
+        # 종목별 레짐 친화도를 강도 배율로 적용하여 라우팅
         best_per_stock: Dict[str, tuple] = {}
         for sig_tuple in self._collected_signals:
             strategy, signal = sig_tuple[0], sig_tuple[1]
             code = signal.stock_code
 
+            # Apply per-stock regime affinity as strength multiplier
+            affinity = self._get_stock_affinity(code, strategy)
+            if affinity <= 0.0:
+                continue  # Skip zero-affinity signals
+            # Scale effective strength by affinity
+            effective_strength = signal.strength * affinity
+
             if code not in best_per_stock:
-                best_per_stock[code] = sig_tuple
+                best_per_stock[code] = (sig_tuple, effective_strength)
             else:
-                existing_strategy = best_per_stock[code][0]
-                existing_weight = allocator.weights.get(existing_strategy, 0)
-                new_weight = allocator.weights.get(strategy, 0)
-                # 비중 차이가 10%p 이상이면 비중 높은 전략 우선
-                if new_weight > existing_weight + 0.10:
-                    best_per_stock[code] = sig_tuple
-                elif abs(new_weight - existing_weight) <= 0.10:
-                    # 비중 비슷하면 strength 비교
-                    if signal.strength > best_per_stock[code][1].strength:
-                        best_per_stock[code] = sig_tuple
+                _, existing_eff = best_per_stock[code]
+                if effective_strength > existing_eff:
+                    best_per_stock[code] = (sig_tuple, effective_strength)
 
         dedup_skips = len(self._collected_signals) - len(best_per_stock)
         if dedup_skips > 0:
@@ -2481,10 +2790,11 @@ class SimulationEngine:
         # 비활성 전략 예산은 현금으로 유보 (자연스러운 포지션 사이징 제약)
 
         # ── 3단계: 선택된 시그널을 전략별 예산 한도 내에서 실행 ──
-        sorted_signals = sorted(best_per_stock.values(), key=lambda x: x[1].strength, reverse=True)
+        sorted_signals = sorted(best_per_stock.values(), key=lambda x: x[1], reverse=True)
 
         exec_count_per_strategy: Dict[str, int] = {}
-        for sig_tuple in sorted_signals:
+        for item in sorted_signals:
+            sig_tuple = item[0]
             strategy, signal, trend_str, trend_stage, align = sig_tuple
             if day_budgets.get(strategy, 0) <= 0:
                 continue
@@ -2786,11 +3096,227 @@ class SimulationEngine:
             if code in self.positions:
                 del self.positions[code]
 
+    def _get_adaptive_threshold(self, base_threshold: int, strategy: str = "") -> int:
+        """P5: Raise entry threshold when VIX high or portfolio in drawdown."""
+        adjustment = 0
+
+        # VIX adjustment: +0.5 per VIX point above 20
+        if self._vix_ema20 > 20:
+            adjustment += int((self._vix_ema20 - 20) * 0.5)
+
+        # Drawdown adjustment: +5 per 5% drawdown above 5%
+        if self._peak_equity > 0:
+            equity = self._get_total_equity()
+            dd_pct = (equity - self._peak_equity) / self._peak_equity
+            if dd_pct < -0.05:
+                adjustment += int(abs(dd_pct) * 50)  # -10% DD → +5 threshold
+
+        # CRISIS 레짐: 진입 임계값 +15 (거래 수 축소, 226→목표 80건 이하)
+        if self._market_regime == "CRISIS":
+            adjustment += 15
+
+        # Cap adjustment at +30 to avoid blocking all entries
+        adjustment = min(adjustment, 30)
+
+        if adjustment > 0:
+            self._phase_stats["p5_threshold_adjustments"] += 1
+
+        return min(base_threshold + adjustment, 90)
+
+    def _apply_signal_conflict(self, score: int, candle_score: int) -> int:
+        """P5: Reduce score when candlestick pattern conflicts with strategy signal direction."""
+        if score > 0 and candle_score < -20:
+            # Bullish score but bearish candle → reduce confidence by 30%
+            self._phase_stats["p5_conflict_reductions"] += 1
+            return int(score * 0.70)
+        elif score < 0 and candle_score > 20:
+            # Bearish score but bullish candle → reduce confidence by 30%
+            self._phase_stats["p5_conflict_reductions"] += 1
+            return int(score * 0.70)
+        return score
+
+    def _get_candle_score(self, code: str) -> int:
+        """P2: Quick candlestick pattern score from raw OHLCV, cached per day."""
+        cache_key = f"{code}_{self._backtest_date}"
+        if cache_key in self._candle_score_cache:
+            return self._candle_score_cache[cache_key]
+
+        df = self._ohlcv_cache.get(code)
+        if df is None or len(df) < 3:
+            return 0
+
+        score = 0
+        c = df['close'].values.astype(float)
+        o = df['open'].values.astype(float)
+        h = df['high'].values.astype(float)
+        lo = df['low'].values.astype(float)
+
+        # Last bar
+        body = c[-1] - o[-1]
+        prev_body = c[-2] - o[-2]
+        body_abs = abs(body)
+        prev_body_abs = abs(prev_body)
+
+        # Bullish Engulfing (+30)
+        if prev_body < 0 and body > 0 and o[-1] <= c[-2] and c[-1] >= o[-2]:
+            score += 30
+        # Bearish Engulfing (-30)
+        elif prev_body > 0 and body < 0 and o[-1] >= c[-2] and c[-1] <= o[-2]:
+            score -= 30
+
+        # Hammer (+25) — small body top, long lower shadow
+        lower_shadow = min(c[-1], o[-1]) - lo[-1]
+        upper_shadow = h[-1] - max(c[-1], o[-1])
+        if body_abs > 0 and lower_shadow >= 2 * body_abs and upper_shadow < body_abs:
+            # Check 3+ down bars context
+            down_count = 0
+            for i in range(2, min(6, len(c))):
+                if c[-i] < o[-i]:
+                    down_count += 1
+                else:
+                    break
+            if down_count >= 3:
+                score += 25
+
+        # Shooting Star (-25)
+        if body_abs > 0 and upper_shadow >= 2 * body_abs and lower_shadow < body_abs:
+            up_count = 0
+            for i in range(2, min(6, len(c))):
+                if c[-i] > o[-i]:
+                    up_count += 1
+                else:
+                    break
+            if up_count >= 3:
+                score -= 25
+
+        # Morning Star (+30) — 3-candle
+        if len(df) >= 3:
+            body_2 = c[-3] - o[-3]
+            body_1_abs = abs(c[-2] - o[-2])
+            hl_range_1 = h[-2] - lo[-2]
+            midpoint = o[-3] + body_2 / 2
+            if (body_2 < 0 and body > 0
+                    and hl_range_1 > 0 and body_1_abs < 0.1 * hl_range_1
+                    and c[-1] > midpoint):
+                score += 30
+
+        # Evening Star (-30)
+        if len(df) >= 3:
+            body_2 = c[-3] - o[-3]
+            body_1_abs = abs(c[-2] - o[-2])
+            hl_range_1 = h[-2] - lo[-2]
+            midpoint = o[-3] + body_2 / 2
+            if (body_2 > 0 and body < 0
+                    and hl_range_1 > 0 and body_1_abs < 0.1 * hl_range_1
+                    and c[-1] < midpoint):
+                score -= 30
+
+        # Doji (±15 based on shadow direction)
+        hl_range = h[-1] - lo[-1]
+        if hl_range > 0 and body_abs < 0.1 * hl_range:
+            if lower_shadow > 2 * upper_shadow:
+                score += 15  # Dragonfly Doji (bullish)
+            elif upper_shadow > 2 * lower_shadow:
+                score -= 15  # Gravestone Doji (bearish)
+
+        # Clamp
+        score = max(-100, min(100, score))
+        self._candle_score_cache[cache_key] = score
+        return score
+
+    def _get_fib_alignment(self, code: str) -> float:
+        """P3: Fibonacci level proximity score (0.0 to 1.0)."""
+        df = self._ohlcv_cache.get(code)
+        if df is None or len(df) < 30:
+            return 0.0
+
+        close = df['close'].values
+        high = df['high'].values
+        low = df['low'].values
+        price = close[-1]
+
+        # Find recent swing high and swing low (last 50 bars)
+        lookback = min(50, len(df))
+        recent_high = np.max(high[-lookback:])
+        recent_low = np.min(low[-lookback:])
+        swing_range = recent_high - recent_low
+        if swing_range <= 0:
+            return 0.0
+
+        # Key Fib levels (retracement from high)
+        fib_levels = [
+            recent_high - swing_range * 0.382,
+            recent_high - swing_range * 0.500,
+            recent_high - swing_range * 0.618,
+        ]
+
+        # Score = how close price is to nearest Fib level (within 2% = max score)
+        min_dist = min(abs(price - level) / price for level in fib_levels)
+        if min_dist < 0.02:
+            return 1.0 - (min_dist / 0.02)  # Linear decay from 1.0 at level to 0.0 at 2% away
+        return 0.0
+
+    def _get_chart_pattern_score(self, code: str) -> int:
+        """P3: Simple chart pattern detection from raw OHLCV."""
+        cache_key = f"cp_{code}_{self._backtest_date}"
+        if cache_key in self._candle_score_cache:  # reuse same cache dict
+            return self._candle_score_cache[cache_key]
+
+        df = self._ohlcv_cache.get(code)
+        if df is None or len(df) < 30:
+            return 0
+
+        score = 0
+        close = df['close'].values
+        high = df['high'].values
+        low = df['low'].values
+        volume = df['volume'].values if 'volume' in df.columns else None
+        price = close[-1]
+
+        # Double Bottom detection (simplified)
+        lookback = min(60, len(df))
+        lows_arr = low[-lookback:]
+        # Find two local minimums
+        min1_idx = np.argmin(lows_arr[:lookback // 2])
+        min2_idx = lookback // 2 + np.argmin(lows_arr[lookback // 2:])
+        min1 = lows_arr[min1_idx]
+        min2 = lows_arr[min2_idx]
+
+        if min1 > 0 and abs(min1 - min2) / min1 < 0.03:  # Within 3%
+            neckline = np.max(high[-lookback:][min1_idx:min2_idx]) if min2_idx > min1_idx else 0
+            if neckline > 0 and price > neckline:
+                score += 70  # Double bottom confirmed
+
+        # Bull Flag detection (simplified)
+        if len(df) >= 20:
+            atr = np.mean(high[-20:] - low[-20:])
+            # Check for impulse: 5-bar move > 2*ATR
+            impulse_move = close[-15] - close[-20] if len(df) >= 20 else 0
+            if atr > 0 and impulse_move > 2 * atr:
+                # Check consolidation: last 10 bars range < 50% of impulse
+                consol_range = np.max(high[-10:]) - np.min(low[-10:])
+                if consol_range < 0.5 * abs(impulse_move):
+                    # Check declining volume
+                    if volume is not None:
+                        vol_start = np.mean(volume[-15:-10])
+                        vol_end = np.mean(volume[-5:])
+                        if vol_end < vol_start:
+                            score += 60
+
+        score = max(-100, min(100, score))
+        self._candle_score_cache[cache_key] = score
+        return score
+
     def _scan_entries_momentum(self):
         """
         6-Phase 통합 파이프라인 (기존 Momentum Swing):
         Phase 0 (시장 체제) → Phase 4 (리스크 게이트) → 종목별 Phase 1→2→3
         """
+        # ── P4 RG6: SPY MA200 게이트 ──
+        if not self._strategy_allowed_by_rg6("momentum"):
+            self._phase_stats["rg6_spy_blocks"] += 1
+            return
+
         # ── Phase 0: 시장 체제 판단 ──
         self._update_market_regime()
         # BEAR 체제: 제한적 거래 허용 (max_positions=2, max_weight=5%)
@@ -2815,6 +3341,10 @@ class SimulationEngine:
 
         for w in self._watchlist:
             code = w["code"]
+
+            # B5: 종목별 레짐 기반 전략 필터링
+            if self._get_stock_affinity(code, "momentum") <= 0.0:
+                continue
 
             # STRONG_BULL 피라미딩: 기존 보유 종목도 조건부 추가 매수 허용
             is_pyramid = False
@@ -3005,7 +3535,9 @@ class SimulationEngine:
                 self._phase_stats["divergence_blocks"] += 1
                 continue
 
-
+            # MFI 베어리시 다이버전스 차단
+            if 'mfi_bear_div' in df.columns and df['mfi_bear_div'].iloc[-1] == 1:
+                continue
 
             # 시그널 강도 계산 (연속 스코어링)
             adx = trend.get("adx", 0)
@@ -3021,6 +3553,30 @@ class SimulationEngine:
             rsi_quality = max(0, int(10 - abs(rsi - 55) * 0.5))  # RSI 55 이상대
             volume_bonus = min(int((vol_ratio - 1.5) * 10), 10) if vol_ratio > 1.5 else 0
             strength = min(max(base_strength + trend_bonus + stage_bonus + rsi_quality + volume_bonus, 10), 100)
+
+            # P2: Candlestick pattern bonus (P5 conflict handles bearish penalty separately)
+            candle_score = self._get_candle_score(code)
+            if candle_score > 20:
+                strength += 10
+
+            # P3: Fibonacci alignment & chart pattern bonus
+            fib_score = self._get_fib_alignment(code)
+            if fib_score > 0.5:
+                strength += 8
+            chart_pattern_score = self._get_chart_pattern_score(code)
+            if chart_pattern_score > 50:
+                strength += 12
+
+            strength = min(max(strength, 10), 100)
+
+            # P5: Conflict resolution — bearish candle vs bullish momentum
+            strength = self._apply_signal_conflict(strength, candle_score)
+
+            # B8: Minimum strength filter to reduce ES1 fires (P5: adaptive threshold)
+            if strength < self._get_adaptive_threshold(45, "momentum"):
+                self._phase_stats.setdefault("b8_strength_blocks", 0)
+                self._phase_stats["b8_strength_blocks"] += 1
+                continue  # Skip weak signals that are likely to stop out
 
             current_price = self._current_prices.get(code, float(curr["close"]))
 
@@ -3067,6 +3623,11 @@ class SimulationEngine:
         SMC 4-Layer 스코어링 기반 진입 스캔.
         Phase 0 (시장 체제) + Phase 4 (리스크 게이트) → SMC 스코어링 → 매수 실행.
         """
+        # ── P4 RG6: SPY MA200 게이트 ──
+        if not self._strategy_allowed_by_rg6("smc"):
+            self._phase_stats["rg6_spy_blocks"] += 1
+            return
+
         # ── Phase 0: 시장 체제 판단 ──
         self._update_market_regime()
 
@@ -3090,6 +3651,9 @@ class SimulationEngine:
         for w in self._watchlist:
             code = w["code"]
 
+            # B5: 종목별 레짐 기반 전략 필터링
+            if self._get_stock_affinity(code, "smc") <= 0.0:
+                continue
 
             if code in self.positions and self.positions[code].status in ("ACTIVE", "PENDING"):
                 continue
@@ -3111,9 +3675,17 @@ class SimulationEngine:
             score_vol = self._score_volatility(df)
             score_obv = self._score_obv_signal(df)
             score_mom = self._score_momentum_signal(df)
-            total_score = score_smc + score_vol + score_obv + score_mom
 
-            if total_score < self._smc_entry_threshold:
+            # P2: Candlestick at OB/FVG zone confirmation
+            candle_score = self._get_candle_score(code)
+            candle_bonus = 15 if candle_score > 15 else 0  # Strong candlestick confirmation at SMC zone
+
+            total_score = score_smc + score_vol + score_obv + score_mom + candle_bonus
+
+            # P5: Conflict resolution — bearish candle vs bullish SMC score
+            total_score = self._apply_signal_conflict(total_score, candle_score)
+
+            if total_score < self._get_adaptive_threshold(self._smc_entry_threshold, "smc"):
                 self._phase_stats["phase3_no_primary"] += 1
                 continue
 
@@ -3340,7 +3912,9 @@ class SimulationEngine:
 
             # ATR SL: entry - ATR * mult (2일 쿨다운)
             elif atr_val and atr_val > 0:
-                atr_sl_price = entry_price - atr_val * self._smc_cfg.atr_sl_mult
+                adx_val = float(df.iloc[-1].get("adx", 25)) if df is not None and len(df) > 0 and "adx" in df.columns and pd.notna(df.iloc[-1].get("adx")) else 25.0
+                dynamic_sl_mult = self._get_dynamic_atr_mult(adx_val, mode='stop')
+                atr_sl_price = entry_price - atr_val * dynamic_sl_mult
                 floor_sl_price = entry_price * (1 + self.stop_loss_pct)
                 effective_sl = max(atr_sl_price, floor_sl_price)
 
@@ -3498,6 +4072,25 @@ class SimulationEngine:
         if ma200 > 0 and price > ma200:
             score += 5
 
+        # CRSI 과매도 보너스
+        if 'crsi' in df.columns:
+            crsi_val = float(curr.get("crsi", 50)) if pd.notna(curr.get("crsi")) else 50
+            if crsi_val < 15:
+                score += 25  # 매우 강한 과매도 확인
+
+        # Williams %R 확인
+        if 'williams_r' in df.columns and 'rsi' in df.columns:
+            wr_val = float(curr.get("williams_r", 0)) if pd.notna(curr.get("williams_r")) else 0
+            rsi_val = float(curr.get("rsi", 50)) if pd.notna(curr.get("rsi")) else 50
+            if wr_val < -80 and rsi_val < 40:
+                score += 10  # WR + RSI 이중 확인
+
+        # Z-score 통계적 과매도 확인
+        if 'zscore' in df.columns:
+            zscore_val = float(curr.get("zscore", 0)) if pd.notna(curr.get("zscore")) else 0
+            if zscore_val < -2.0:
+                score += 15  # 통계적 과매도 확인
+
         return min(score, self._mr_cfg.weight_signal)
 
     def _score_mr_volatility(self, df: pd.DataFrame) -> int:
@@ -3609,6 +4202,10 @@ class SimulationEngine:
         for w in self._watchlist:
             code = w["code"]
 
+            # B5: 종목별 레짐 기반 전략 필터링
+            if self._get_stock_affinity(code, "mean_reversion") <= 0.0:
+                continue
+
             # 기존 보유 종목 체크 — MR 수익 +3%, 3일+ 보유, 미스케일 → 추가 진입 허용
             is_scale = False
             if code in self.positions and self.positions[code].status in ("ACTIVE", "PENDING"):
@@ -3668,9 +4265,25 @@ class SimulationEngine:
             score_signal = self._score_mr_signal(df)
             score_vol = self._score_mr_volatility(df)
             score_confirm = self._score_mr_confirmation(df)
-            total_score = score_signal + score_vol + score_confirm
 
-            if total_score < self._mr_cfg.entry_threshold:
+            # P2: Reversal candle at oversold
+            candle_score = self._get_candle_score(code)
+            candle_bonus = 0
+            if candle_score > 15 and rsi < 40:  # Bullish candle at oversold
+                candle_bonus = 10
+
+            # P3: Fib alignment bonus (price at key retracement = good MR entry)
+            fib_bonus = 0
+            fib_score = self._get_fib_alignment(code)
+            if fib_score > 0.5:
+                fib_bonus = 8
+
+            total_score = score_signal + score_vol + score_confirm + candle_bonus + fib_bonus
+
+            # P5: Conflict resolution — bearish candle vs bullish MR score
+            total_score = self._apply_signal_conflict(total_score, candle_score)
+
+            if total_score < self._get_adaptive_threshold(self._mr_cfg.entry_threshold, "mean_reversion"):
                 self._phase_stats["phase3_no_primary"] += 1
                 continue
 
@@ -3983,6 +4596,12 @@ class SimulationEngine:
             if obv_ema5 > obv_ema20:
                 score += 10
 
+        # CMF 기관 매집 확인 보너스
+        if 'cmf' in df.columns:
+            cmf_val = float(df["cmf"].iloc[-1]) if pd.notna(df["cmf"].iloc[-1]) else 0
+            if cmf_val > 0.05:
+                score += 5  # 기관 매집 확인
+
         return min(score, self._brt_cfg.weight_volume)
 
     def _score_brt_momentum(self, df: pd.DataFrame) -> int:
@@ -4176,6 +4795,11 @@ class SimulationEngine:
         Pass 1: IDLE 티커 → Phase A 돌파 감지
         Pass 2: WAITING_RETEST 티커 → Phase B 리테스트 확인
         """
+        # ── P4 RG6: SPY MA200 게이트 ──
+        if not self._strategy_allowed_by_rg6("breakout_retest"):
+            self._phase_stats["rg6_spy_blocks"] += 1
+            return
+
         # ── Phase 0: 시장 체제 판단 ──
         self._update_market_regime()
 
@@ -4195,6 +4819,9 @@ class SimulationEngine:
         for w in self._watchlist:
             code = w["code"]
 
+            # B5: 종목별 레짐 기반 전략 필터링
+            if self._get_stock_affinity(code, "breakout_retest") <= 0.0:
+                continue
 
             if code in self.positions and self.positions[code].status in ("ACTIVE", "PENDING"):
                 continue
@@ -4328,11 +4955,23 @@ class SimulationEngine:
 
             # 존 스코어링
             zone_score = self._score_brt_retest_zone(df, state)
-            if zone_score < self._brt_cfg.retest_zone_threshold:
+
+            # P3: Chart pattern bonus for retest quality
+            chart_pattern_score = self._get_chart_pattern_score(code)
+            if chart_pattern_score > 40:
+                zone_score += 10
+
+            if zone_score < self._get_adaptive_threshold(self._brt_cfg.retest_zone_threshold, "breakout_retest"):
                 continue
 
             # ── 리테스트 진입 확인 ──
-            strength = min(state.get("breakout_score", 60) + zone_score // 2, 100)
+            # P2: Candlestick confirmation at retest zone
+            candle_score = self._get_candle_score(code)
+            candle_bonus = 10 if candle_score > 15 else 0
+            strength = min(state.get("breakout_score", 60) + zone_score // 2 + candle_bonus, 100)
+
+            # P5: Conflict resolution — bearish candle vs bullish BRT signal
+            strength = self._apply_signal_conflict(strength, candle_score)
             stock_name = self._stock_names.get(code, code)
 
             self._signal_counter += 1
@@ -4443,14 +5082,16 @@ class SimulationEngine:
                 exit_reason = "ES1 손절 -5%"
                 exit_type = "STOP_LOSS"
 
-            # ES_BRT_SL: ATR × 1.5 (2일 쿨다운)
+            # ES_BRT_SL: ATR × dynamic mult (ADX-based)
             elif atr_val and atr_val > 0:
-                atr_sl_price = entry_price - atr_val * self._brt_cfg.atr_sl_mult
+                adx_val = float(df.iloc[-1].get("adx", 25)) if df is not None and len(df) > 0 and "adx" in df.columns and pd.notna(df.iloc[-1].get("adx")) else 25.0
+                dynamic_sl_mult = self._get_dynamic_atr_mult(adx_val, mode='stop')
+                atr_sl_price = entry_price - atr_val * dynamic_sl_mult
                 floor_sl_price = entry_price * (1 + self.stop_loss_pct)
                 effective_sl = max(atr_sl_price, floor_sl_price)
 
                 if current_price <= effective_sl and effective_sl > floor_sl_price:
-                    exit_reason = "ES_BRT ATR SL (1.5x)"
+                    exit_reason = "ES_BRT ATR SL (dynamic)"
                     exit_type = "ATR_STOP_LOSS"
 
                 # ES_BRT_TP: ATR × 3.0
@@ -5754,7 +6395,19 @@ class SimulationEngine:
 
         # ── 신규 포지션 생성 ──
         pos_id = f"sim-pos-{signal.stock_code}"
-        stop_loss = effective_price * (1 + self.stop_loss_pct)
+        # B8: Adaptive initial stop — tighter for low-vol stocks, capped at -5%
+        _df_for_stop = self._ohlcv_cache.get(signal.stock_code)
+        _atr_val = 0.0
+        if _df_for_stop is not None and "atr" in _df_for_stop.columns and len(_df_for_stop) > 0:
+            _last_atr = _df_for_stop.iloc[-1].get("atr")
+            if pd.notna(_last_atr):
+                _atr_val = float(_last_atr)
+        if _atr_val > 0:
+            atr_stop = effective_price - 2.0 * _atr_val
+            # Use tighter of ATR-based or -5%
+            stop_loss = max(atr_stop, effective_price * 0.95)  # Never wider than -5%
+        else:
+            stop_loss = effective_price * (1 + self.stop_loss_pct)
         take_profit = effective_price * (1 + self.take_profit_pct)
 
         self.positions[signal.stock_code] = SimPosition(
@@ -5825,8 +6478,37 @@ class SimulationEngine:
             return self._check_exits_defensive()
         return self._check_exits_momentum()
 
+    def _portfolio_mdd_guard(self):
+        """DD 12-15% 구간: 스탑 타이트닝, DD >= 15%: 비방어 포지션 즉시 강제 청산."""
+        equity = self._get_total_equity()
+        dd_pct = (equity - self._peak_equity) / self._peak_equity if self._peak_equity > 0 else 0
+
+        if dd_pct <= -0.15:
+            # DD >= 15%: 비방어 포지션 즉시 강제 청산 (ES7 PnL gate 우회)
+            codes_to_remove = []
+            for code, pos in list(self.positions.items()):
+                if pos.status == "ACTIVE" and pos.strategy_tag != "defensive":
+                    sell_price = pos.current_price if pos.current_price > 0 else pos.entry_price
+                    self._execute_sell(pos, sell_price, "MDD_GUARD -15% 강제청산", "MDD_GUARD")
+                    codes_to_remove.append(code)
+            for code in codes_to_remove:
+                if code in self.positions:
+                    del self.positions[code]
+            if codes_to_remove:
+                self._phase_stats["es_mdd_guard"] += 1
+        elif dd_pct <= -0.12:
+            # Tighten all active stops to -2% from current price
+            for code, pos in self.positions.items():
+                if pos.status == "ACTIVE":
+                    tight_stop = pos.current_price * 0.98
+                    if tight_stop > pos.stop_loss:
+                        pos.stop_loss = tight_stop
+
     def _check_exits_multi(self):
         """멀티 전략 모드: 각 포지션의 strategy_tag에 따라 올바른 청산 로직 라우팅."""
+        # P0: Portfolio MDD Guard — DD 기반 강제 청산/스탑 타이트닝
+        self._portfolio_mdd_guard()
+
         # CRISIS 레짐: 비방어 포지션 즉시 청산 대상 지정
         overrides = REGIME_OVERRIDES.get(self._market_regime, {})
         if overrides.get("crisis_exit_immediate"):
@@ -5930,6 +6612,14 @@ class SimulationEngine:
                 else:
                     trail_mult = 3.0   # 기본: 3×ATR, 플로어 -4%
                     trail_floor = self.trailing_stop_pct
+            # 동적 ATR 배수 적용 (ADX 강도 기반 trail_mult 조정)
+            if df is not None and len(df) > 0 and "adx" in df.columns:
+                _adx_val = float(df.iloc[-1].get("adx", 25)) if pd.notna(df.iloc[-1].get("adx")) else 25.0
+                _dyn_trail = self._get_dynamic_atr_mult(_adx_val, mode='trail')
+                # 동적 배수가 현재 trail_mult보다 크면 (더 넓은 보호) → 적용
+                if _dyn_trail > trail_mult:
+                    trail_mult = _dyn_trail
+
             # 글로벌 레짐별 트레일링 오버라이드 (STRONG_BULL: 2.0×ATR 타이트)
             _ro = REGIME_OVERRIDES.get(self._market_regime, {})
             if "trail_atr_mult" in _ro:
@@ -6218,6 +6908,18 @@ class SimulationEngine:
         )
         if not self._replay_mode and len(self.closed_trades) > 200:
             self.closed_trades = self.closed_trades[-200:]
+
+        # B7: Per-stock regime performance tracking
+        _entry_stock_regime = getattr(pos, "stock_regime", "NEUTRAL")
+        _sr_counts = self._phase_stats.setdefault("_stock_regime_pnls", {})
+        if _entry_stock_regime not in _sr_counts:
+            _sr_counts[_entry_stock_regime] = {"wins": 0, "losses": 0, "total_pnl": 0.0, "count": 0}
+        _sr_counts[_entry_stock_regime]["count"] += 1
+        _sr_counts[_entry_stock_regime]["total_pnl"] += pnl_pct_val
+        if pnl_pct_val > 0:
+            _sr_counts[_entry_stock_regime]["wins"] += 1
+        else:
+            _sr_counts[_entry_stock_regime]["losses"] += 1
 
         # Phase 3.4: Dynamic Kelly — 전략별 거래 결과 기록
         if self._strategy_allocator is not None:

@@ -84,12 +84,12 @@ class RebalanceManager:
         old_codes = self._current_watchlist_codes
 
         # 추가/제거 종목
-        added = list(new_codes - old_codes)
-        removed = list(old_codes - new_codes)
+        added = sorted(new_codes - old_codes)
+        removed = sorted(old_codes - new_codes)
 
         # 보유 중인 탈락 종목 → ES7 청산 대상
         active_codes = set(active_positions.keys()) if active_positions else set()
-        force_exit = list(active_codes & set(removed))
+        force_exit = sorted(active_codes & set(removed))
 
         # 모멘텀 점수 수집 (리포트용)
         scores: Dict[str, float] = {}
@@ -125,6 +125,48 @@ class RebalanceManager:
     def tick(self):
         """매 거래일 호출. 리밸런스 카운터 증가."""
         self._trading_day_count += 1
+
+    def reset_counter(self):
+        """거부 시 카운터 리셋 — 다음 주기까지 대기."""
+        self._trading_day_count = 0
+
+    def apply_scan_result(
+        self,
+        scan_result: list,
+        active_positions: dict,
+    ) -> "RebalanceEvent":
+        """PAPER/LIVE: 스캔 결과를 받아 상태 변경 (메인 스레드에서 호출).
+
+        execute_rebalance()의 상태 변경 부분만 분리한 버전.
+        CPU-intensive scan()은 별도 스레드에서 실행하고,
+        이 메서드는 이벤트 루프 스레드에서 호출하여 race condition을 방지한다.
+        """
+        new_codes = {w["code"] for w in scan_result}
+        old_codes = self._current_watchlist_codes
+
+        added = sorted(new_codes - old_codes)
+        removed = sorted(old_codes - new_codes)
+        force_exit = sorted(set(active_positions.keys()) & set(removed))
+
+        # 상태 업데이트
+        self._current_watchlist = scan_result
+        self._current_watchlist_codes = new_codes
+        self._cycle_count += 1
+        self._trading_day_count = 0
+        self._is_initialized = True  # 없으면 무한 리밸런스 루프
+
+        event = RebalanceEvent(
+            date="",
+            cycle_number=self._cycle_count,
+            stocks_added=added,
+            stocks_removed=removed,
+            positions_force_exited=force_exit,
+            new_watchlist=scan_result,
+            total_scanned=len(scan_result),
+            passed_prefilter=len(scan_result),
+        )
+        self._history.append(event)
+        return event
 
     def get_current_watchlist(self) -> List[Dict[str, str]]:
         """현재 활성 워치리스트 반환."""
