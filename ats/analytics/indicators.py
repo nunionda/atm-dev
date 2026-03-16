@@ -74,6 +74,14 @@ def calculate_basic_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = calculate_fibonacci_levels(df)       # P3: Fibonacci levels
     df = detect_chart_patterns(df)            # P3: Chart patterns
 
+    # B1-B5: Additional technical indicators (Connors RSI, Williams %R, MFI, Z-score, CMF)
+    df = calculate_connors_rsi(df)
+    df = calculate_williams_r(df)
+    if 'volume' in df.columns:
+        df = calculate_mfi(df)
+        df = calculate_cmf(df)
+    df = calculate_zscore(df)
+
     # NaN 값을 None 또는 특정 값으로 처리하기 (JSON 직렬화를 위해)
     df = df.replace({np.nan: None})
     return df
@@ -526,6 +534,90 @@ def calculate_fibonacci_levels(df: pd.DataFrame, swing_length: int = 3) -> pd.Da
     return df
 
 
+def _detect_triangle(high: np.ndarray, low: np.ndarray, close: np.ndarray,
+                     atr: float, i: int, lookback: int = 30) -> tuple:
+    """
+    B8: Triangle pattern detector (Symmetric/Ascending/Descending).
+    Uses linear regression slopes on recent highs/lows.
+    Returns (pattern_name, score, None) or (None, 0, None).
+    """
+    if i < lookback:
+        return None, 0, None
+
+    w_high = high[i - lookback: i].astype(float)
+    w_low  = low[i - lookback: i].astype(float)
+    x = np.arange(lookback, dtype=float)
+
+    if atr <= 0:
+        return None, 0, None
+
+    # Linear regression slopes (ATR-normalized)
+    upper_slope = float(np.polyfit(x, w_high, 1)[0]) / atr
+    lower_slope = float(np.polyfit(x, w_low,  1)[0]) / atr
+
+    threshold = 0.015  # ATR-normalized slope threshold
+
+    if upper_slope < -threshold and lower_slope > threshold:
+        return "SYMMETRIC_TRIANGLE", 55, None   # converging — neutral breakout pending
+    elif abs(upper_slope) <= threshold and lower_slope > threshold:
+        return "ASCENDING_TRIANGLE", 60, None   # bullish (flat top, rising support)
+    elif upper_slope < -threshold and abs(lower_slope) <= threshold:
+        return "DESCENDING_TRIANGLE", -50, None # bearish (declining top, flat support)
+
+    return None, 0, None
+
+
+def _detect_cup_and_handle(close: np.ndarray, high: np.ndarray, low: np.ndarray,
+                            volume, i: int, lookback: int = 60) -> tuple:
+    """
+    B7: Cup & Handle pattern detector for a single bar index i.
+    Cup depth: 15-35% below left rim. Handle retracement < 50% of cup.
+    Returns (pattern_name, score, price_target) or (None, 0, None).
+    """
+    if i < lookback:
+        return None, 0, None
+
+    window_high = high[i - lookback: i]
+    window_low  = low[i - lookback: i]
+
+    left_rim_rel = int(np.argmax(window_high))
+    left_rim = float(window_high[left_rim_rel])
+
+    cup_bottom_rel = int(np.argmin(window_low[left_rim_rel:]))
+    cup_bottom = float(window_low[left_rim_rel + cup_bottom_rel])
+
+    if left_rim <= 0:
+        return None, 0, None
+
+    cup_depth_pct = (left_rim - cup_bottom) / left_rim
+    if not (0.15 <= cup_depth_pct <= 0.40):
+        return None, 0, None
+
+    # Handle: last 5-25 bars should show smaller range than cup
+    handle_len = min(25, i)
+    handle_high = np.max(high[i - handle_len: i])
+    handle_low  = np.min(low[i - handle_len: i])
+    cup_range = left_rim - cup_bottom
+    handle_range = handle_high - handle_low
+    if cup_range <= 0 or handle_range > 0.5 * cup_range:
+        return None, 0, None
+
+    # Breakout: current close near or above left rim (within 3%)
+    if close[i] < left_rim * 0.97:
+        return None, 0, None
+
+    # Volume: handle should have lower volume than cup (optional check)
+    vol_ok = True
+    if volume is not None:
+        cup_vol_mean = np.mean(volume[i - lookback: i - handle_len]) if (i - lookback) < (i - handle_len) else 1.0
+        handle_vol_mean = np.mean(volume[i - handle_len: i]) if handle_len > 0 else 1.0
+        vol_ok = handle_vol_mean < cup_vol_mean
+
+    score = 70 if vol_ok else 55
+    target = close[i] + cup_range  # price target = cup depth above breakout
+    return "CUP_AND_HANDLE", score, target
+
+
 def detect_chart_patterns(df: pd.DataFrame, swing_length: int = 3) -> pd.DataFrame:
     """
     P3: Classic chart pattern detection using swing points.
@@ -684,9 +776,165 @@ def detect_chart_patterns(df: pd.DataFrame, swing_length: int = 3) -> pd.DataFra
                             best_score = -60
                             best_target = target
 
+        # B7: Cup & Handle
+        ch_name, ch_score, ch_target = _detect_cup_and_handle(close, high, low, volume, i)
+        if abs(ch_score) > abs(best_score):
+            best_pattern = ch_name
+            best_score = ch_score
+            best_target = ch_target
+
+        # B8: Triangle
+        atr = atr_arr[i] if i < len(atr_arr) else 0.0
+        tri_name, tri_score, tri_target = _detect_triangle(high, low, close, atr, i)
+        if tri_name and abs(tri_score) > abs(best_score):
+            best_pattern = tri_name
+            best_score = tri_score
+            best_target = tri_target
+
         if best_pattern:
             df.iat[i, df.columns.get_loc('chart_pattern')] = best_pattern
             df.iat[i, df.columns.get_loc('chart_pattern_score')] = best_score
             df.iat[i, df.columns.get_loc('chart_pattern_target')] = best_target
 
+    return df
+
+
+# ============================================================
+# B1-B5: Additional Technical Indicators
+# ============================================================
+
+def calculate_connors_rsi(df: pd.DataFrame, rsi_period: int = 3, streak_period: int = 2, rank_period: int = 100) -> pd.DataFrame:
+    """
+    B1: Connors RSI — composite momentum/reversion indicator.
+    Components:
+      1. RSI(3) — fast price RSI
+      2. Streak RSI(2) — RSI of consecutive up/down day count
+      3. PercentRank(100) — percentile rank of today's 1-day return in last 100 bars
+    Output columns: crsi (float 0-100), crsi_oversold (bool: crsi < 15), crsi_overbought (bool: crsi > 80)
+    """
+    df = df.copy()
+    close = df['close'].astype(float)
+
+    # Component 1: Fast RSI(3)
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = (-delta).clip(lower=0)
+    avg_gain = gain.ewm(com=rsi_period - 1, min_periods=rsi_period).mean()
+    avg_loss = loss.ewm(com=rsi_period - 1, min_periods=rsi_period).mean()
+    rs1 = avg_gain / avg_loss.replace(0, np.finfo(float).eps)
+    rsi3 = 100 - (100 / (1 + rs1))
+
+    # Component 2: Streak RSI
+    # Count consecutive up (+) or down (-) days
+    direction = np.sign(close.diff()).fillna(0)
+    streak = pd.Series(0.0, index=df.index)
+    current_streak = 0.0
+    for idx in range(len(direction)):
+        d = direction.iloc[idx]
+        if d > 0:
+            current_streak = max(0, current_streak) + 1
+        elif d < 0:
+            current_streak = min(0, current_streak) - 1
+        else:
+            current_streak = 0.0
+        streak.iloc[idx] = current_streak
+
+    # Apply RSI(2) to streak values
+    s_delta = streak.diff()
+    s_gain = s_delta.clip(lower=0)
+    s_loss = (-s_delta).clip(lower=0)
+    s_avg_gain = s_gain.ewm(com=streak_period - 1, min_periods=streak_period).mean()
+    s_avg_loss = s_loss.ewm(com=streak_period - 1, min_periods=streak_period).mean()
+    rs2 = s_avg_gain / s_avg_loss.replace(0, np.finfo(float).eps)
+    streak_rsi = 100 - (100 / (1 + rs2))
+
+    # Component 3: PercentRank(100) — where today's return ranks vs last 100
+    daily_ret = close.pct_change()
+    percent_rank = daily_ret.rolling(rank_period).apply(
+        lambda x: float((x[:-1] < x[-1]).sum()) / max(len(x) - 1, 1) * 100,
+        raw=True
+    )
+
+    # Composite: average of 3 components
+    crsi = (rsi3 + streak_rsi + percent_rank) / 3.0
+    crsi = crsi.clip(0, 100)
+
+    df['crsi'] = crsi
+    df['crsi_oversold'] = crsi < 15
+    df['crsi_overbought'] = crsi > 80
+    return df
+
+
+def calculate_williams_r(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+    """
+    B2: Williams %R — momentum/mean-reversion oscillator.
+    Range: -100 to 0. Oversold < -80, Overbought > -20.
+    Output columns: williams_r (float), williams_r_oversold (bool: wr < -80)
+    """
+    df = df.copy()
+    highest_high = df['high'].rolling(period).max()
+    lowest_low = df['low'].rolling(period).min()
+    denom = (highest_high - lowest_low).replace(0, np.finfo(float).eps)
+    df['williams_r'] = (highest_high - df['close']) / denom * -100
+    df['williams_r_oversold'] = df['williams_r'] < -80
+    return df
+
+
+def calculate_mfi(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+    """
+    B3: Money Flow Index (MFI) — volume-weighted RSI.
+    Oversold < 20, Overbought > 80.
+    Also detects bearish divergence: price at 20-bar high but MFI declining.
+    Output columns: mfi (float 0-100), mfi_bear_div (int 0/1)
+    """
+    df = df.copy()
+    tp = (df['high'] + df['low'] + df['close']) / 3.0
+    raw_mf = tp * df['volume']
+
+    # Positive / Negative money flow
+    pos_mf = raw_mf.where(tp > tp.shift(1), 0.0)
+    neg_mf = raw_mf.where(tp < tp.shift(1), 0.0)
+
+    pos_sum = pos_mf.rolling(period).sum()
+    neg_sum = neg_mf.rolling(period).sum().replace(0, np.finfo(float).eps)
+
+    mfr = pos_sum / neg_sum
+    df['mfi'] = 100 - (100 / (1 + mfr))
+    df['mfi'] = df['mfi'].clip(0, 100)
+
+    # Bearish divergence: price at new 20-bar high but MFI trending down
+    price_new_high = df['close'] > df['close'].rolling(20).max().shift(1)
+    mfi_declining = df['mfi'] < df['mfi'].shift(5)
+    df['mfi_bear_div'] = (price_new_high & mfi_declining).astype(int)
+
+    return df
+
+
+def calculate_zscore(df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
+    """
+    B4: Rolling Z-score normalization of price.
+    Z < -2.0 = statistically oversold (MR entry signal)
+    Z > +2.0 = statistically overbought (MR exit / short signal)
+    Output columns: zscore (float)
+    """
+    df = df.copy()
+    roll_mean = df['close'].rolling(period).mean()
+    roll_std = df['close'].rolling(period).std().replace(0, np.finfo(float).eps)
+    df['zscore'] = (df['close'] - roll_mean) / roll_std
+    return df
+
+
+def calculate_cmf(df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
+    """
+    B5: Chaikin Money Flow — institutional accumulation/distribution.
+    CMF > 0.05 = bullish (buying pressure), < -0.05 = bearish.
+    Output columns: cmf (float -1 to +1)
+    """
+    df = df.copy()
+    hl_range = (df['high'] - df['low']).replace(0, np.finfo(float).eps)
+    mfm = ((df['close'] - df['low']) - (df['high'] - df['close'])) / hl_range
+    mfm = mfm.fillna(0.0)
+    vol_sum = df['volume'].rolling(period).sum().replace(0, np.finfo(float).eps)
+    df['cmf'] = (mfm * df['volume']).rolling(period).sum() / vol_sum
+    df['cmf'] = df['cmf'].clip(-1, 1)
     return df
