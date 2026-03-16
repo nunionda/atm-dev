@@ -3079,8 +3079,12 @@ class SimulationEngine:
             if dd_pct < -0.05:
                 adjustment += int(abs(dd_pct) * 50)  # -10% DD → +5 threshold
 
-        # Cap adjustment at +20 to avoid blocking all entries
-        adjustment = min(adjustment, 20)
+        # CRISIS 레짐: 진입 임계값 +15 (거래 수 축소, 226→목표 80건 이하)
+        if self._market_regime == "CRISIS":
+            adjustment += 15
+
+        # Cap adjustment at +30 to avoid blocking all entries
+        adjustment = min(adjustment, 30)
 
         if adjustment > 0:
             self._phase_stats["p5_threshold_adjustments"] += 1
