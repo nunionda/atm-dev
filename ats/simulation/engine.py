@@ -3501,12 +3501,10 @@ class SimulationEngine:
             volume_bonus = min(int((vol_ratio - 1.5) * 10), 10) if vol_ratio > 1.5 else 0
             strength = min(max(base_strength + trend_bonus + stage_bonus + rsi_quality + volume_bonus, 10), 100)
 
-            # P2: Candlestick pattern bonus
+            # P2: Candlestick pattern bonus (P5 conflict handles bearish penalty separately)
             candle_score = self._get_candle_score(code)
             if candle_score > 20:
                 strength += 10
-            elif candle_score < -20:
-                strength -= 5  # Bearish candle near entry = reduce confidence
 
             # P3: Fibonacci alignment & chart pattern bonus
             fib_score = self._get_fib_alignment(code)
@@ -6399,16 +6397,23 @@ class SimulationEngine:
         return self._check_exits_momentum()
 
     def _portfolio_mdd_guard(self):
-        """DD 12-15% 구간: 스탑 타이트닝, DD >= 15%: 비방어 포지션 강제 청산."""
+        """DD 12-15% 구간: 스탑 타이트닝, DD >= 15%: 비방어 포지션 즉시 강제 청산."""
         equity = self._get_total_equity()
         dd_pct = (equity - self._peak_equity) / self._peak_equity if self._peak_equity > 0 else 0
 
         if dd_pct <= -0.15:
-            # Force liquidate all non-defensive positions
+            # DD >= 15%: 비방어 포지션 즉시 강제 청산 (ES7 PnL gate 우회)
+            codes_to_remove = []
             for code, pos in list(self.positions.items()):
                 if pos.status == "ACTIVE" and pos.strategy_tag != "defensive":
-                    self._rebalance_exit_codes.add(code)
-            self._phase_stats["es_mdd_guard"] += 1
+                    sell_price = pos.current_price if pos.current_price > 0 else pos.entry_price
+                    self._execute_sell(pos, sell_price, "MDD_GUARD -15% 강제청산", "MDD_GUARD")
+                    codes_to_remove.append(code)
+            for code in codes_to_remove:
+                if code in self.positions:
+                    del self.positions[code]
+            if codes_to_remove:
+                self._phase_stats["es_mdd_guard"] += 1
         elif dd_pct <= -0.12:
             # Tighten all active stops to -2% from current price
             for code, pos in self.positions.items():
