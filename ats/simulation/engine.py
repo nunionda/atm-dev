@@ -2531,6 +2531,21 @@ class SimulationEngine:
 
         return False
 
+    def _get_dynamic_atr_mult(self, adx: float, mode: str = 'stop') -> float:
+        """ADX 강도에 따라 ATR 배수 동적 조정."""
+        if mode == 'stop':
+            if adx < 20:
+                return 2.5   # 레인지: 와이드 스탑
+            elif adx < 35:
+                return 2.0   # 보통 추세: 표준
+            else:
+                return 1.5   # 강한 추세: 타이트
+        else:  # trail
+            if adx > 35:
+                return 3.5   # 강한 추세에서 위너 보호
+            else:
+                return 2.0   # 표준 트레일링
+
     def _detect_support_resistance(self, df: pd.DataFrame, lookback: int = 40) -> dict:
         """최근 N봉의 스윙 포인트를 클러스터링하여 S/R 레벨 반환.
         RANGE_BOUND 레짐에서 MR 진입 시 가격이 지지선 근처인지 확인.
@@ -3484,7 +3499,9 @@ class SimulationEngine:
                 self._phase_stats["divergence_blocks"] += 1
                 continue
 
-
+            # MFI 베어리시 다이버전스 차단
+            if 'mfi_bear_div' in df.columns and df['mfi_bear_div'].iloc[-1] == 1:
+                continue
 
             # 시그널 강도 계산 (연속 스코어링)
             adx = trend.get("adx", 0)
@@ -3859,7 +3876,9 @@ class SimulationEngine:
 
             # ATR SL: entry - ATR * mult (2일 쿨다운)
             elif atr_val and atr_val > 0:
-                atr_sl_price = entry_price - atr_val * self._smc_cfg.atr_sl_mult
+                adx_val = float(df.iloc[-1].get("adx", 25)) if df is not None and len(df) > 0 and "adx" in df.columns and pd.notna(df.iloc[-1].get("adx")) else 25.0
+                dynamic_sl_mult = self._get_dynamic_atr_mult(adx_val, mode='stop')
+                atr_sl_price = entry_price - atr_val * dynamic_sl_mult
                 floor_sl_price = entry_price * (1 + self.stop_loss_pct)
                 effective_sl = max(atr_sl_price, floor_sl_price)
 
@@ -4016,6 +4035,25 @@ class SimulationEngine:
         ma200 = float(curr.get("ma200", 0)) if pd.notna(curr.get("ma200")) else 0
         if ma200 > 0 and price > ma200:
             score += 5
+
+        # CRSI 과매도 보너스
+        if 'crsi' in df.columns:
+            crsi_val = float(curr.get("crsi", 50)) if pd.notna(curr.get("crsi")) else 50
+            if crsi_val < 15:
+                score += 25  # 매우 강한 과매도 확인
+
+        # Williams %R 확인
+        if 'williams_r' in df.columns and 'rsi' in df.columns:
+            wr_val = float(curr.get("williams_r", 0)) if pd.notna(curr.get("williams_r")) else 0
+            rsi_val = float(curr.get("rsi", 50)) if pd.notna(curr.get("rsi")) else 50
+            if wr_val < -80 and rsi_val < 40:
+                score += 10  # WR + RSI 이중 확인
+
+        # Z-score 통계적 과매도 확인
+        if 'zscore' in df.columns:
+            zscore_val = float(curr.get("zscore", 0)) if pd.notna(curr.get("zscore")) else 0
+            if zscore_val < -2.0:
+                score += 15  # 통계적 과매도 확인
 
         return min(score, self._mr_cfg.weight_signal)
 
@@ -4522,6 +4560,12 @@ class SimulationEngine:
             if obv_ema5 > obv_ema20:
                 score += 10
 
+        # CMF 기관 매집 확인 보너스
+        if 'cmf' in df.columns:
+            cmf_val = float(df["cmf"].iloc[-1]) if pd.notna(df["cmf"].iloc[-1]) else 0
+            if cmf_val > 0.05:
+                score += 5  # 기관 매집 확인
+
         return min(score, self._brt_cfg.weight_volume)
 
     def _score_brt_momentum(self, df: pd.DataFrame) -> int:
@@ -5002,14 +5046,16 @@ class SimulationEngine:
                 exit_reason = "ES1 손절 -5%"
                 exit_type = "STOP_LOSS"
 
-            # ES_BRT_SL: ATR × 1.5 (2일 쿨다운)
+            # ES_BRT_SL: ATR × dynamic mult (ADX-based)
             elif atr_val and atr_val > 0:
-                atr_sl_price = entry_price - atr_val * self._brt_cfg.atr_sl_mult
+                adx_val = float(df.iloc[-1].get("adx", 25)) if df is not None and len(df) > 0 and "adx" in df.columns and pd.notna(df.iloc[-1].get("adx")) else 25.0
+                dynamic_sl_mult = self._get_dynamic_atr_mult(adx_val, mode='stop')
+                atr_sl_price = entry_price - atr_val * dynamic_sl_mult
                 floor_sl_price = entry_price * (1 + self.stop_loss_pct)
                 effective_sl = max(atr_sl_price, floor_sl_price)
 
                 if current_price <= effective_sl and effective_sl > floor_sl_price:
-                    exit_reason = "ES_BRT ATR SL (1.5x)"
+                    exit_reason = "ES_BRT ATR SL (dynamic)"
                     exit_type = "ATR_STOP_LOSS"
 
                 # ES_BRT_TP: ATR × 3.0
@@ -6530,6 +6576,14 @@ class SimulationEngine:
                 else:
                     trail_mult = 3.0   # 기본: 3×ATR, 플로어 -4%
                     trail_floor = self.trailing_stop_pct
+            # 동적 ATR 배수 적용 (ADX 강도 기반 trail_mult 조정)
+            if df is not None and len(df) > 0 and "adx" in df.columns:
+                _adx_val = float(df.iloc[-1].get("adx", 25)) if pd.notna(df.iloc[-1].get("adx")) else 25.0
+                _dyn_trail = self._get_dynamic_atr_mult(_adx_val, mode='trail')
+                # 동적 배수가 현재 trail_mult보다 크면 (더 넓은 보호) → 적용
+                if _dyn_trail > trail_mult:
+                    trail_mult = _dyn_trail
+
             # 글로벌 레짐별 트레일링 오버라이드 (STRONG_BULL: 2.0×ATR 타이트)
             _ro = REGIME_OVERRIDES.get(self._market_regime, {})
             if "trail_atr_mult" in _ro:
