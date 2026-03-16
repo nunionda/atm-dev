@@ -943,6 +943,11 @@ class SimulationEngine:
         self._index_ohlcv: List[Dict] = []   # [{open, high, low, close, volume}, ...]
         self._index_trend: Dict = {}          # _analyze_index_trend() 결과 캐시
         self._index_trend_history: List[Dict] = []  # 추세 변경 이력 (max 20)
+        # Index Trend 스무딩 (가중치 플리핑 방지)
+        self._index_trend_confirmed: str = "NEUTRAL"  # 확인된 추세
+        self._index_trend_candidate: str = "NEUTRAL"  # 전환 후보
+        self._index_trend_candidate_days: int = 0     # 후보 연속 일수
+        self._index_trend_confirm_days: int = 3       # 전환 확인 필요 일수 (최적)
 
         # P4: SPY MA200 gate — SPY(^GSPC) 200일 이평선 하회 시 공격적 전략 차단
         self._spy_below_ma200: bool = False
@@ -1769,6 +1774,29 @@ class SimulationEngine:
 
         return self._market_regime  # 아직 미확인 → 현재 유지
 
+    def _smooth_index_trend(self, raw_trend: str) -> str:
+        """Index Trend 스무딩: N일 연속 동일 신호 시에만 가중치 전환.
+
+        _smooth_regime()과 동일한 로직이지만 지수 추세(가중치 드라이버)에 적용.
+        진단 결과: 스무딩 미적용 시 250일 중 20+회 전환 → 전략 가중치 불안정 → Sharpe 손실.
+        """
+        if raw_trend == self._index_trend_confirmed:
+            # 현재 확인된 추세와 동일 → 후보 리셋
+            self._index_trend_candidate = raw_trend
+            self._index_trend_candidate_days = 0
+            return self._index_trend_confirmed
+
+        if raw_trend == self._index_trend_candidate:
+            self._index_trend_candidate_days += 1
+            if self._index_trend_candidate_days >= self._index_trend_confirm_days:
+                self._index_trend_confirmed = raw_trend
+                return raw_trend  # 확인 완료 → 추세 전환
+        else:
+            self._index_trend_candidate = raw_trend
+            self._index_trend_candidate_days = 1
+
+        return self._index_trend_confirmed  # 미확인 → 현재 유지
+
     def _update_market_regime(self):
         """레짐 감지 + 레짐 고정 모드 오버라이드.
 
@@ -1986,7 +2014,11 @@ class SimulationEngine:
         )
 
         self._index_trend = self._analyze_index_trend()
-        trend = self._index_trend.get("trend", "NEUTRAL")
+        raw_trend = self._index_trend.get("trend", "NEUTRAL")
+
+        # ── Index Trend 스무딩: N일 연속 동일 신호 시에만 전환 ──
+        # 가중치 플리핑 방지 (진단: 250일 중 20+회 전환 → Sharpe 손실)
+        trend = self._smooth_index_trend(raw_trend)
 
         weights = INDEX_TREND_STRATEGY_WEIGHTS.get(
             trend, INDEX_TREND_STRATEGY_WEIGHTS["NEUTRAL"]
