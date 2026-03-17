@@ -36,7 +36,7 @@ def analyze_index_trend(market: str):
     start = end - timedelta(days=400)
     print(f"\n  데이터 기간: {start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}")
 
-    df = yf.download(index_symbol, start=start, end=end, progress=False, auto_adjust=True)
+    df = yf.download(index_symbol, start=start, end=end, progress=False, auto_adjust=False)
     if df.empty:
         print(f"  ❌ {index_symbol} 데이터 다운로드 실패")
         return None
@@ -116,7 +116,7 @@ def analyze_index_trend(market: str):
 
     # ── VIX ──
     print(f"\n  🌡️  변동성 분석:")
-    vix_data = yf.download("^VIX", start=start, end=end, progress=False, auto_adjust=True)
+    vix_data = yf.download("^VIX", start=start, end=end, progress=False, auto_adjust=False)
     if isinstance(vix_data.columns, pd.MultiIndex):
         vix_data.columns = [c[0] if isinstance(c, tuple) else c for c in vix_data.columns]
 

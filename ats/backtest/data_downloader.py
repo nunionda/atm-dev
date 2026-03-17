@@ -87,7 +87,7 @@ def download_and_cache(
         if len(tickers) == 1:
             data = yf.download(
                 tickers[0], start=start_fmt, end=end_fmt,
-                interval="1d", progress=True, auto_adjust=True,
+                interval="1d", progress=True, auto_adjust=False,
             )
             # 단일 티커: MultiIndex 없음
             if not data.empty:
@@ -95,7 +95,7 @@ def download_and_cache(
         else:
             data = yf.download(
                 " ".join(tickers), start=start_fmt, end=end_fmt,
-                interval="1d", progress=True, auto_adjust=True,
+                interval="1d", progress=True, auto_adjust=False,
             )
             if not data.empty:
                 for w in to_download:
@@ -303,7 +303,7 @@ def _download_single(
         logger.info("Individual download: %s (%s)", w["code"], w["ticker"])
         data = yf.download(
             w["ticker"], start=start_fmt, end=end_fmt,
-            interval="1d", progress=False, auto_adjust=True,
+            interval="1d", progress=False, auto_adjust=False,
         )
         if not data.empty:
             _save_single(data, w, cache_dir, result)

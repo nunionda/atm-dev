@@ -20,6 +20,7 @@ import {
   type Time,
 } from 'lightweight-charts';
 import type { ESFCandle, VWATRZone } from '../../lib/api';
+import { updateAxisLabels, type AxisLabelItem } from '../../lib/axisLabelUtils';
 
 // ── Types ──
 
@@ -119,7 +120,7 @@ const SHARED_CHART_OPTIONS = {
   },
   rightPriceScale: {
     borderColor: 'rgba(255, 255, 255, 0.06)',
-    minimumWidth: 72,
+    minimumWidth: 100,
   },
 };
 
@@ -131,87 +132,7 @@ const SUBCHART_OPTIONS = {
   },
 };
 
-// ── Right-axis label deconfliction overlay ──
-interface AxisLabelItem {
-  price: number;
-  text: string;
-  color: string;
-}
-
-function updateAxisLabels(
-  series: ISeriesApi<SeriesType>,
-  items: AxisLabelItem[],
-  overlay: HTMLDivElement,
-  chartHeight: number,
-) {
-  const MIN_GAP = 16;
-  const LABEL_H = 14;
-
-  const mapped = items
-    .map((item) => {
-      const y = series.priceToCoordinate(item.price);
-      return { ...item, origY: (y ?? -1) as number, labelY: (y ?? -1) as number };
-    })
-    .filter((r) => r.origY >= 0 && r.origY <= chartHeight)
-    .sort((a, b) => a.origY - b.origY);
-
-  // Downward pass — push overlapping labels down
-  for (let i = 1; i < mapped.length; i++) {
-    if (mapped[i].labelY - mapped[i - 1].labelY < MIN_GAP) {
-      mapped[i].labelY = mapped[i - 1].labelY + MIN_GAP;
-    }
-  }
-  // Upward pass — fix any that got pushed below bottom
-  for (let i = mapped.length - 2; i >= 0; i--) {
-    if (mapped[i + 1].labelY - mapped[i].labelY < MIN_GAP) {
-      mapped[i].labelY = mapped[i + 1].labelY - MIN_GAP;
-    }
-  }
-
-  overlay.innerHTML = '';
-  mapped.forEach((item) => {
-    const lY = Math.round(item.labelY) - Math.floor(LABEL_H / 2);
-    if (lY < -LABEL_H || lY > chartHeight + LABEL_H) return;
-
-    // Horizontal tick at original price when label was moved
-    if (Math.abs(item.labelY - item.origY) > 4) {
-      const tick = document.createElement('div');
-      tick.style.cssText = [
-        'position:absolute', 'right:0',
-        `top:${Math.round(item.origY)}px`,
-        'width:6px', 'height:1px',
-        `background:${item.color}`, 'opacity:0.6',
-      ].join(';');
-      overlay.appendChild(tick);
-    }
-
-    const el = document.createElement('div');
-    el.style.cssText = [
-      'position:absolute', 'right:0',
-      `top:${lY}px`,
-      `background:${item.color}`,
-      'color:#fff',
-      'font-size:9px',
-      "font-family:'IBM Plex Mono',monospace",
-      'font-weight:700',
-      'padding:1px 4px',
-      'border-radius:2px 0 0 2px',
-      'white-space:nowrap',
-      'line-height:1.4',
-      'text-shadow:0 1px 2px rgba(0,0,0,0.6)',
-      'pointer-events:none',
-      'max-width:70px',
-      'overflow:hidden',
-      'text-overflow:ellipsis',
-    ].join(';');
-    // Shorten label: "VWATR S1 (SMA9)" → "S1", "Mag MA" → "Mag"
-    const shortText = item.text
-      .replace(/^VWATR /, '')
-      .replace(/\s*\([^)]*\)/, '');
-    el.textContent = `${shortText} ${item.price.toFixed(1)}`;
-    overlay.appendChild(el);
-  });
-}
+// ── Right-axis label overlay (shared util) ──
 
 // ══════════════════════════════════════════
 // Component
@@ -275,7 +196,7 @@ export default function ESFIntradayChart({
       rightPriceScale: {
         borderColor: 'rgba(255, 255, 255, 0.06)',
         scaleMargins: { top: 0.08, bottom: 0.22 },
-        minimumWidth: 72,
+        minimumWidth: 100,
       },
       watermark: {
         visible: true,
@@ -501,37 +422,43 @@ export default function ESFIntradayChart({
       const rewardDollar = rewardPts * multiplier;
 
       // Entry line (blue solid)
+      const entryLabel = `${direction === 'LONG' ? '\u25B2' : '\u25BC'} Entry`;
       mainSeries.createPriceLine({
         price: entry,
         color: '#3b82f6',
         lineWidth: 2,
         lineStyle: 0,
-        axisLabelVisible: true,
-        title: `${direction === 'LONG' ? '\u25B2' : '\u25BC'} Entry`,
+        axisLabelVisible: false,
+        title: '',
       });
+      axisLabelItems.push({ price: entry, text: entryLabel, color: '#3b82f6' });
 
       // Stop Loss (red dashed)
       if (stopLoss > 0) {
+        const slLabel = `SL -$${riskDollar.toFixed(0)}`;
         mainSeries.createPriceLine({
           price: stopLoss,
           color: '#ef4444',
           lineWidth: 2,
           lineStyle: 2,
-          axisLabelVisible: true,
-          title: `SL -$${riskDollar.toFixed(0)}`,
+          axisLabelVisible: false,
+          title: '',
         });
+        axisLabelItems.push({ price: stopLoss, text: slLabel, color: '#ef4444' });
       }
 
       // Take Profit (green dashed)
       if (takeProfit > 0) {
+        const tpLabel = `TP +$${rewardDollar.toFixed(0)}`;
         mainSeries.createPriceLine({
           price: takeProfit,
           color: '#22c55e',
           lineWidth: 2,
           lineStyle: 2,
-          axisLabelVisible: true,
-          title: `TP +$${rewardDollar.toFixed(0)}`,
+          axisLabelVisible: false,
+          title: '',
         });
+        axisLabelItems.push({ price: takeProfit, text: tpLabel, color: '#22c55e' });
       }
     }
 

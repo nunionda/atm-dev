@@ -21,6 +21,30 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def _sanitize_for_json(obj):
+    """NaN/Inf/numpy 타입을 JSON 직렬화 가능하게 변환."""
+    import math
+    if isinstance(obj, float):
+        if math.isnan(obj):
+            return None
+        if math.isinf(obj):
+            return 0.0
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        v = float(obj)
+        return None if math.isnan(v) else (0.0 if math.isinf(v) else v)
+    if isinstance(obj, np.ndarray):
+        return [_sanitize_for_json(v) for v in obj.tolist()]
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
+
 # ── Analyze 캐시 ──────────────────────────────────────────────────────
 _analyze_cache: dict[str, dict] = {}
 _analyze_cache_ts: dict[str, float] = {}
@@ -134,9 +158,10 @@ async def analyze_ticker(ticker: str, period: str = "1mo", interval: str = "1d")
             records = result_df.to_dict(orient="records")
             result = {"ticker": ticker, "period": period, "interval": interval, "data": records,
                       "cache_ts": now, "cache_ttl": ANALYZE_CACHE_TTL}
-            _analyze_cache[cache_key] = result
+            sanitized = _sanitize_for_json(result)
+            _analyze_cache[cache_key] = sanitized
             _analyze_cache_ts[cache_key] = now
-            return result
+            return sanitized
 
         # ── yfinance 경로 (async) ──
         ticker = resolve_ticker(ticker)
@@ -207,10 +232,11 @@ async def analyze_ticker(ticker: str, period: str = "1mo", interval: str = "1d")
             "cache_ts": now,
             "cache_ttl": ANALYZE_CACHE_TTL,
         }
-        _analyze_cache[cache_key] = result
+        sanitized = _sanitize_for_json(result)
+        _analyze_cache[cache_key] = sanitized
         _analyze_cache_ts[cache_key] = now
         return JSONResponse(
-            content=result,
+            content=sanitized,
             headers={"Cache-Control": "no-cache"},
         )
 

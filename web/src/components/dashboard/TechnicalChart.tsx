@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart, ColorType, CrosshairMode, type IChartApi, type ISeriesApi, type SeriesType, type Time } from 'lightweight-charts';
 import type { AnalyticsData } from '../../lib/api';
 import { MA_CONFIG, computeSupportResistance, type ChartType, type OverlayState } from '../../lib/chartUtils';
+import { updateAxisLabels, createAxisOverlay, bindAxisLabelRefresh, type AxisLabelItem } from '../../lib/axisLabelUtils';
 // smcZonePrimitive available if OB/FVG zones are re-enabled
 import { OHLCVOverlay, type CrosshairData } from './OHLCVOverlay';
 import { VolumeProfile } from './VolumeProfile';
@@ -71,6 +72,8 @@ export function TechnicalChart({
     const mainSeriesRef = useRef<ISeriesApi<SeriesType> | null>(null);
     const parseTimeRef = useRef<((datetime: string) => Time) | null>(null);
     const barIndexMapRef = useRef<Map<string, number>>(new Map());
+    const axisOverlayRef = useRef<HTMLDivElement | null>(null);
+    const axisLabelItemsRef = useRef<AxisLabelItem[]>([]);
 
     // OHLCV overlay state (throttled)
     const [crosshairData, setCrosshairData] = useState<CrosshairData | null>(null);
@@ -210,6 +213,7 @@ export function TechnicalChart({
             rightPriceScale: {
                 borderColor: 'rgba(255, 255, 255, 0.06)',
                 scaleMargins: { top: 0.05, bottom: 0.25 },
+                minimumWidth: 100,
             },
             watermark: {
                 visible: true,
@@ -278,7 +282,8 @@ export function TechnicalChart({
             }
         }
 
-        // Last price line
+        // Last price line + S/R lines — labels rendered via custom overlay
+        const axisLabels: AxisLabelItem[] = [];
         if (chartData.length > 0) {
             const lastPrice = chartData[chartData.length - 1].close;
             mainSeries.createPriceLine({
@@ -286,27 +291,35 @@ export function TechnicalChart({
                 color: '#2962ff',
                 lineWidth: 1,
                 lineStyle: 2,
-                axisLabelVisible: true,
+                axisLabelVisible: false,
                 title: '',
             });
+            axisLabels.push({ price: lastPrice, text: 'Last', color: '#2962ff' });
 
             // Support/Resistance lines
             if (showSR) {
                 const srLevels = computeSupportResistance(data, lastPrice);
                 srLevels.forEach(level => {
+                    const color = level.type === 'resistance'
+                        ? 'rgba(239, 68, 68, 0.6)'
+                        : 'rgba(34, 197, 94, 0.6)';
                     mainSeries.createPriceLine({
                         price: level.price,
-                        color: level.type === 'resistance'
-                            ? 'rgba(239, 68, 68, 0.6)'
-                            : 'rgba(34, 197, 94, 0.6)',
+                        color,
                         lineWidth: level.touches >= 3 ? 2 : 1,
                         lineStyle: 2,
-                        axisLabelVisible: true,
-                        title: `${level.type === 'resistance' ? 'R' : 'S'} (${level.touches})`,
+                        axisLabelVisible: false,
+                        title: '',
+                    });
+                    axisLabels.push({
+                        price: level.price,
+                        text: `${level.type === 'resistance' ? 'R' : 'S'} (${level.touches})`,
+                        color,
                     });
                 });
             }
         }
+        axisLabelItemsRef.current = axisLabels;
 
         // === Volume Series ===
         const volumeSeries = chart.addHistogramSeries({
@@ -358,11 +371,21 @@ export function TechnicalChart({
                         color: config.color,
                         lineWidth: key === 'sma20' ? 2 : 1,
                         crosshairMarkerVisible: true,
-                        lastValueVisible: true,
+                        lastValueVisible: false,
                         priceLineVisible: false,
                         title: config.label,
                     });
                     maSeries.setData(maData);
+
+                    // Add last MA value to axis label overlay
+                    const lastMa = maData[maData.length - 1];
+                    if (lastMa) {
+                        axisLabelItemsRef.current.push({
+                            price: lastMa.value,
+                            text: config.label,
+                            color: config.color,
+                        });
+                    }
                 }
             });
         }
@@ -631,12 +654,27 @@ export function TechnicalChart({
             });
         });
 
+        // === Axis Label Overlay ===
+        const overlay = createAxisOverlay(chartContainerRef.current);
+        axisOverlayRef.current = overlay;
+
+        const refreshAxisLabels = () => {
+            if (!axisOverlayRef.current || !mainSeriesRef.current) return;
+            const h = chartContainerRef.current?.clientHeight ?? 0;
+            updateAxisLabels(mainSeriesRef.current, axisLabelItemsRef.current, axisOverlayRef.current, h);
+        };
+
+        chart.timeScale().subscribeVisibleLogicalRangeChange(refreshAxisLabels);
+        setTimeout(refreshAxisLabels, 80);
+        const cleanupAxisDrag = bindAxisLabelRefresh(chartContainerRef.current, refreshAxisLabels);
+
         // === Resize Handler ===
         const handleResize = () => {
             if (chartContainerRef.current) chart.applyOptions({ width: chartContainerRef.current.clientWidth });
             if (activeSubcharts.rsi && rsiContainerRef.current && rsiChart) rsiChart.applyOptions({ width: rsiContainerRef.current.clientWidth });
             if (activeSubcharts.macd && macdContainerRef.current && macdChart) macdChart.applyOptions({ width: macdContainerRef.current.clientWidth });
             if (activeSubcharts.adx && adxContainerRef.current && adxChart) adxChart.applyOptions({ width: adxContainerRef.current.clientWidth });
+            refreshAxisLabels();
         };
 
         window.addEventListener('resize', handleResize);
@@ -651,7 +689,12 @@ export function TechnicalChart({
 
         return () => {
             window.removeEventListener('resize', handleResize);
+            cleanupAxisDrag();
             cancelAnimationFrame(rafRef.current);
+            if (axisOverlayRef.current) {
+                axisOverlayRef.current.remove();
+                axisOverlayRef.current = null;
+            }
             // Remove charts (this also cleans up internal subscriptions)
             try { chart.remove(); } catch (_) { /* already removed */ }
             subcharts.forEach(c => { try { c.remove(); } catch (_) { /* already removed */ } });

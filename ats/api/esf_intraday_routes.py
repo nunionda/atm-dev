@@ -66,7 +66,7 @@ def _get_config():
 # ── 캐시 (인트라데이는 3분 TTL) ──
 _analysis_cache: Dict[str, dict] = {}
 _analysis_cache_ts: Dict[str, float] = {}
-CACHE_TTL = 180  # 3분
+CACHE_TTL = 30  # 30초 — 인트라데이 스캘핑에 적합한 캐시 주기
 
 _backtest_in_progress = False
 _backtest_cache: Optional[dict] = None
@@ -158,7 +158,7 @@ def _download_intraday_data(
     try:
         raw = yf.download(
             ticker, period=period, interval=interval,
-            auto_adjust=True, progress=False,
+            auto_adjust=False, progress=False,
         )
     except Exception as e:
         logger.warning("yfinance download failed for %s: %s", ticker, e)
@@ -390,12 +390,13 @@ async def analyze_esf_intraday(
         # 지표가 전부 기본값이면 캐시 저장 안 함
         ind = result["indicators"]
         has_real_data = ind["adx"] != 0 or ind["atr"] != 0 or ind["rsi"] != 50.0
+        sanitized = _sanitize_for_json(result)
         if has_real_data:
-            _analysis_cache[cache_key] = result
+            _analysis_cache[cache_key] = sanitized
             _analysis_cache_ts[cache_key] = now
 
         return JSONResponse(
-            content=_sanitize_for_json(result),
+            content=sanitized,
             headers={"Cache-Control": "no-cache"},
         )
 
@@ -569,11 +570,12 @@ async def get_esf_candles(
             "vwatr_zones": vwatr_zones_data,
         }
 
-        _analysis_cache[cache_key] = result
+        sanitized = _sanitize_for_json(result)
+        _analysis_cache[cache_key] = sanitized
         _analysis_cache_ts[cache_key] = now
 
         return JSONResponse(
-            content=_sanitize_for_json(result),
+            content=sanitized,
             headers={"Cache-Control": "no-cache"},
         )
 
