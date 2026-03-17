@@ -14,6 +14,8 @@ import { OptionCalculator } from './pages/OptionCalculator';
 import { Rebalance } from './pages/Rebalance';
 import { FuturesTrading } from './pages/FuturesTrading';
 import { ESFScalping } from './pages/ESFScalping';
+import { ESFuturesScalping } from './pages/ESFuturesScalping';
+import { Navigate } from 'react-router-dom';
 
 function App() {
   return (
@@ -29,8 +31,10 @@ function App() {
           <Route path="/rebalance" element={<Rebalance />} />
           <Route path="/risk" element={<Risk />} />
           <Route path="/performance" element={<Performance />} />
-          <Route path="/futures-trading" element={<FuturesTrading />} />
-          <Route path="/esf-scalping" element={<ESFScalping />} />
+          <Route path="/futures" element={<ESFuturesScalping />} />
+          <Route path="/es-futures" element={<Navigate to="/futures" replace />} />
+          <Route path="/futures-trading" element={<Navigate to="/futures" replace />} />
+          <Route path="/esf-scalping" element={<Navigate to="/futures" replace />} />
           <Route path="/scalp-analyzer" element={<ScalpAnalyzer />} />
           <Route path="/scalp-analyzer/fabio" element={<FabioStrategy />} />
           <Route path="/option-calculator" element={<OptionCalculator />} />

@@ -66,13 +66,15 @@ class FuturesBacktester:
         initial_equity: float = 100000.0,
         is_micro: bool = False,
         progress_callback: Optional[Callable[[float], None]] = None,
+        trend_adaptive: bool = False,
     ):
         # is_micro 설정 반영
         if is_micro:
             config.sp500_futures.is_micro = True
             config.sp500_futures.contract_multiplier = 5.0
 
-        self.strategy = SP500FuturesStrategy(config)
+        self.trend_adaptive = trend_adaptive
+        self.strategy = SP500FuturesStrategy(config, trend_adaptive=trend_adaptive)
         self.fc = config.sp500_futures
         self.ticker = ticker
         self.start_date = start_date
@@ -267,18 +269,9 @@ class FuturesBacktester:
                         pnl_pct = pnl_points / position.entry_price if position.entry_price > 0 else 0
                         equity += pnl_dollar
 
-                        trades.append({
-                            "entry_date": position.entry_date,
-                            "exit_date": date_str,
-                            "direction": position.direction,
-                            "entry_price": round(position.entry_price, 2),
-                            "exit_price": round(current_price, 2),
-                            "contracts": position.contracts,
-                            "pnl_dollar": round(pnl_dollar, 2),
-                            "pnl_pct": round(pnl_pct * 100, 2),
-                            "holding_days": position.holding_days,
-                            "exit_reason": "MARGIN_CALL",
-                        })
+                        trades.append(self._make_trade_record(
+                            position, date_str, current_price, pnl_dollar, pnl_pct, "MARGIN_CALL",
+                        ))
                         self.margin_calls.append({
                             "date": date_str,
                             "equity": round(equity + unrealized, 2),
@@ -304,18 +297,9 @@ class FuturesBacktester:
                     pnl_pct = pnl_points / position.entry_price if position.entry_price > 0 else 0
                     equity += pnl_dollar
 
-                    trades.append({
-                        "entry_date": position.entry_date,
-                        "exit_date": date_str,
-                        "direction": position.direction,
-                        "entry_price": round(position.entry_price, 2),
-                        "exit_price": round(current_price, 2),
-                        "contracts": position.contracts,
-                        "pnl_dollar": round(pnl_dollar, 2),
-                        "pnl_pct": round(pnl_pct * 100, 2),
-                        "holding_days": position.holding_days,
-                        "exit_reason": f"CB_{cb_level}",
-                    })
+                    trades.append(self._make_trade_record(
+                        position, date_str, current_price, pnl_dollar, pnl_pct, f"CB_{cb_level}",
+                    ))
                     self.strategy.record_trade_result(pnl_pct)
                     self.strategy._position_states.pop(self.ticker, None)
                     position = None
@@ -361,18 +345,9 @@ class FuturesBacktester:
                         pnl_pct = pnl_points / position.entry_price if position.entry_price > 0 else 0
                         equity += pnl_dollar
 
-                        trades.append({
-                            "entry_date": position.entry_date,
-                            "exit_date": date_str,
-                            "direction": position.direction,
-                            "entry_price": round(position.entry_price, 2),
-                            "exit_price": round(current_price, 2),
-                            "contracts": position.contracts,
-                            "pnl_dollar": round(pnl_dollar, 2),
-                            "pnl_pct": round(pnl_pct * 100, 2),
-                            "holding_days": position.holding_days,
-                            "exit_reason": exit_sig.exit_reason,
-                        })
+                        trades.append(self._make_trade_record(
+                            position, date_str, current_price, pnl_dollar, pnl_pct, exit_sig.exit_reason,
+                        ))
 
                         self.strategy.record_trade_result(pnl_pct)
                         self.strategy._position_states.pop(self.ticker, None)
@@ -447,6 +422,14 @@ class FuturesBacktester:
                                 stop_loss=signal.stop_loss,
                                 take_profit=signal.take_profit,
                             )
+                            # 레짐 정보 저장 (trend_adaptive 모드)
+                            if self.trend_adaptive and self.strategy._last_regime_result:
+                                position._regime_at_entry = self.strategy._last_regime_result.regime
+                                position._trend_score = self.strategy._last_regime_result.trend_score
+                            else:
+                                position._regime_at_entry = "UNKNOWN"
+                                position._trend_score = 0
+
                             state = self.strategy._get_position_state(self.ticker)
                             state.reset_for_entry(signal.direction, current_price)
 
@@ -490,18 +473,9 @@ class FuturesBacktester:
             pnl_pct = pnl_points / position.entry_price if position.entry_price > 0 else 0
             equity += pnl_dollar
 
-            trades.append({
-                "entry_date": position.entry_date,
-                "exit_date": last_date,
-                "direction": position.direction,
-                "entry_price": round(position.entry_price, 2),
-                "exit_price": round(last_price, 2),
-                "contracts": position.contracts,
-                "pnl_dollar": round(pnl_dollar, 2),
-                "pnl_pct": round(pnl_pct * 100, 2),
-                "holding_days": position.holding_days,
-                "exit_reason": "FORCED_CLOSE",
-            })
+            trades.append(self._make_trade_record(
+                position, last_date, last_price, pnl_dollar, pnl_pct, "FORCED_CLOSE",
+            ))
             self.strategy.record_trade_result(pnl_pct)
 
         # 3. Metrics 계산
@@ -529,10 +503,33 @@ class FuturesBacktester:
             "end_date": self.end_date,
             "initial_equity": self.initial_equity,
             "final_equity": round(equity, 2),
+            "trend_adaptive": self.trend_adaptive,
             "metrics": metrics,
             "equity_curve": equity_curve,
             "trades": trades,
         }
+
+    def _make_trade_record(
+        self, position: FuturesPosition, exit_date: str, exit_price: float,
+        pnl_dollar: float, pnl_pct: float, exit_reason: str,
+    ) -> dict:
+        """트레이드 기록 생성 (regime 정보 포함)."""
+        record = {
+            "entry_date": position.entry_date,
+            "exit_date": exit_date,
+            "direction": position.direction,
+            "entry_price": round(position.entry_price, 2),
+            "exit_price": round(exit_price, 2),
+            "contracts": position.contracts,
+            "pnl_dollar": round(pnl_dollar, 2),
+            "pnl_pct": round(pnl_pct * 100, 2),
+            "holding_days": position.holding_days,
+            "exit_reason": exit_reason,
+        }
+        if self.trend_adaptive:
+            record["regime_at_entry"] = getattr(position, "_regime_at_entry", "UNKNOWN")
+            record["trend_score"] = getattr(position, "_trend_score", 0)
+        return record
 
     def _unrealized_pnl(self, position: Optional[FuturesPosition], current_price: float) -> float:
         if position is None:
@@ -657,6 +654,26 @@ class FuturesBacktester:
             "exit_reasons": self._count_exit_reasons(trades),
             "monte_carlo": monte_carlo,
         }
+
+        # Trend-adaptive 모드: 레짐별 통계 추가
+        if self.trend_adaptive:
+            regime_stats = {}
+            for t in trades:
+                regime = t.get("regime_at_entry", "UNKNOWN")
+                if regime not in regime_stats:
+                    regime_stats[regime] = {"trades": 0, "wins": 0, "total_pnl": 0.0}
+                regime_stats[regime]["trades"] += 1
+                if t["pnl_dollar"] > 0:
+                    regime_stats[regime]["wins"] += 1
+                regime_stats[regime]["total_pnl"] += t["pnl_dollar"]
+
+            for regime, stats in regime_stats.items():
+                stats["win_rate"] = round(stats["wins"] / stats["trades"] * 100, 1) if stats["trades"] > 0 else 0
+                stats["total_pnl"] = round(stats["total_pnl"], 2)
+
+            result["regime_stats"] = regime_stats
+            result["trend_adaptive"] = True
+
         return result
 
     def _run_monte_carlo(self, daily_returns: pd.Series, n_simulations: int = 1000, n_days: int = 252) -> dict:

@@ -43,6 +43,7 @@ from common.enums import ExitReason, FuturesDirection
 from common.types import ExitSignal, FuturesSignal
 from data.config_manager import ATSConfig, ESFIntradayConfig
 from infra.logger import get_logger
+from strategy.trend_regime_detector import detect_regime
 
 logger = get_logger("esf_intraday")
 
@@ -127,6 +128,21 @@ class VolumeProfileData:
     val: float = 0.0                    # Value Area Low
     nodes: List[Dict] = field(default_factory=list)  # [{price, volume}, ...]
     lvn_levels: List[float] = field(default_factory=list)  # Low Volume Nodes
+
+
+@dataclass
+class VWATRZone:
+    """VWATR 기반 S/R Zone."""
+    ma_type: str = ""          # "SMA" or "EMA"
+    ma_period: int = 0
+    ma_value: float = 0.0
+    support_lower: float = 0.0
+    support_upper: float = 0.0
+    resistance_lower: float = 0.0
+    resistance_upper: float = 0.0
+    strength: float = 0.0     # 0-100
+    zone_type: str = ""        # "SUPPORT" or "RESISTANCE"
+    distance_atr: float = 0.0
 
 
 class ESFIntradayStrategy:
@@ -236,6 +252,10 @@ class ESFIntradayStrategy:
         df["obv_ema_fast"] = df["obv"].ewm(span=5, adjust=False).mean()
         df["obv_ema_slow"] = df["obv"].ewm(span=20, adjust=False).mean()
 
+        # ── VWATR (Volume-Weighted ATR) ──
+        if self.fc.vwatr_enabled:
+            self._calculate_vwatr(df)
+
         return df
 
     @staticmethod
@@ -262,6 +282,280 @@ class ESFIntradayStrategy:
         adx = dx.ewm(span=period, adjust=False).mean()
 
         return adx.fillna(0), plus_di.fillna(0), minus_di.fillna(0)
+
+    # ══════════════════════════════════════════
+    # 1b. Magnetic MA 분석 (평균회귀 강도 측정)
+    # ══════════════════════════════════════════
+
+    def compute_magnetic_ma(self, df: pd.DataFrame) -> dict:
+        """
+        각 MA 기간별 평균회귀(magnetic) 강도를 ATR 기준으로 측정.
+
+        측정 항목:
+          - Reversion Rate: 1 ATR 이상 이탈 후 10봉 내 0.5 ATR 이내 복귀 비율
+          - Avg Reversion Bars: 복귀까지 평균 봉 수
+          - Magnetic Score: reversion_rate / avg_bars (높을수록 강한 자력)
+
+        Returns: {"rankings": [...], "best": {...} | None}
+        """
+        if len(df) < 60 or "atr" not in df.columns:
+            return {"rankings": [], "best": None}
+
+        c = df["close"].astype(float)
+        atr = df["atr"].astype(float)
+
+        # ATR가 0인 구간 필터
+        valid_mask = atr > 0
+        results = []
+
+        for period in [9, 20, 50, 100, 200]:
+            if len(df) < period + 20:
+                continue
+
+            for ma_type in ["SMA", "EMA"]:
+                if ma_type == "SMA":
+                    ma_vals = c.rolling(period).mean()
+                else:
+                    ma_vals = c.ewm(span=period, adjust=False).mean()
+
+                # ATR 단위 거리
+                distance = pd.Series(np.nan, index=df.index)
+                mask = valid_mask & ma_vals.notna()
+                distance[mask] = (c[mask] - ma_vals[mask]) / atr[mask]
+
+                abs_dist = distance.abs()
+                deviations = abs_dist > 1.0
+
+                reversion_count = 0
+                reversion_bars_sum = 0
+                total_deviations = 0
+                lookback = 10  # 10봉 내 복귀 체크
+
+                indices = df.index.tolist()
+                for idx_pos in range(period, len(indices) - lookback):
+                    if not deviations.iloc[idx_pos]:
+                        continue
+                    total_deviations += 1
+                    for j in range(1, lookback + 1):
+                        if abs_dist.iloc[idx_pos + j] < 0.5:
+                            reversion_count += 1
+                            reversion_bars_sum += j
+                            break
+
+                if total_deviations < 5:
+                    continue
+
+                rev_rate = reversion_count / total_deviations * 100
+                avg_bars = reversion_bars_sum / max(reversion_count, 1)
+                magnetic_score = rev_rate / max(avg_bars, 1)
+
+                current_value = float(ma_vals.iloc[-1]) if not pd.isna(ma_vals.iloc[-1]) else 0.0
+                current_dist = float(distance.iloc[-1]) if not pd.isna(distance.iloc[-1]) else 0.0
+
+                results.append({
+                    "period": period,
+                    "type": ma_type,
+                    "reversion_rate": round(rev_rate, 1),
+                    "avg_reversion_bars": round(avg_bars, 1),
+                    "avg_distance_atr": round(float(abs_dist.dropna().mean()), 2),
+                    "magnetic_score": round(magnetic_score, 1),
+                    "current_value": round(current_value, 2),
+                    "current_distance_atr": round(current_dist, 2),
+                    "total_samples": total_deviations,
+                })
+
+        results.sort(key=lambda x: x["magnetic_score"], reverse=True)
+        best = results[0] if results else None
+        return {"rankings": results, "best": best}
+
+    # ══════════════════════════════════════════
+    # 1c. VWATR S/R Zone (Volume-Weighted ATR)
+    # ══════════════════════════════════════════
+
+    def _calculate_vwatr(self, df: pd.DataFrame) -> None:
+        """Volume-Weighted ATR 컬럼 추가. calculate_indicators() 내에서 호출."""
+        if "atr" not in df.columns or "volume_ma" not in df.columns:
+            return
+        vol_ratio = (df["volume"] / df["volume_ma"].replace(0, np.nan)).clip(0.5, 3.0).fillna(1.0)
+        df["vwatr"] = (df["atr"] * vol_ratio).rolling(
+            window=self.fc.vwatr_period, min_periods=5,
+        ).mean()
+
+    def compute_vwatr_zones(self, df: pd.DataFrame) -> List[VWATRZone]:
+        """
+        MA 주변 VWATR S/R Zone 구성 + 강도 측정.
+
+        각 MA(9,20,50)에 대해:
+          1. MA ± VWATR*mult 로 support/resistance zone 정의
+          2. Zone 강도 = magnetic_score(40%) + volume_density(30%) + touch_reaction(30%)
+          3. 현재가 기준 SUPPORT/RESISTANCE 분류
+
+        Returns: strength 순 정렬된 VWATRZone 리스트
+        """
+        if not self.fc.vwatr_enabled:
+            return []
+        if len(df) < 60 or "vwatr" not in df.columns or "atr" not in df.columns:
+            return []
+
+        c = df["close"].astype(float)
+        atr = df["atr"].astype(float)
+        vwatr = df["vwatr"].astype(float)
+        current_price = float(c.iloc[-1])
+        current_atr = float(atr.iloc[-1]) if pd.notna(atr.iloc[-1]) and atr.iloc[-1] > 0 else 1.0
+        current_vwatr = float(vwatr.iloc[-1]) if pd.notna(vwatr.iloc[-1]) and vwatr.iloc[-1] > 0 else current_atr
+        mult = self.fc.vwatr_zone_mult
+
+        # Magnetic MA 결과 캐시 (강도 가중용)
+        magnetic = self.compute_magnetic_ma(df)
+        mag_scores = {}
+        max_mag = 1.0
+        for r in magnetic.get("rankings", []):
+            key = (r["type"], r["period"])
+            mag_scores[key] = r["magnetic_score"]
+            if r["magnetic_score"] > max_mag:
+                max_mag = r["magnetic_score"]
+
+        ma_periods = [int(p.strip()) for p in self.fc.vwatr_ma_periods.split(",") if p.strip()]
+        lookback = min(self.fc.vwatr_touch_lookback, len(df) - 1)
+        zones: List[VWATRZone] = []
+
+        for period in ma_periods:
+            if len(df) < period + 10:
+                continue
+
+            for ma_type in ["SMA", "EMA"]:
+                if ma_type == "SMA":
+                    ma_vals = c.rolling(period).mean()
+                else:
+                    ma_vals = c.ewm(span=period, adjust=False).mean()
+
+                ma_current = float(ma_vals.iloc[-1]) if pd.notna(ma_vals.iloc[-1]) else 0.0
+                if ma_current <= 0:
+                    continue
+
+                # Zone 경계
+                sup_lower = ma_current - current_vwatr * mult
+                sup_upper = ma_current - current_vwatr * mult * 0.3
+                res_lower = ma_current + current_vwatr * mult * 0.3
+                res_upper = ma_current + current_vwatr * mult
+
+                # ── 강도 계산 (0-100) ──
+                # (A) Magnetic Score 기여 (40%)
+                mag_key = (ma_type, period)
+                mag_raw = mag_scores.get(mag_key, 0.0)
+                mag_component = (mag_raw / max_mag) * 40.0 if max_mag > 0 else 0.0
+
+                # (B) Volume Density (30%): zone 내 close 비율 × volume 가중
+                tail = df.tail(lookback)
+                tail_c = tail["close"].astype(float)
+                tail_v = tail["volume"].astype(float)
+                tail_ma = ma_vals.loc[tail.index]
+                tail_vwatr = vwatr.loc[tail.index]
+
+                in_zone = (tail_c - tail_ma).abs() <= (tail_vwatr * mult)
+                if in_zone.any():
+                    vol_in_zone = tail_v[in_zone].sum()
+                    vol_total = tail_v.sum()
+                    vol_density = (vol_in_zone / max(vol_total, 1)) * 30.0
+                else:
+                    vol_density = 0.0
+
+                # (C) Touch-Reaction Rate (30%): zone 진입 후 0.5 ATR 반전
+                touch_count = 0
+                reaction_count = 0
+                tail_atr = atr.loc[tail.index]
+                indices = tail.index.tolist()
+                for idx_pos in range(len(indices) - 5):
+                    i = indices[idx_pos]
+                    ma_v = tail_ma.get(i)
+                    vwatr_v = tail_vwatr.get(i)
+                    atr_v = tail_atr.get(i)
+                    if ma_v is None or pd.isna(ma_v) or vwatr_v is None or pd.isna(vwatr_v):
+                        continue
+                    if atr_v is None or pd.isna(atr_v) or atr_v <= 0:
+                        continue
+
+                    dist = abs(float(tail_c.loc[i]) - float(ma_v))
+                    if dist <= float(vwatr_v) * mult:
+                        touch_count += 1
+                        # 5봉 내 0.5 ATR 반전 체크
+                        for j_offset in range(1, min(6, len(indices) - idx_pos)):
+                            j_idx = indices[idx_pos + j_offset]
+                            next_dist = abs(float(tail_c.loc[j_idx]) - float(ma_v))
+                            if next_dist < float(atr_v) * 0.5:
+                                reaction_count += 1
+                                break
+
+                touch_rate = (reaction_count / max(touch_count, 1)) * 30.0 if touch_count > 0 else 0.0
+
+                strength = round(mag_component + vol_density + touch_rate, 1)
+
+                if strength < self.fc.vwatr_strength_min:
+                    continue
+
+                # Zone type: SUPPORT if price above MA, RESISTANCE if below
+                if current_price >= ma_current:
+                    zone_type = "SUPPORT"
+                    dist_edge = (current_price - sup_upper) / current_atr
+                else:
+                    zone_type = "RESISTANCE"
+                    dist_edge = (res_lower - current_price) / current_atr
+
+                zones.append(VWATRZone(
+                    ma_type=ma_type,
+                    ma_period=period,
+                    ma_value=round(ma_current, 2),
+                    support_lower=round(sup_lower, 2),
+                    support_upper=round(sup_upper, 2),
+                    resistance_lower=round(res_lower, 2),
+                    resistance_upper=round(res_upper, 2),
+                    strength=strength,
+                    zone_type=zone_type,
+                    distance_atr=round(dist_edge, 2),
+                ))
+
+        zones.sort(key=lambda z: z.strength, reverse=True)
+        return zones
+
+    def _score_vwatr_proximity(
+        self, zones: List[VWATRZone], direction: FuturesDirection,
+    ) -> Tuple[float, List[str]]:
+        """
+        VWATR S/R Zone 근접도 스코어 (max vwatr_max_score점).
+
+        규칙:
+          가장 강한 zone 안 + 방향 정렬: max
+          2번째 zone 안 + 방향 정렬: max * 0.625
+          Zone 접근 중 (0.3 ATR 내) + 방향 정렬: max * 0.375
+          Zone 안이지만 역방향: 1점
+          Zone 없음: 0점
+        """
+        max_score = self.fc.vwatr_max_score
+        signals: List[str] = []
+        is_long = direction == FuturesDirection.LONG
+
+        if not zones:
+            return 0.0, signals
+
+        for rank, zone in enumerate(zones[:3]):
+            aligned = (is_long and zone.zone_type == "SUPPORT") or \
+                      (not is_long and zone.zone_type == "RESISTANCE")
+            in_zone = zone.distance_atr <= 0  # negative = inside zone
+            near_zone = 0 < zone.distance_atr <= 0.3
+
+            if in_zone and aligned:
+                score = max_score if rank == 0 else max_score * 0.625
+                signals.append(f"VWATR_{zone.zone_type}_{zone.ma_type}{zone.ma_period}_IN")
+                return round(score, 1), signals
+            elif near_zone and aligned:
+                score = max_score * 0.375
+                signals.append(f"VWATR_{zone.zone_type}_{zone.ma_type}{zone.ma_period}_NEAR")
+                return round(score, 1), signals
+            elif in_zone and not aligned:
+                signals.append(f"VWATR_{zone.zone_type}_{zone.ma_type}{zone.ma_period}_COUNTER")
+                return 1.0, signals
+
+        return 0.0, signals
 
     # ══════════════════════════════════════════
     # 2. Volume Profile
@@ -627,6 +921,7 @@ class ESFIntradayStrategy:
           Z-Score: < -1.5 → +1 (과매도 롱), > +1.5 → -1 (과매수 숏)
 
         합계 ≥ 3 → LONG, ≤ -3 → SHORT, 그 외 NEUTRAL.
+        EMA 완전 역배열 시 반대 방향 veto (역추세 진입 차단).
         """
         if len(df) < 2:
             return FuturesDirection.NEUTRAL
@@ -652,13 +947,15 @@ class ESFIntradayStrategy:
             elif aggression["direction"] == "BEAR":
                 score -= 2
 
-        # EMA 정렬
+        # EMA 정렬 (±1 기본, veto로 역추세 차단)
         ema_f = float(curr["ema_fast"])
         ema_m = float(curr["ema_mid"])
         ema_s = float(curr["ema_slow"])
-        if ema_f > ema_m > ema_s:
+        ema_bullish = ema_f > ema_m > ema_s
+        ema_bearish = ema_f < ema_m < ema_s
+        if ema_f > ema_s:
             score += 1
-        elif ema_f < ema_m < ema_s:
+        elif ema_f < ema_s:
             score -= 1
 
         # MACD
@@ -675,9 +972,16 @@ class ESFIntradayStrategy:
         elif zscore > 1.5:
             score -= 1  # 과매수 → 숏 기회
 
+        # ── 방향 결정 (임계값 3, EMA 역배열 veto) ──
         if score >= 3:
+            # EMA 완전 역배열(bearish)이면 LONG 차단
+            if ema_bearish:
+                return FuturesDirection.NEUTRAL
             return FuturesDirection.LONG
         elif score <= -3:
+            # EMA 완전 정배열(bullish)이면 SHORT 차단
+            if ema_bullish:
+                return FuturesDirection.NEUTRAL
             return FuturesDirection.SHORT
 
         return FuturesDirection.NEUTRAL
@@ -688,13 +992,19 @@ class ESFIntradayStrategy:
 
     def _score_amt_location(
         self, market_state: str, location: Dict, direction: FuturesDirection,
+        vwatr_zones: Optional[List[VWATRZone]] = None,
     ) -> Tuple[float, List[str]]:
         """
-        Layer 1: AMT + Location (max 30점).
+        Layer 1: AMT + Location + VWATR (max 30점).
 
-        구성:
-          AMT 정렬 (max 15): 마켓 상태와 방향 일치
-          위치 품질 (max 15): AT_LVN 추세 방향 +15, AT_POC +10, IN_VALUE +5, 엣지 +3
+        구성 (vwatr_enabled=True):
+          AMT 정렬 (max 12): 마켓 상태와 방향 일치
+          위치 품질 (max 10): AT_LVN 추세 방향 +10, AT_POC +7, IN_VALUE +4, 엣지 +2
+          VWATR S/R (max 8): Zone 근접 + 방향 정렬
+
+        구성 (vwatr_enabled=False):
+          AMT 정렬 (max 15): 기존 방식
+          위치 품질 (max 15): 기존 방식
 
         Returns:
             (score, signals)
@@ -704,43 +1014,51 @@ class ESFIntradayStrategy:
         score = 0.0
         is_long = direction == FuturesDirection.LONG
 
-        # ── AMT 정렬: 마켓 상태와 매매 방향 일치 (max 15) ──
+        use_vwatr = self.fc.vwatr_enabled and vwatr_zones is not None
+
+        # ── AMT 정렬 (max 12 or 15) ──
+        amt_max = 12.0 if use_vwatr else 15.0
         if is_long and market_state == "IMBALANCE_BULL":
-            score += 15.0
+            score += amt_max
             signals.append("AMT_BULL_ALIGNED")
         elif not is_long and market_state == "IMBALANCE_BEAR":
-            score += 15.0
+            score += amt_max
             signals.append("AMT_BEAR_ALIGNED")
         elif market_state == "BALANCE":
-            score += 5.0
+            score += round(amt_max / 2, 1)  # 1/3→1/2: BALANCE에서도 충분한 크레딧
             signals.append("AMT_BALANCE")
 
-        # ── 위치 품질 (max 15) ──
+        # ── 위치 품질 (max 10 or 15) ──
+        loc_max = 10.0 if use_vwatr else 15.0
         zone = location["zone"]
         if zone == "AT_LVN":
-            # LVN에서 추세 방향이면 최고 점수
             if (is_long and market_state != "IMBALANCE_BEAR") or (
                 not is_long and market_state != "IMBALANCE_BULL"
             ):
-                score += 15.0
+                score += loc_max
                 signals.append("LOC_LVN_TREND")
             else:
-                score += 8.0
+                score += round(loc_max * 0.6, 1)
                 signals.append("LOC_LVN_COUNTER")
         elif zone == "AT_POC":
-            score += 10.0
+            score += round(loc_max * 0.7, 1)
             signals.append("LOC_AT_POC")
         elif zone == "IN_VALUE":
-            score += 5.0
+            score += round(loc_max * 0.4, 1)
             signals.append("LOC_IN_VALUE")
         elif zone in ("ABOVE_VAH", "BELOW_VAL"):
-            # 엣지: 추세 방향과 일치하면 추가 점수
             if (is_long and zone == "ABOVE_VAH") or (not is_long and zone == "BELOW_VAL"):
-                score += 5.0
+                score += round(loc_max * 0.4, 1)
                 signals.append("LOC_EDGE_TREND")
             else:
-                score += 3.0
+                score += round(loc_max * 0.2, 1)
                 signals.append("LOC_EDGE_COUNTER")
+
+        # ── VWATR S/R (max 8) ──
+        if use_vwatr:
+            vwatr_score, vwatr_signals = self._score_vwatr_proximity(vwatr_zones, direction)
+            score += vwatr_score
+            signals.extend(vwatr_signals)
 
         return round(min(score, max_score), 1), signals
 
@@ -776,12 +1094,12 @@ class ESFIntradayStrategy:
                 score = max_score * 0.75  # 15점
                 signals.append("Z_OVERSOLD")
             elif zscore <= -1.0:
-                score = max_score * 0.50  # 10점
+                score = max_score * 0.55  # 11점 (기존 10)
                 signals.append("Z_MILD_OVERSOLD")
             elif -1.0 < zscore <= 0.5:
-                # 추세 추종: 평균 근처에서 롱 (5-8점)
+                # 추세 추종: 평균 근처에서 롱 (7-11점, 기존 5-8)
                 t = (zscore - (-1.0)) / 1.5  # 0..1
-                score = max_score * (0.40 * (1 - t) + 0.25 * t)
+                score = max_score * (0.55 * (1 - t) + 0.35 * t)
                 signals.append("Z_TREND_PULLBACK")
             elif zscore >= 2.0:
                 # 과매수 → 롱 차단
@@ -795,11 +1113,12 @@ class ESFIntradayStrategy:
                 score = max_score * 0.75
                 signals.append("Z_OVERBOUGHT")
             elif zscore >= 1.0:
-                score = max_score * 0.50
+                score = max_score * 0.55  # 11점 (기존 10)
                 signals.append("Z_MILD_OVERBOUGHT")
             elif -0.5 <= zscore < 1.0:
+                # 추세 추종 (7-11점, 기존 5-8)
                 t = (1.0 - zscore) / 1.5
-                score = max_score * (0.40 * (1 - t) + 0.25 * t)
+                score = max_score * (0.55 * (1 - t) + 0.35 * t)
                 signals.append("Z_TREND_PULLBACK")
             elif zscore <= -2.0:
                 score = 0
@@ -840,30 +1159,60 @@ class ESFIntradayStrategy:
         rsi = float(curr.get("rsi", 50))
 
         # ── MACD 크로스 (max 8) ──
+        # 최근 3봉 이내 크로스도 인정 (6점)
         if is_long:
             if macd_hist_prev <= 0 < macd_hist:
                 score += 8.0
                 signals.append("MACD_BULL_CROSS")
             elif macd_hist > 0 and macd_hist > macd_hist_prev:
-                score += 4.0
-                signals.append("MACD_HIST_RISING")
+                # 최근 3봉 내 크로스 확인
+                recent_cross = False
+                for i in range(max(0, len(df) - 4), len(df) - 1):
+                    h_prev = float(df.iloc[i - 1].get("macd_hist", 0)) if i > 0 else 0
+                    h_curr = float(df.iloc[i].get("macd_hist", 0))
+                    if h_prev <= 0 < h_curr:
+                        recent_cross = True
+                        break
+                if recent_cross:
+                    score += 6.0
+                    signals.append("MACD_RECENT_CROSS")
+                else:
+                    score += 4.0
+                    signals.append("MACD_HIST_RISING")
         else:
             if macd_hist_prev >= 0 > macd_hist:
                 score += 8.0
                 signals.append("MACD_BEAR_CROSS")
             elif macd_hist < 0 and macd_hist < macd_hist_prev:
-                score += 4.0
-                signals.append("MACD_HIST_FALLING")
+                recent_cross = False
+                for i in range(max(0, len(df) - 4), len(df) - 1):
+                    h_prev = float(df.iloc[i - 1].get("macd_hist", 0)) if i > 0 else 0
+                    h_curr = float(df.iloc[i].get("macd_hist", 0))
+                    if h_prev >= 0 > h_curr:
+                        recent_cross = True
+                        break
+                if recent_cross:
+                    score += 6.0
+                    signals.append("MACD_RECENT_CROSS")
+                else:
+                    score += 4.0
+                    signals.append("MACD_HIST_FALLING")
 
-        # ── ADX + DI (max 7) ──
+        # ── ADX + DI (max 7, 부분 크레딧 추가) ──
         if is_long:
             if adx > self.fc.adx_threshold and plus_di > minus_di:
                 score += 7.0
                 signals.append("ADX_BULL_TREND")
+            elif adx > 20 and plus_di > minus_di:
+                score += 4.0  # ADX 20-25: 부분 크레딧
+                signals.append("ADX_BULL_MODERATE")
         else:
             if adx > self.fc.adx_threshold and minus_di > plus_di:
                 score += 7.0
                 signals.append("ADX_BEAR_TREND")
+            elif adx > 20 and minus_di > plus_di:
+                score += 4.0
+                signals.append("ADX_BEAR_MODERATE")
 
         # ── RSI 적정 범위 (max 5) ──
         if is_long:
@@ -888,6 +1237,26 @@ class ESFIntradayStrategy:
         if consecutive >= 3:
             score += 5.0
             signals.append(f"CONSEC_{consecutive}_BARS")
+
+        # ── 중립 모멘텀 기본 점수 (L3가 0일 때 보정) ──
+        # 방향 결정은 통과했지만 MACD/ADX/RSI가 아직 비정렬인 경우,
+        # "적극적 반대"가 아니면 최소 기본점 부여
+        if score == 0:
+            neutral_base = 0.0
+            # MACD가 방향에 반대가 아닌 경우 (약한 양의 신호)
+            if is_long and macd_hist >= -0.5:
+                neutral_base += 2.0
+            elif not is_long and macd_hist <= 0.5:
+                neutral_base += 2.0
+            # RSI가 극단이 아닌 경우 (30-70 넓은 범위)
+            if 30 <= rsi <= 70:
+                neutral_base += 2.0
+            # ADX가 존재하면 (추세 존재 자체에 크레딧)
+            if adx > 15:
+                neutral_base += 1.0
+            if neutral_base > 0:
+                score += neutral_base
+                signals.append(f"MOM_NEUTRAL_BASE_{neutral_base:.0f}")
 
         return round(min(score, max_score), 1), signals
 
@@ -933,19 +1302,45 @@ class ESFIntradayStrategy:
             score += 7.0
             signals.append("OBV_BEAR")
 
-        # ── Aggression (max 10) ──
-        if aggression["detected"]:
-            dir_match = (
-                (is_long and aggression["direction"] == "BULL")
-                or (not is_long and aggression["direction"] == "BEAR")
-            )
-            if dir_match:
-                score += 10.0
+        # ── Aggression (max 10, 가중 합산 방식) ──
+        # conjunction 대신: 각 요소가 독립적으로 기여
+        aggr_score = 0.0
+        body_ratio = float(aggression.get("body_ratio", 0))
+        range_exp = float(aggression.get("range_expansion", 1.0))
+        consec = int(aggression.get("consecutive_dir", 0))
+        aggr_dir = aggression.get("direction", "NEUTRAL")
+        dir_match = (
+            (is_long and aggr_dir == "BULL")
+            or (not is_long and aggr_dir == "BEAR")
+        )
+        dir_counter = (
+            (is_long and aggr_dir == "BEAR")
+            or (not is_long and aggr_dir == "BULL")
+        )
+
+        if dir_match:
+            if aggression["detected"]:
+                # 풀 공격성: 모든 조건 충족
+                aggr_score = 10.0
                 signals.append("AGGRESSION_ALIGNED")
             else:
-                # 반대 방향 aggression → 페널티
-                score -= 5.0
-                signals.append("AGGRESSION_COUNTER")
+                # 부분 공격성: 방향 일치 + 개별 요소 기여
+                if body_ratio > 0.55:
+                    aggr_score += 3.0
+                if range_exp > 1.0:
+                    aggr_score += 2.0
+                if consec >= 2:
+                    aggr_score += 2.0
+                if vol_ratio >= 1.2:
+                    aggr_score += 1.0
+                aggr_score = min(aggr_score, 7.0)  # 풀 공격성보다 낮은 cap
+                if aggr_score >= 3.0:
+                    signals.append("AGGRESSION_PARTIAL")
+        elif dir_counter and aggression["detected"]:
+            aggr_score = -5.0
+            signals.append("AGGRESSION_COUNTER")
+
+        score += aggr_score
 
         return round(max(0, min(score, max_score)), 1), signals
 
@@ -1016,6 +1411,47 @@ class ESFIntradayStrategy:
             aggression["detected"], aggression["direction"],
         )
 
+        # ── 레짐 감지 (인트라데이 보정) ──
+        regime_result = detect_regime(df)
+        regime = regime_result.regime
+
+        # 15m 데이터에서 detect_regime이 NEUTRAL만 반환하는 경우 EMA 기반 보정
+        if regime == "NEUTRAL" and len(df) >= 100:
+            ema_f_val = float(curr.get("ema_fast", 0))
+            ema_s_val = float(curr.get("ema_slow", 0))
+            # 최근 20봉 close 추세
+            recent_close = df["close"].astype(float).tail(20)
+            price_change_pct = (recent_close.iloc[-1] / recent_close.iloc[0] - 1) * 100 if len(recent_close) >= 20 else 0
+            # EMA 역배열 + 하락추세 → BEAR, 정배열 + 상승추세 → BULL
+            if ema_f_val < ema_s_val and price_change_pct < -0.5:
+                regime = "BEAR"
+            elif ema_f_val > ema_s_val and price_change_pct > 0.5:
+                regime = "BULL"
+
+        # ── Fabio 모델 선택 ──
+        fabio_model = self._select_fabio_model(
+            regime, market_state, location["zone"], FuturesDirection.NEUTRAL,
+        )
+
+        # ── Phase E: Time-of-day filter ──
+        if self.fc.use_time_filter and hasattr(df.index, 'hour'):
+            try:
+                bar_hour = int(df.index[-1].hour)
+                bar_minute = int(df.index[-1].minute)
+                bar_time = bar_hour * 60 + bar_minute
+
+                # Parse avoid windows
+                for window in self.fc.entry_window_avoid.split(","):
+                    parts = window.strip().split("-")
+                    if len(parts) == 2:
+                        s_h, s_m = map(int, parts[0].split(":"))
+                        e_h, e_m = map(int, parts[1].split(":"))
+                        if s_h * 60 + s_m <= bar_time <= e_h * 60 + e_m:
+                            logger.debug("TIME_FILTER | Avoiding entry at %02d:%02d", bar_hour, bar_minute)
+                            return None
+            except (ValueError, AttributeError):
+                pass  # Non-datetime index, skip filter
+
         # ── 방향 결정 ──
         direction = self._determine_direction(df, market_state, aggression)
         if direction == FuturesDirection.NEUTRAL:
@@ -1023,34 +1459,116 @@ class ESFIntradayStrategy:
 
         is_long = direction == FuturesDirection.LONG
 
+        # Fabio 모델 재평가 (방향 결정 후)
+        fabio_model = self._select_fabio_model(
+            regime, market_state, location["zone"], direction,
+        )
+
+        # ── VWATR Zones ──
+        vwatr_zones = self.compute_vwatr_zones(df) if self.fc.vwatr_enabled else []
+
         # ── 4-Layer 스코어링 ──
-        l1_score, l1_signals = self._score_amt_location(market_state, location, direction)
+        l1_score, l1_signals = self._score_amt_location(market_state, location, direction, vwatr_zones)
         l2_score, l2_signals = self._score_zscore(df, direction)
         l3_score, l3_signals = self._score_momentum(df, direction)
         l4_score, l4_signals = self._score_volume_aggression(df, aggression, direction)
 
         total_score = l1_score + l2_score + l3_score + l4_score
 
-        # ── Grade 판정 ──
-        if total_score >= self.fc.grade_a_threshold:
+        # ── Phase C: MA Alignment Bonus ──
+        ma_bonus = 0.0
+        ema_f = curr.get("ema_fast")
+        ema_m = curr.get("ema_mid")
+        ema_s = curr.get("ema_slow")
+        ma_alignment = "MIXED"
+        if ema_f is not None and ema_m is not None and ema_s is not None:
+            if not any(pd.isna(v) for v in [ema_f, ema_m, ema_s]):
+                ef, em, es = float(ema_f), float(ema_m), float(ema_s)
+                if ef > em > es:
+                    ma_alignment = "BULLISH"
+                elif ef < em < es:
+                    ma_alignment = "BEARISH"
+
+                if (is_long and ma_alignment == "BULLISH") or (not is_long and ma_alignment == "BEARISH"):
+                    ma_bonus = self.fc.ma_alignment_bonus  # Full alignment with direction
+                elif (is_long and ma_alignment == "BEARISH") or (not is_long and ma_alignment == "BULLISH"):
+                    ma_bonus = -self.fc.ma_counter_penalty  # Counter-trend penalty
+                else:
+                    ma_bonus = self.fc.ma_alignment_bonus * 0.5  # Partial alignment
+
+        total_score += ma_bonus
+
+        # ── Phase C: Regime Direction Bias ──
+        regime_bonus = 0.0
+        if regime == "BULL" and is_long:
+            regime_bonus = 5.0
+        elif regime == "BULL" and not is_long:
+            regime_bonus = -10.0
+        elif regime == "BEAR" and not is_long:
+            regime_bonus = 5.0
+        elif regime == "NEUTRAL" and is_long:
+            regime_bonus = -self.fc.long_penalty_neutral  # Phase E: LONG underperforms in NEUTRAL
+        elif regime == "CRISIS":
+            if is_long:
+                logger.info("CRISIS regime — blocking LONG entry")
+                return None
+            regime_bonus = -5.0  # Very selective shorts in CRISIS
+
+        total_score += regime_bonus
+
+        # ── Phase F: 약세장 LONG 모멘텀 게이트 ──
+        # BEAR/NEUTRAL 레짐에서 LONG 진입 시 L3+L4 최소 요구
+        if is_long and regime in ("BEAR", "NEUTRAL"):
+            momentum_volume = l3_score + l4_score
+            if momentum_volume < 8.0:
+                logger.debug(
+                    "LONG blocked in %s — L3+L4=%.1f < 8 (momentum insufficient)",
+                    regime, momentum_volume,
+                )
+                return None
+
+        # ── Phase C: Regime-adjusted Grade thresholds ──
+        if regime == "BULL":
+            grade_a_thr = self.fc.regime_bull_threshold
+        elif regime in ("BEAR", "CRISIS"):
+            grade_a_thr = self.fc.regime_bear_threshold
+        else:
+            grade_a_thr = self.fc.regime_neutral_threshold
+
+        grade_b_thr = grade_a_thr - 10.0
+        grade_c_thr = max(grade_a_thr - 20.0, self.fc.grade_c_threshold)  # C는 최소 35 유지
+
+        if total_score >= grade_a_thr:
             grade = "A"
             contract_mult = 1.0
-        elif total_score >= self.fc.grade_b_threshold:
+        elif total_score >= grade_b_thr:
             grade = "B"
             contract_mult = 0.5
-        elif total_score >= self.fc.grade_c_threshold:
+        elif total_score >= grade_c_thr:
             grade = "C"
             contract_mult = 0.25
         else:
             # 진입 임계값 미달
             return None
 
-        # ── SL / TP 계산 ──
+        # ── SL / TP 계산 (Phase C: ATR-Adaptive) ──
         if atr <= 0:
             atr = current_price * 0.005  # 폴백: 가격의 0.5%
 
-        sl_distance = atr * self.fc.sl_atr_mult
-        tp_distance = atr * self.fc.tp_atr_mult
+        # ATR ratio: current vs rolling average
+        atr_values = df["atr"].dropna().tail(20)
+        atr_avg = float(atr_values.mean()) if len(atr_values) >= 5 else atr
+        atr_ratio = atr / atr_avg if atr_avg > 0 else 1.0
+
+        if atr_ratio > self.fc.atr_expand_ratio:
+            atr_adj = self.fc.atr_expand_sl_mult  # Wider stops in expanding vol
+        elif atr_ratio < self.fc.atr_contract_ratio:
+            atr_adj = self.fc.atr_contract_sl_mult  # Tighter in contracting vol
+        else:
+            atr_adj = 1.0
+
+        sl_distance = atr * self.fc.sl_atr_mult * atr_adj
+        tp_distance = atr * self.fc.tp_atr_mult * atr_adj
 
         if is_long:
             sl = current_price - sl_distance
@@ -1074,11 +1592,11 @@ class ESFIntradayStrategy:
         contracts = max(1, min(int(base_contracts * contract_mult), self.fc.max_contracts))
 
         logger.info(
-            "INTRADAY %s | grade=%s | score=%.0f (L1:%.0f L2:%.0f L3:%.0f L4:%.0f) | "
-            "price=%.2f | SL=%.2f | TP=%.2f | ATR=%.2f | Z=%.2f | contracts=%d",
+            "INTRADAY %s | grade=%s | score=%.0f (L1:%.0f L2:%.0f L3:%.0f L4:%.0f MA:%.0f RG:%.0f) | "
+            "price=%.2f | SL=%.2f | TP=%.2f | ATR=%.2f (adj=%.2f) | Z=%.2f | contracts=%d",
             "LONG" if is_long else "SHORT", grade, total_score,
-            l1_score, l2_score, l3_score, l4_score,
-            current_price, sl, tp, atr,
+            l1_score, l2_score, l3_score, l4_score, ma_bonus, regime_bonus,
+            current_price, sl, tp, atr, atr_adj,
             float(curr.get("zscore", 0)), contracts,
         )
 
@@ -1108,6 +1626,20 @@ class ESFIntradayStrategy:
                 "location_zone": location["zone"],
                 "aggression_detected": aggression["detected"],
                 "aggression_direction": aggression["direction"],
+                "regime": regime,
+                "trend_score": regime_result.trend_score,
+                "recommended_strategy": regime_result.recommended_strategy,
+                "regime_confidence": regime_result.confidence,
+                "regime_components": regime_result.components,
+                "fabio_model": fabio_model["model"],
+                "fabio_description": fabio_model["description"],
+                "fabio_confidence": fabio_model["confidence"],
+                "ma_alignment": ma_alignment,
+                "ma_bonus": ma_bonus,
+                "regime_bonus": regime_bonus,
+                "atr_ratio": round(atr_ratio, 3),
+                "atr_adj": round(atr_adj, 3),
+                "grade_threshold": grade_a_thr,
                 "adx": float(curr.get("adx", 0)),
                 "rsi": float(curr.get("rsi", 50)),
                 "macd_hist": float(curr.get("macd_hist", 0)),
@@ -1368,6 +1900,107 @@ class ESFIntradayStrategy:
             "stop_reason": self._session.stop_reason,
         }
 
+    # ══════════════════════════════════════════
+    # 9. Fabio Model Selection + Regime Integration
+    # ══════════════════════════════════════════
+
+    def _select_fabio_model(
+        self,
+        regime: str,
+        market_state: str,
+        location_zone: str,
+        direction: FuturesDirection,
+    ) -> Dict:
+        """
+        Fabio 스캘핑 모델 선택 (레짐 + AMT 상태 기반).
+
+        Model 1: Trend Continuation at LVN
+          - IMBALANCE 상태 + LVN 위치 + 추세 방향 정렬
+          - BULL → LONG continuation, BEAR → SHORT continuation
+
+        Model 2: Mean Reversion on Failed Breakout
+          - BALANCE/TRANSITION 상태 + VAH/VAL 위치 + 카운터 방향
+          - NEUTRAL → 양방향 MR
+
+        Returns:
+            {model: "M1"|"M2"|"NONE", description: str, confidence: float}
+        """
+        is_long = direction == FuturesDirection.LONG
+        model = "NONE"
+        description = "No Fabio model match"
+        confidence = 0.0
+
+        if market_state == "IMBALANCE":
+            # Model 1: Trend Continuation at LVN
+            if location_zone in ("LVN", "BETWEEN_POC_VAL", "BELOW_VAL"):
+                if regime in ("BULL", "NEUTRAL") and is_long:
+                    model = "M1"
+                    description = "Trend Continuation LONG at LVN (Fabio Model 1)"
+                    confidence = 0.8
+                elif regime in ("BEAR",) and not is_long:
+                    model = "M1"
+                    description = "Trend Continuation SHORT at LVN (Fabio Model 1 inverted)"
+                    confidence = 0.7
+            elif location_zone in ("ABOVE_VAH",) and not is_long:
+                if regime in ("BEAR", "NEUTRAL"):
+                    model = "M1"
+                    description = "Trend Continuation SHORT above VAH (Fabio Model 1 inverted)"
+                    confidence = 0.7
+
+        elif market_state in ("BALANCE", "TRANSITION"):
+            # Model 2: Mean Reversion on Failed Breakout
+            if location_zone in ("AT_VAH", "ABOVE_VAH") and not is_long:
+                model = "M2"
+                description = "Mean Reversion SHORT at VAH (Fabio Model 2)"
+                confidence = 0.75
+            elif location_zone in ("AT_VAL", "BELOW_VAL") and is_long:
+                model = "M2"
+                description = "Mean Reversion LONG at VAL (Fabio Model 2)"
+                confidence = 0.75
+            elif location_zone == "AT_POC":
+                model = "M2"
+                description = f"Mean Reversion {'LONG' if is_long else 'SHORT'} at POC (Fabio Model 2)"
+                confidence = 0.5
+
+        logger.debug(
+            "FABIO | regime=%s state=%s zone=%s dir=%s → model=%s (%.0f%%)",
+            regime, market_state, location_zone, direction.value,
+            model, confidence * 100,
+        )
+
+        return {
+            "model": model,
+            "description": description,
+            "confidence": confidence,
+            "regime": regime,
+        }
+
+    def get_regime_info(self, df: pd.DataFrame) -> Dict:
+        """
+        현재 레짐 정보 반환 (API 노출용).
+
+        Returns:
+            {regime, trend_score, recommended_strategy, confidence, components}
+        """
+        if df.empty or len(df) < 210:
+            return {
+                "regime": "NEUTRAL",
+                "trend_score": 0,
+                "recommended_strategy": "mean_reversion",
+                "confidence": 0.0,
+                "components": {},
+            }
+
+        df_calc = self.calculate_indicators(df.copy())
+        result = detect_regime(df_calc)
+        return {
+            "regime": result.regime,
+            "trend_score": result.trend_score,
+            "recommended_strategy": result.recommended_strategy,
+            "confidence": result.confidence,
+            "components": result.components,
+        }
+
     # ── Public API 래퍼 메서드 ──────────────────────
 
     def determine_amt_state(self, df: pd.DataFrame) -> Dict:
@@ -1396,7 +2029,7 @@ class ESFIntradayStrategy:
         return result.value  # FuturesDirection → str
 
     def score_amt_location(self, df: pd.DataFrame, is_long: bool):
-        """L1 AMT+Location 스코어 (API 노출용)."""
+        """L1 AMT+Location+VWATR 스코어 (API 노출용)."""
         vp = self.build_volume_profile(df)
         curr = df.iloc[-1]
         current_price = float(curr["close"])
@@ -1404,7 +2037,8 @@ class ESFIntradayStrategy:
         market_state = self._detect_market_state(df, vp)
         location = self._analyze_location(current_price, vp, atr)
         direction = FuturesDirection.LONG if is_long else FuturesDirection.SHORT
-        return self._score_amt_location(market_state, location, direction)
+        vwatr_zones = self.compute_vwatr_zones(df) if self.fc.vwatr_enabled else None
+        return self._score_amt_location(market_state, location, direction, vwatr_zones)
 
     def score_zscore(self, df: pd.DataFrame, is_long: bool):
         """L2 Z-Score 스코어 (API 노출용)."""

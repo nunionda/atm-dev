@@ -1,17 +1,21 @@
 """
 Mean Reversion 전략 구현체.
-과매도 구간의 평균 회귀를 포착하는 3-Layer 스코어링 전략.
+과매도/과매수 구간의 평균 회귀를 포착하는 3-Layer 스코어링 전략.
+양방향(LONG + SHORT) 지원.
 
 3-Layer 스코어링:
-  Layer 1 (40점): MR Signal — RSI 과매도, BB 하단, 장기 추세 유지
+  Layer 1 (40점): MR Signal — RSI 과매도/과매수, BB 이탈, 장기 추세 컨텍스트
   Layer 2 (30점): Volatility & Volume — BB Width 확대, 거래량 스파이크, ATR 고조
-  Layer 3 (30점): Confirmation — MACD 양전환, Stochastic 과매도 크로스, 연속 하락일
+  Layer 3 (30점): Confirmation — MACD 전환, Stochastic 크로스, 연속 하락/상승일
 
-진입: Total Score ≥ entry_threshold (default 65)
-레짐 필터: ADX < 25 (비추세 선호) OR RSI < 25 (극도 과매도 시 ADX 무시)
+진입: Total Score ≥ entry_threshold (default 50)
+레짐 필터: ADX < 25 (비추세 선호) OR RSI 극단값 시 ADX 무시
+
+LONG: RSI < 35, Price < BB Lower, Price > MA200
+SHORT: RSI > 70, Price > BB Upper, Price < MA200
 
 청산 우선순위:
-  ES1(-5% 불변) > ATR SL > MR TP(MA20/RSI>60) > BB Mid > Trailing > Overbought > Max Holding
+  ES1(-5% 불변) > ATR SL > MR TP(MA20/RSI 평균) > BB Mid > Trailing > 과매수/과매도 전환 > Max Holding
 """
 
 from __future__ import annotations
@@ -279,7 +283,87 @@ class MeanReversionStrategy(BaseStrategy):
         return min(score, self.mr.weight_confirmation)
 
     # ══════════════════════════════════════════
-    # 진입 시그널 스캔 (3-Layer 통합)
+    # SHORT Layer 1: MR Signal 스코어 (0~40)
+    # ══════════════════════════════════════════
+
+    def _score_mr_signal_short(self, df: pd.DataFrame) -> int:
+        """
+        Layer 1 SHORT: Mean Reversion 숏 시그널.
+        - RSI(14) > 70 → +20 (과매수)
+        - Price > BB Upper → +15 (평균 이탈)
+        - Price < MA200 → +5 (장기 하락 추세 = 숏 유리)
+        """
+        if len(df) < 200:
+            return 0
+
+        score = 0
+        curr = df.iloc[-1]
+        price = float(curr["close"])
+
+        # RSI 과매수
+        rsi = float(curr.get("rsi", 50)) if pd.notna(curr.get("rsi")) else 50
+        if rsi > self.mr.rsi_overbought:
+            score += 20
+
+        # Price > BB Upper
+        bb_upper = float(curr.get("bb_upper", float("inf"))) if pd.notna(curr.get("bb_upper")) else float("inf")
+        if bb_upper < float("inf") and price > bb_upper:
+            score += 15
+
+        # Price < MA200 (장기 하락 추세 = 숏 유리 컨텍스트)
+        ma200 = float(curr.get("ma200", 0)) if pd.notna(curr.get("ma200")) else 0
+        if ma200 > 0 and price < ma200:
+            score += 5
+
+        return min(score, self.mr.weight_signal)
+
+    # ══════════════════════════════════════════
+    # SHORT Layer 3: Confirmation 스코어 (0~30)
+    # ══════════════════════════════════════════
+
+    def _score_mr_confirmation_short(self, df: pd.DataFrame) -> int:
+        """
+        Layer 3 SHORT: 확인 시그널.
+        - MACD 히스토그램 음전환 → +10 (모멘텀 하락 전환)
+        - Stochastic %K > 80 AND %K < %D 크로스 → +10 (과매수 확인)
+        - 연속 상승일 ≥ consecutive_down_days → +10 (과매수 스트레칭)
+        """
+        if len(df) < 30:
+            return 0
+
+        score = 0
+        curr = df.iloc[-1]
+        prev = df.iloc[-2]
+
+        # MACD 히스토그램 음전환
+        macd_hist = float(curr.get("macd_hist", 0)) if pd.notna(curr.get("macd_hist")) else 0
+        prev_macd = float(prev.get("macd_hist", 0)) if pd.notna(prev.get("macd_hist")) else 0
+        if prev_macd >= 0 and macd_hist < 0:
+            score += 10
+
+        # Stochastic 과매수 크로스 (%K > 80, %K crosses below %D)
+        stoch_k = float(curr.get("stoch_k", 50)) if pd.notna(curr.get("stoch_k")) else 50
+        stoch_d = float(curr.get("stoch_d", 50)) if pd.notna(curr.get("stoch_d")) else 50
+        prev_stoch_k = float(prev.get("stoch_k", 50)) if pd.notna(prev.get("stoch_k")) else 50
+        prev_stoch_d = float(prev.get("stoch_d", 50)) if pd.notna(prev.get("stoch_d")) else 50
+        if stoch_k > 80 and prev_stoch_k >= prev_stoch_d and stoch_k < stoch_d:
+            score += 10
+
+        # 연속 상승일 (연속 하락일의 반대)
+        daily_return = df["close"].astype(float).pct_change()
+        consec_up = 0
+        for val in reversed(daily_return.tolist()):
+            if pd.notna(val) and val > 0:
+                consec_up += 1
+            else:
+                break
+        if consec_up >= self.mr.consecutive_down_days:
+            score += 10
+
+        return min(score, self.mr.weight_confirmation)
+
+    # ══════════════════════════════════════════
+    # 진입 시그널 스캔 (3-Layer 통합, 양방향)
     # ══════════════════════════════════════════
 
     def scan_entry_signals(
@@ -290,7 +374,8 @@ class MeanReversionStrategy(BaseStrategy):
     ) -> List[Signal]:
         """
         3-Layer 스코어 합산 → Score ≥ entry_threshold 시 Signal 반환.
-        레짐 필터: ADX < adx_trending_limit (비추세) OR RSI < extreme_oversold_rsi
+        양방향: LONG(과매도) + SHORT(과매수) 모두 스캔.
+        레짐 필터: ADX < adx_trending_limit (비추세) OR RSI 극단값 시 무시
         """
         signals = []
 
@@ -305,44 +390,77 @@ class MeanReversionStrategy(BaseStrategy):
 
             curr = df.iloc[-1]
 
-            # 레짐 필터: ADX < 25 (비추세 선호) OR 극도 과매도 시 무시
             adx = float(curr.get("adx", 0)) if pd.notna(curr.get("adx")) else 0
             rsi = float(curr.get("rsi", 50)) if pd.notna(curr.get("rsi")) else 50
-            if adx >= self.mr.adx_trending_limit and rsi >= self.mr.extreme_oversold_rsi:
-                continue  # 추세장이면서 극도 과매도 아님 → 스킵
 
             price_data = current_prices.get(code)
             current_price = price_data.current_price if price_data else float(curr["close"])
             stock_name = price_data.stock_name if price_data else code
 
-            # 3-Layer 스코어링
-            score_signal = self._score_mr_signal(df)
-            score_vol = self._score_mr_volatility(df)
-            score_confirm = self._score_mr_confirmation(df)
-            total_score = score_signal + score_vol + score_confirm
+            # ── LONG (과매도 평균 회귀) ──
+            # 레짐 필터: ADX < 25 (비추세) OR 극도 과매도 시 무시
+            if adx < self.mr.adx_trending_limit or rsi < self.mr.extreme_oversold_rsi:
+                score_signal = self._score_mr_signal(df)
+                score_vol = self._score_mr_volatility(df)
+                score_confirm = self._score_mr_confirmation(df)
+                total_long = score_signal + score_vol + score_confirm
 
-            if total_score >= self.mr.entry_threshold:
-                signal = Signal(
-                    stock_code=code,
-                    stock_name=stock_name,
-                    signal_type="BUY",
-                    primary_signals=[f"MR_{total_score}"],
-                    confirmation_filters=[
-                        f"L1:{score_signal}",
-                        f"L2:{score_vol}",
-                        f"L3:{score_confirm}",
-                    ],
-                    current_price=current_price,
-                    bb_upper=float(curr.get("bb_upper", float("inf"))) if pd.notna(curr.get("bb_upper")) else float("inf"),
-                )
-                signal.strength = total_score
-                signals.append(signal)
+                if total_long >= self.mr.entry_threshold:
+                    signal = Signal(
+                        stock_code=code,
+                        stock_name=stock_name,
+                        signal_type="BUY",
+                        primary_signals=[f"MR_LONG_{total_long}"],
+                        confirmation_filters=[
+                            f"L1:{score_signal}",
+                            f"L2:{score_vol}",
+                            f"L3:{score_confirm}",
+                            "dir:LONG",
+                        ],
+                        current_price=current_price,
+                        bb_upper=float(curr.get("bb_upper", float("inf"))) if pd.notna(curr.get("bb_upper")) else float("inf"),
+                    )
+                    signal.strength = total_long
+                    signals.append(signal)
 
-                logger.info(
-                    "MR Entry | %s (%s) | score=%d [L1:%d L2:%d L3:%d] | RSI=%.0f | price=%.2f",
-                    stock_name, code, total_score,
-                    score_signal, score_vol, score_confirm, rsi, current_price,
-                )
+                    logger.info(
+                        "MR LONG Entry | %s (%s) | score=%d [L1:%d L2:%d L3:%d] | RSI=%.0f | price=%.2f",
+                        stock_name, code, total_long,
+                        score_signal, score_vol, score_confirm, rsi, current_price,
+                    )
+
+            # ── SHORT (과매수 평균 회귀) ──
+            # 레짐 필터: ADX < 25 (비추세) OR 극도 과매수(RSI > 85) 시 무시
+            extreme_overbought = 100 - self.mr.extreme_oversold_rsi  # 대칭: 100 - 28 = 72
+            if adx < self.mr.adx_trending_limit or rsi > extreme_overbought:
+                score_signal_s = self._score_mr_signal_short(df)
+                score_vol_s = self._score_mr_volatility(df)  # 변동성은 방향 무관
+                score_confirm_s = self._score_mr_confirmation_short(df)
+                total_short = score_signal_s + score_vol_s + score_confirm_s
+
+                if total_short >= self.mr.entry_threshold:
+                    signal = Signal(
+                        stock_code=code,
+                        stock_name=stock_name,
+                        signal_type="SELL",
+                        primary_signals=[f"MR_SHORT_{total_short}"],
+                        confirmation_filters=[
+                            f"L1:{score_signal_s}",
+                            f"L2:{score_vol_s}",
+                            f"L3:{score_confirm_s}",
+                            "dir:SHORT",
+                        ],
+                        current_price=current_price,
+                        bb_upper=float(curr.get("bb_upper", float("inf"))) if pd.notna(curr.get("bb_upper")) else float("inf"),
+                    )
+                    signal.strength = total_short
+                    signals.append(signal)
+
+                    logger.info(
+                        "MR SHORT Entry | %s (%s) | score=%d [L1:%d L2:%d L3:%d] | RSI=%.0f | price=%.2f",
+                        stock_name, code, total_short,
+                        score_signal_s, score_vol_s, score_confirm_s, rsi, current_price,
+                    )
 
         signals.sort(key=lambda s: s.strength, reverse=True)
         return signals
@@ -358,14 +476,9 @@ class MeanReversionStrategy(BaseStrategy):
         current_prices: Dict[str, PriceData],
     ) -> List[ExitSignal]:
         """
-        Mean Reversion 전용 7-Priority 청산 cascade:
-        1. ES1: -5% 하드 스톱 (BR-S01 불변)
-        2. ES_MR_SL: Entry - ATR × 1.5
-        3. ES_MR_TP: Price > MA20 OR RSI > 60 (평균 회귀 도달)
-        4. ES_MR_BB: Price > BB 중간밴드 (평균 복귀)
-        5. ES3: Progressive trailing
-        6. ES_MR_OB: RSI > 70 (과매수 전환)
-        7. ES5: 최대 보유 15일
+        Mean Reversion 전용 7-Priority 청산 cascade (양방향).
+        LONG: ES1 > ATR SL > MR TP(MA20/RSI>60) > BB Mid > Trailing > Overbought > Max Holding
+        SHORT: ES1 > ATR SL > MR TP(MA20/RSI<40) > BB Mid > Trailing > Oversold > Max Holding
         """
         exit_signals = []
 
@@ -379,10 +492,18 @@ class MeanReversionStrategy(BaseStrategy):
             if not entry_price or entry_price <= 0:
                 continue
 
-            pnl_pct = (current_price - entry_price) / entry_price
+            # 방향 판별: confirmation_filters에 dir:SHORT가 있으면 SHORT
+            is_short = getattr(pos, "direction", None) == "SHORT" or (
+                hasattr(pos, "signal_type") and pos.signal_type == "SELL"
+            )
+
+            if is_short:
+                pnl_pct = (entry_price - current_price) / entry_price
+            else:
+                pnl_pct = (current_price - entry_price) / entry_price
 
             # ── Priority 1: ES1 손절 -5% ──
-            if current_price <= entry_price * (1 + self.ec.stop_loss_pct):
+            if pnl_pct <= self.ec.stop_loss_pct:
                 exit_signals.append(ExitSignal(
                     stock_code=pos.stock_code,
                     stock_name=pos.stock_name,
@@ -393,10 +514,11 @@ class MeanReversionStrategy(BaseStrategy):
                     current_price=current_price,
                     pnl_pct=pnl_pct,
                 ))
-                logger.info("EXIT ES1 STOP_LOSS | %s | pnl=%.2f%%", pos.stock_name, pnl_pct * 100)
+                logger.info("EXIT ES1 STOP_LOSS | %s | dir=%s | pnl=%.2f%%",
+                            pos.stock_name, "SHORT" if is_short else "LONG", pnl_pct * 100)
                 continue
 
-            # ATR 조회
+            # ATR / 지표 조회
             df = ohlcv_data.get(pos.stock_code)
             atr_val = None
             rsi_val = None
@@ -416,100 +538,186 @@ class MeanReversionStrategy(BaseStrategy):
 
             # ── Priority 2: ATR SL ──
             if atr_val and atr_val > 0:
-                atr_sl_price = entry_price - atr_val * self.mr.atr_sl_mult
-                floor_sl = entry_price * (1 + self.ec.stop_loss_pct)
-                effective_sl = max(atr_sl_price, floor_sl)
-                if current_price <= effective_sl and effective_sl > floor_sl:
-                    exit_signals.append(ExitSignal(
-                        stock_code=pos.stock_code,
-                        stock_name=pos.stock_name,
-                        position_id=pos.position_id,
-                        exit_type="ES_MR_SL",
-                        exit_reason="ATR_STOP_LOSS",
-                        order_type="MARKET",
-                        current_price=current_price,
-                        pnl_pct=pnl_pct,
-                    ))
-                    logger.info("EXIT ES_MR_SL | %s | pnl=%.2f%%", pos.stock_name, pnl_pct * 100)
-                    continue
+                if is_short:
+                    atr_sl_price = entry_price + atr_val * self.mr.atr_sl_mult
+                    if current_price >= atr_sl_price:
+                        exit_signals.append(ExitSignal(
+                            stock_code=pos.stock_code,
+                            stock_name=pos.stock_name,
+                            position_id=pos.position_id,
+                            exit_type="ES_MR_SL",
+                            exit_reason="ATR_STOP_LOSS",
+                            order_type="MARKET",
+                            current_price=current_price,
+                            pnl_pct=pnl_pct,
+                        ))
+                        logger.info("EXIT ES_MR_SL SHORT | %s | pnl=%.2f%%", pos.stock_name, pnl_pct * 100)
+                        continue
+                else:
+                    atr_sl_price = entry_price - atr_val * self.mr.atr_sl_mult
+                    floor_sl = entry_price * (1 + self.ec.stop_loss_pct)
+                    effective_sl = max(atr_sl_price, floor_sl)
+                    if current_price <= effective_sl and effective_sl > floor_sl:
+                        exit_signals.append(ExitSignal(
+                            stock_code=pos.stock_code,
+                            stock_name=pos.stock_name,
+                            position_id=pos.position_id,
+                            exit_type="ES_MR_SL",
+                            exit_reason="ATR_STOP_LOSS",
+                            order_type="MARKET",
+                            current_price=current_price,
+                            pnl_pct=pnl_pct,
+                        ))
+                        logger.info("EXIT ES_MR_SL LONG | %s | pnl=%.2f%%", pos.stock_name, pnl_pct * 100)
+                        continue
 
             # ── Priority 3: MR TP (평균 회귀 도달) ──
-            if ma20 and current_price > ma20:
-                exit_signals.append(ExitSignal(
-                    stock_code=pos.stock_code,
-                    stock_name=pos.stock_name,
-                    position_id=pos.position_id,
-                    exit_type="ES_MR_TP",
-                    exit_reason="MEAN_REVERSION_TP",
-                    order_type="LIMIT",
-                    current_price=current_price,
-                    pnl_pct=pnl_pct,
-                ))
-                logger.info("EXIT ES_MR_TP | %s | Price > MA20 | pnl=%.2f%%", pos.stock_name, pnl_pct * 100)
-                continue
-
-            if rsi_val is not None and rsi_val > 60:
-                exit_signals.append(ExitSignal(
-                    stock_code=pos.stock_code,
-                    stock_name=pos.stock_name,
-                    position_id=pos.position_id,
-                    exit_type="ES_MR_TP",
-                    exit_reason="MEAN_REVERSION_TP",
-                    order_type="LIMIT",
-                    current_price=current_price,
-                    pnl_pct=pnl_pct,
-                ))
-                logger.info("EXIT ES_MR_TP | %s | RSI > 60 | pnl=%.2f%%", pos.stock_name, pnl_pct * 100)
-                continue
-
-            # ── Priority 4: BB Mid (평균 복귀) ──
-            if bb_mid and current_price > bb_mid:
-                exit_signals.append(ExitSignal(
-                    stock_code=pos.stock_code,
-                    stock_name=pos.stock_name,
-                    position_id=pos.position_id,
-                    exit_type="ES_MR_BB",
-                    exit_reason="BB_MID_REVERT",
-                    order_type="LIMIT",
-                    current_price=current_price,
-                    pnl_pct=pnl_pct,
-                ))
-                logger.info("EXIT ES_MR_BB | %s | Price > BB Mid | pnl=%.2f%%", pos.stock_name, pnl_pct * 100)
-                continue
-
-            # ── Priority 5: Trailing Stop ──
-            trailing_high = pos.trailing_high or entry_price
-            if current_price > trailing_high:
-                trailing_high = current_price
-            if pnl_pct >= 0.07:
-                trailing_stop_price = trailing_high * (1 + self.ec.trailing_stop_pct)
-                if current_price <= trailing_stop_price and trailing_high > entry_price:
+            if is_short:
+                # SHORT TP: price < MA20 or RSI < 40
+                if ma20 and current_price < ma20:
                     exit_signals.append(ExitSignal(
                         stock_code=pos.stock_code,
                         stock_name=pos.stock_name,
                         position_id=pos.position_id,
-                        exit_type=ExitReason.TRAILING_STOP.value,
-                        exit_reason="TRAILING_STOP",
-                        order_type="MARKET",
+                        exit_type="ES_MR_TP",
+                        exit_reason="MEAN_REVERSION_TP",
+                        order_type="LIMIT",
+                        current_price=current_price,
+                        pnl_pct=pnl_pct,
+                    ))
+                    logger.info("EXIT ES_MR_TP SHORT | %s | Price < MA20 | pnl=%.2f%%", pos.stock_name, pnl_pct * 100)
+                    continue
+                if rsi_val is not None and rsi_val < 40:
+                    exit_signals.append(ExitSignal(
+                        stock_code=pos.stock_code,
+                        stock_name=pos.stock_name,
+                        position_id=pos.position_id,
+                        exit_type="ES_MR_TP",
+                        exit_reason="MEAN_REVERSION_TP",
+                        order_type="LIMIT",
+                        current_price=current_price,
+                        pnl_pct=pnl_pct,
+                    ))
+                    logger.info("EXIT ES_MR_TP SHORT | %s | RSI < 40 | pnl=%.2f%%", pos.stock_name, pnl_pct * 100)
+                    continue
+            else:
+                if ma20 and current_price > ma20:
+                    exit_signals.append(ExitSignal(
+                        stock_code=pos.stock_code,
+                        stock_name=pos.stock_name,
+                        position_id=pos.position_id,
+                        exit_type="ES_MR_TP",
+                        exit_reason="MEAN_REVERSION_TP",
+                        order_type="LIMIT",
+                        current_price=current_price,
+                        pnl_pct=pnl_pct,
+                    ))
+                    logger.info("EXIT ES_MR_TP LONG | %s | Price > MA20 | pnl=%.2f%%", pos.stock_name, pnl_pct * 100)
+                    continue
+                if rsi_val is not None and rsi_val > 60:
+                    exit_signals.append(ExitSignal(
+                        stock_code=pos.stock_code,
+                        stock_name=pos.stock_name,
+                        position_id=pos.position_id,
+                        exit_type="ES_MR_TP",
+                        exit_reason="MEAN_REVERSION_TP",
+                        order_type="LIMIT",
+                        current_price=current_price,
+                        pnl_pct=pnl_pct,
+                    ))
+                    logger.info("EXIT ES_MR_TP LONG | %s | RSI > 60 | pnl=%.2f%%", pos.stock_name, pnl_pct * 100)
+                    continue
+
+            # ── Priority 4: BB Mid (평균 복귀) ──
+            if bb_mid:
+                if is_short and current_price < bb_mid:
+                    exit_signals.append(ExitSignal(
+                        stock_code=pos.stock_code,
+                        stock_name=pos.stock_name,
+                        position_id=pos.position_id,
+                        exit_type="ES_MR_BB",
+                        exit_reason="BB_MID_REVERT",
+                        order_type="LIMIT",
+                        current_price=current_price,
+                        pnl_pct=pnl_pct,
+                    ))
+                    continue
+                elif not is_short and current_price > bb_mid:
+                    exit_signals.append(ExitSignal(
+                        stock_code=pos.stock_code,
+                        stock_name=pos.stock_name,
+                        position_id=pos.position_id,
+                        exit_type="ES_MR_BB",
+                        exit_reason="BB_MID_REVERT",
+                        order_type="LIMIT",
                         current_price=current_price,
                         pnl_pct=pnl_pct,
                     ))
                     continue
 
-            # ── Priority 6: Overbought (RSI > 70) ──
-            if rsi_val is not None and rsi_val > self.mr.rsi_overbought:
-                exit_signals.append(ExitSignal(
-                    stock_code=pos.stock_code,
-                    stock_name=pos.stock_name,
-                    position_id=pos.position_id,
-                    exit_type="ES_MR_OB",
-                    exit_reason="OVERBOUGHT_EXIT",
-                    order_type="LIMIT",
-                    current_price=current_price,
-                    pnl_pct=pnl_pct,
-                ))
-                logger.info("EXIT ES_MR_OB | %s | RSI > 70 | pnl=%.2f%%", pos.stock_name, pnl_pct * 100)
-                continue
+            # ── Priority 5: Trailing Stop ──
+            if pnl_pct >= 0.07:
+                if is_short:
+                    trailing_low = getattr(pos, "trailing_low", None) or entry_price
+                    if current_price < trailing_low:
+                        trailing_low = current_price
+                    trailing_stop_price = trailing_low * (1 - self.ec.trailing_stop_pct)
+                    if current_price >= trailing_stop_price and trailing_low < entry_price:
+                        exit_signals.append(ExitSignal(
+                            stock_code=pos.stock_code,
+                            stock_name=pos.stock_name,
+                            position_id=pos.position_id,
+                            exit_type=ExitReason.TRAILING_STOP.value,
+                            exit_reason="TRAILING_STOP",
+                            order_type="MARKET",
+                            current_price=current_price,
+                            pnl_pct=pnl_pct,
+                        ))
+                        continue
+                else:
+                    trailing_high = pos.trailing_high or entry_price
+                    if current_price > trailing_high:
+                        trailing_high = current_price
+                    trailing_stop_price = trailing_high * (1 + self.ec.trailing_stop_pct)
+                    if current_price <= trailing_stop_price and trailing_high > entry_price:
+                        exit_signals.append(ExitSignal(
+                            stock_code=pos.stock_code,
+                            stock_name=pos.stock_name,
+                            position_id=pos.position_id,
+                            exit_type=ExitReason.TRAILING_STOP.value,
+                            exit_reason="TRAILING_STOP",
+                            order_type="MARKET",
+                            current_price=current_price,
+                            pnl_pct=pnl_pct,
+                        ))
+                        continue
+
+            # ── Priority 6: Overbought/Oversold 전환 ──
+            if rsi_val is not None:
+                if is_short and rsi_val < self.mr.rsi_oversold:
+                    exit_signals.append(ExitSignal(
+                        stock_code=pos.stock_code,
+                        stock_name=pos.stock_name,
+                        position_id=pos.position_id,
+                        exit_type="ES_MR_OS",
+                        exit_reason="OVERSOLD_EXIT",
+                        order_type="LIMIT",
+                        current_price=current_price,
+                        pnl_pct=pnl_pct,
+                    ))
+                    continue
+                elif not is_short and rsi_val > self.mr.rsi_overbought:
+                    exit_signals.append(ExitSignal(
+                        stock_code=pos.stock_code,
+                        stock_name=pos.stock_name,
+                        position_id=pos.position_id,
+                        exit_type="ES_MR_OB",
+                        exit_reason="OVERBOUGHT_EXIT",
+                        order_type="LIMIT",
+                        current_price=current_price,
+                        pnl_pct=pnl_pct,
+                    ))
+                    continue
 
             # ── Priority 7: Max Holding ──
             if pos.holding_days and pos.holding_days > self.mr.max_holding_days:

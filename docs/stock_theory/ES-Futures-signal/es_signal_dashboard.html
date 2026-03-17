@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ES Futures Signal System — Architecture Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
+    --border: #30363d; --text: #e6edf3; --text2: #8b949e;
+    --green: #3fb950; --green-bg: rgba(63,185,80,0.1);
+    --red: #f85149; --red-bg: rgba(248,81,73,0.1);
+    --blue: #58a6ff; --blue-bg: rgba(88,166,255,0.1);
+    --purple: #bc8cff; --purple-bg: rgba(188,140,255,0.1);
+    --orange: #d29922; --orange-bg: rgba(210,153,34,0.1);
+    --yellow: #e3b341;
+    --radius: 12px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5;
+    min-height: 100vh; padding: 24px;
+  }
+
+  /* Header */
+  .header { text-align: center; margin-bottom: 32px; }
+  .header h1 { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+  .header h1 span { color: var(--blue); }
+  .header p { color: var(--text2); font-size: 14px; }
+  .badge-row { display: flex; gap: 8px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 500;
+    border: 1px solid var(--border);
+  }
+  .badge.green { color: var(--green); border-color: var(--green); background: var(--green-bg); }
+  .badge.blue { color: var(--blue); border-color: var(--blue); background: var(--blue-bg); }
+  .badge.purple { color: var(--purple); border-color: var(--purple); background: var(--purple-bg); }
+  .badge.orange { color: var(--orange); border-color: var(--orange); background: var(--orange-bg); }
+
+  /* Navigation Tabs */
+  .tabs {
+    display: flex; justify-content: center; gap: 4px; margin-bottom: 28px;
+    background: var(--surface); border-radius: 10px; padding: 4px;
+    width: fit-content; margin-left: auto; margin-right: auto;
+  }
+  .tab {
+    padding: 8px 20px; border-radius: 8px; cursor: pointer;
+    font-size: 13px; font-weight: 500; color: var(--text2);
+    transition: all 0.2s; border: none; background: none;
+  }
+  .tab:hover { color: var(--text); background: var(--surface2); }
+  .tab.active { color: var(--text); background: var(--blue); }
+
+  /* Panels */
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* Architecture Flow */
+  .flow { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .flow-arrow {
+    width: 2px; height: 28px; background: var(--border); position: relative;
+  }
+  .flow-arrow::after {
+    content: '▼'; position: absolute; bottom: -6px; left: 50%;
+    transform: translateX(-50%); color: var(--text2); font-size: 10px;
+  }
+  .flow-node {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px 24px; width: 100%; max-width: 640px;
+    cursor: pointer; transition: all 0.25s;
+  }
+  .flow-node:hover { border-color: var(--blue); transform: translateY(-2px); box-shadow: 0 4px 20px rgba(88,166,255,0.1); }
+  .flow-node.expanded { border-color: var(--blue); }
+  .flow-node .node-header {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .flow-node .node-icon { font-size: 20px; }
+  .flow-node .node-title { font-weight: 600; font-size: 15px; flex: 1; }
+  .flow-node .node-badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 6px;
+    font-weight: 500;
+  }
+  .flow-node .node-sub { color: var(--text2); font-size: 13px; margin-top: 4px; }
+  .flow-node .node-detail {
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+    display: none; font-size: 13px;
+  }
+  .flow-node.expanded .node-detail { display: block; }
+
+  /* Layer grid */
+  .layer-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 10px; width: 100%; max-width: 640px;
+  }
+  @media (max-width: 640px) { .layer-grid { grid-template-columns: repeat(2, 1fr); } }
+  .layer-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px; cursor: pointer;
+    transition: all 0.2s; position: relative; overflow: hidden;
+  }
+  .layer-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  }
+  .layer-card.l1::before { background: var(--blue); }
+  .layer-card.l2::before { background: var(--green); }
+  .layer-card.l3::before { background: var(--purple); }
+  .layer-card.l4::before { background: var(--orange); }
+  .layer-card:hover { transform: translateY(-2px); border-color: var(--text2); }
+  .layer-card .lc-title { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
+  .layer-card .lc-pts { font-size: 22px; font-weight: 700; margin: 6px 0; }
+  .layer-card .lc-sub { font-size: 11px; color: var(--text2); }
+  .layer-card.l1 .lc-pts { color: var(--blue); }
+  .layer-card.l2 .lc-pts { color: var(--green); }
+  .layer-card.l3 .lc-pts { color: var(--purple); }
+  .layer-card.l4 .lc-pts { color: var(--orange); }
+
+  /* Fork arrows */
+  .fork { display: flex; justify-content: center; gap: 40px; width: 100%; max-width: 640px; }
+  .fork-branch { text-align: center; }
+  .fork-node {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 20px; width: 280px;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .fork-node:hover { border-color: var(--blue); transform: translateY(-2px); }
+  .fork-node .node-header { display: flex; align-items: center; gap: 8px; }
+  .fork-node .node-icon { font-size: 18px; }
+  .fork-node .node-title { font-weight: 600; font-size: 14px; }
+  .fork-node .node-sub { color: var(--text2); font-size: 12px; margin-top: 4px; }
+
+  /* Exit table */
+  .exit-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .exit-table th {
+    text-align: left; padding: 8px 12px; color: var(--text2);
+    border-bottom: 1px solid var(--border); font-weight: 500;
+  }
+  .exit-table td {
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+  }
+  .exit-table tr:hover td { background: var(--surface2); }
+  .exit-table .prio {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 6px; font-weight: 700; font-size: 12px;
+  }
+  .prio-1 { background: var(--red-bg); color: var(--red); }
+  .prio-2 { background: var(--orange-bg); color: var(--orange); }
+  .prio-3 { background: var(--green-bg); color: var(--green); }
+  .prio-4 { background: var(--blue-bg); color: var(--blue); }
+  .prio-5 { background: var(--purple-bg); color: var(--purple); }
+  .prio-6 { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .prio-7 { background: rgba(139,148,158,0.15); color: var(--text2); }
+
+  /* Code blocks */
+  .code-block {
+    background: #0d1117; border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px; font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 12.5px; line-height: 1.6; overflow-x: auto; color: var(--text);
+    margin: 12px 0;
+  }
+  .code-block .kw { color: #ff7b72; }
+  .code-block .fn { color: #d2a8ff; }
+  .code-block .str { color: #a5d6ff; }
+  .code-block .num { color: #79c0ff; }
+  .code-block .cm { color: #8b949e; font-style: italic; }
+  .code-block .op { color: #ff7b72; }
+
+  /* Section containers */
+  .section-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; margin-bottom: 20px;
+  }
+  .section-card h3 {
+    font-size: 16px; font-weight: 600; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* Slack preview */
+  .slack-preview {
+    background: #1a1d21; border: 1px solid #383a3e;
+    border-radius: 8px; padding: 16px; font-size: 13px;
+    max-width: 520px;
+  }
+  .slack-header {
+    font-weight: 700; font-size: 16px; margin-bottom: 10px;
+    padding-bottom: 10px; border-bottom: 1px solid #383a3e;
+  }
+  .slack-field-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 8px; margin: 10px 0;
+  }
+  .slack-field label { display: block; font-size: 11px; font-weight: 700; color: #e6e6e6; }
+  .slack-field .val { font-size: 13px; color: #d1d5db; }
+  .slack-field .val code { background: #2b2d31; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+  .slack-scoreboard {
+    background: #2b2d31; border-radius: 4px; padding: 10px 12px;
+    font-family: monospace; font-size: 12px; line-height: 1.7;
+    margin: 10px 0; color: #d1d5db;
+  }
+  .slack-context { font-size: 11px; color: #8b8d91; margin-top: 10px; padding-top: 8px; border-top: 1px solid #383a3e; }
+
+  /* File tree */
+  .file-tree { font-family: monospace; font-size: 13px; line-height: 1.8; }
+  .file-tree .dir { color: var(--blue); }
+  .file-tree .file { color: var(--text); }
+  .file-tree .desc { color: var(--text2); font-family: -apple-system, sans-serif; font-size: 12px; }
+
+  /* Setup steps */
+  .setup-step {
+    display: flex; gap: 14px; margin-bottom: 18px;
+  }
+  .step-num {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--blue); color: white; display: flex;
+    align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; flex-shrink: 0;
+  }
+  .step-content { flex: 1; }
+  .step-content h4 { font-size: 14px; margin-bottom: 4px; }
+  .step-content p { font-size: 13px; color: var(--text2); }
+  .cmd {
+    display: inline-block; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 2px 8px; font-family: monospace; font-size: 12px;
+    margin: 4px 0;
+  }
+
+  /* Responsive fork */
+  @media (max-width: 640px) {
+    .fork { flex-direction: column; align-items: center; gap: 12px; }
+    .fork-node { width: 100%; max-width: 320px; }
+  }
+
+  /* Score animation */
+  .score-fill {
+    height: 6px; border-radius: 3px; transition: width 0.6s ease-out;
+  }
+  .score-track {
+    background: var(--surface2); border-radius: 3px; height: 6px; width: 100%; margin-top: 4px;
+  }
+
+  /* Detail list */
+  .detail-list { list-style: none; }
+  .detail-list li {
+    padding: 6px 0; border-bottom: 1px solid rgba(48,54,61,0.5);
+    display: flex; justify-content: space-between; font-size: 13px;
+  }
+  .detail-list li:last-child { border-bottom: none; }
+  .detail-list .label { color: var(--text2); }
+  .detail-list .value { font-weight: 500; font-family: monospace; }
+
+  /* Scoring detail panel */
+  .scoring-detail {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; margin-top: 16px;
+    display: none; width: 100%; max-width: 640px;
+  }
+  .scoring-detail.active { display: block; }
+  .scoring-detail h4 { font-size: 15px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .tier-table { width: 100%; font-size: 13px; border-collapse: collapse; }
+  .tier-table th { text-align: left; color: var(--text2); padding: 6px 8px; font-weight: 500; border-bottom: 1px solid var(--border); }
+  .tier-table td { padding: 6px 8px; border-bottom: 1px solid rgba(48,54,61,0.4); }
+  .tier-table code { background: var(--surface2); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<!-- ═══════ HEADER ═══════ -->
+<div class="header">
+  <h1>S&P 500 <span>ES=F</span> Signal System</h1>
+  <p>4-Layer Entry Scoring · 7-Priority Exit Engine · Kelly Position Sizing · Slack Alerts</p>
+  <div class="badge-row">
+    <span class="badge blue">yfinance 실시간</span>
+    <span class="badge green">5분봉 스캔</span>
+    <span class="badge purple">100pt 스코어링</span>
+    <span class="badge orange">Slack Block Kit</span>
+  </div>
+</div>
+
+<!-- ═══════ TABS ═══════ -->
+<div class="tabs">
+  <button class="tab active" onclick="showPanel('arch')">Architecture</button>
+  <button class="tab" onclick="showPanel('entry')">Entry Logic</button>
+  <button class="tab" onclick="showPanel('exit')">Exit Logic</button>
+  <button class="tab" onclick="showPanel('sizing')">Position Sizing</button>
+  <button class="tab" onclick="showPanel('slack')">Slack Preview</button>
+  <button class="tab" onclick="showPanel('setup')">Setup Guide</button>
+</div>
+
+<!-- ═══════ PANEL 1: ARCHITECTURE ═══════ -->
+<div id="panel-arch" class="panel active">
+  <div class="flow">
+
+    <!-- Data Source -->
+    <div class="flow-node" onclick="toggleNode(this)">
+      <div class="node-header">
+        <span class="node-icon">📡</span>
+        <span class="node-title">ES=F 시세 수신 (yfinance)</span>
+        <span class="node-badge" style="background:var(--blue-bg);color:var(--blue);">data_fetch</span>
+      </div>
+      <div class="node-sub">5분봉 · 30일 룩백 · auto_adjust=True</div>
+      <div class="node-detail">
+        <div class="code-block">
+<span class="cm"># signal_engine.py — fetch_bars()</span>
+df = yf.<span class="fn">download</span>(
+    <span class="str">"ES=F"</span>,
+    period=<span class="str">"30d"</span>,
+    interval=<span class="str">"5m"</span>,
+    auto_adjust=<span class="kw">True</span>,
+    progress=<span class="kw">False</span>
+)
+<span class="cm"># MultiIndex flatten → lowercase columns</span>
+<span class="cm"># Returns: open, high, low, close, volume</span>
+        </div>
+        <ul class="detail-list">
+          <li><span class="label">Ticker</span><span class="value">ES=F</span></li>
+          <li><span class="label">Interval</span><span class="value">5m</span></li>
+          <li><span class="label">Lookback</span><span class="value">30 days (~1,700 bars)</span></li>
+          <li><span class="label">Scheduler</span><span class="value">APScheduler (5min)</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="flow-arrow"></div>
+
+    <!-- Signal Engine -->
+    <div class="flow-node" onclick="toggleNode(this)">
+      <div class="node-header">
+        <span class="node-icon">🧠</span>
+        <span class="node-title">signal_engine.py — 4-Layer Scoring</span>
+        <span class="node-badge" style="background:var(--purple-bg);color:var(--purple);">100pt / 60pt threshold</span>
+      </div>
+      <div class="node-sub">Z-Score + Trend + Momentum + Volume → 합산 ≥ 60 시 신호 발생</div>
+      <div class="node-detail">
+        <p style="color:var(--text2);margin-bottom:10px;">각 레이어 25점 만점. LONG/SHORT 방향은 다수결 투표로 결정. ATR 돌파 필터 + 페이크아웃 필터 적용 후 최종 발화(fired).</p>
+        <div class="code-block">
+<span class="cm"># evaluate_entry() — core logic</span>
+total = l1_score + l2_score + l3_score + l4_score
+direction = <span class="fn">majority_vote</span>([l1_dir, l2_dir, l3_dir, l4_dir])
+
+fired = (
+    total >= <span class="num">60</span>
+    <span class="kw">and</span> direction != <span class="str">"FLAT"</span>
+    <span class="kw">and not</span> fakeout_filtered
+    <span class="kw">and</span> rr_ratio >= <span class="num">2.0</span>
+)
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-arrow"></div>
+
+    <!-- 4 Layers -->
+    <div class="layer-grid">
+      <div class="layer-card l1" onclick="showScoringDetail('l1')">
+        <div class="lc-title">L1 Z-Score</div>
+        <div class="lc-pts">25<span style="font-size:13px;color:var(--text2)">pt</span></div>
+        <div class="lc-sub">통계적 위치 (±2.0σ)</div>
+        <div class="score-track"><div class="score-fill" style="width:100%;background:var(--blue)"></div></div>
+      </div>
+      <div class="layer-card l2" onclick="showScoringDetail('l2')">
+        <div class="lc-title">L2 Trend</div>
+        <div class="lc-pts">25<span style="font-size:13px;color:var(--text2)">pt</span></div>
+        <div class="lc-sub">EMA 10/20/50 + MA200</div>
+        <div class="score-track"><div class="score-fill" style="width:100%;background:var(--green)"></div></div>
+      </div>
+      <div class="layer-card l3" onclick="showScoringDetail('l3')">
+        <div class="lc-title">L3 Momentum</div>
+        <div class="lc-pts">25<span style="font-size:13px;color:var(--text2)">pt</span></div>
+        <div class="lc-sub">MACD + ADX/DMI + RSI</div>
+        <div class="score-track"><div class="score-fill" style="width:100%;background:var(--purple)"></div></div>
+      </div>
+      <div class="layer-card l4" onclick="showScoringDetail('l4')">
+        <div class="lc-title">L4 Volume</div>
+        <div class="lc-pts">25<span style="font-size:13px;color:var(--text2)">pt</span></div>
+        <div class="lc-sub">Vol Spike + OBV + BB</div>
+        <div class="score-track"><div class="score-fill" style="width:100%;background:var(--orange)"></div></div>
+      </div>
+    </div>
+
+    <!-- Scoring Detail Panel -->
+    <div id="scoring-detail-l1" class="scoring-detail">
+      <h4 style="color:var(--blue)">L1 Z-Score — 통계적 위치 판별</h4>
+      <table class="tier-table">
+        <tr><th>조건</th><th>점수</th><th>방향</th></tr>
+        <tr><td><code>Z ≤ -2.0</code></td><td>25pt</td><td style="color:var(--green)">LONG</td></tr>
+        <tr><td><code>Z ≥ +2.0</code></td><td>25pt</td><td style="color:var(--red)">SHORT</td></tr>
+        <tr><td><code>|Z| ≥ 1.5</code></td><td>15pt</td><td>방향 따름</td></tr>
+        <tr><td><code>|Z| ≥ 1.0</code></td><td>8pt</td><td>방향 따름</td></tr>
+        <tr><td><code>|Z| < 1.0</code></td><td>0pt</td><td>FLAT</td></tr>
+      </table>
+      <p style="color:var(--text2);font-size:12px;margin-top:10px;">Z = (Close - SMA(20)) / StdDev(20) — 20봉 기준 표준화 점수</p>
+    </div>
+    <div id="scoring-detail-l2" class="scoring-detail">
+      <h4 style="color:var(--green)">L2 Trend — EMA 정렬 + MA200 방향</h4>
+      <table class="tier-table">
+        <tr><th>조건</th><th>점수</th><th>방향</th></tr>
+        <tr><td><code>EMA10 > EMA20 > EMA50</code> + <code>Close > MA200</code></td><td>25pt</td><td style="color:var(--green)">LONG</td></tr>
+        <tr><td><code>EMA10 > EMA20 > EMA50</code> + MA200 상승 기울기</td><td>18pt</td><td style="color:var(--green)">LONG</td></tr>
+        <tr><td><code>EMA10 > EMA20</code> + <code>Close > MA200</code></td><td>12pt</td><td style="color:var(--green)">LONG</td></tr>
+        <tr><td><code>EMA10 < EMA20 < EMA50</code> + <code>Close < MA200</code></td><td>25pt</td><td style="color:var(--red)">SHORT</td></tr>
+        <tr><td>부분 정렬 (숏)</td><td>18/12pt</td><td style="color:var(--red)">SHORT</td></tr>
+      </table>
+      <p style="color:var(--text2);font-size:12px;margin-top:10px;">MA200 기울기는 5봉 전 대비 현재값으로 판별</p>
+    </div>
+    <div id="scoring-detail-l3" class="scoring-detail">
+      <h4 style="color:var(--purple)">L3 Momentum — MACD × ADX/DMI × RSI</h4>
+      <table class="tier-table">
+        <tr><th>조건</th><th>점수</th></tr>
+        <tr><td>MACD 크로스업 + ADX≥25 + DI+ > DI- + RSI 30~60</td><td>25pt (LONG)</td></tr>
+        <tr><td>MACD 양수 + DI+ > DI- + RSI 범위 통과</td><td>15pt (LONG)</td></tr>
+        <tr><td>MACD 양수 + DI+ > DI-</td><td>8pt (LONG)</td></tr>
+        <tr><td>MACD 크로스다운 + ADX≥25 + DI- > DI+ + RSI 40~70</td><td>25pt (SHORT)</td></tr>
+      </table>
+      <p style="color:var(--text2);font-size:12px;margin-top:10px;">MACD(12,26,9) · ADX/DMI(14) · RSI(14)</p>
+    </div>
+    <div id="scoring-detail-l4" class="scoring-detail">
+      <h4 style="color:var(--orange)">L4 Volume — 거래량 폭증 + OBV + BB 스퀴즈</h4>
+      <table class="tier-table">
+        <tr><th>조건</th><th>점수</th></tr>
+        <tr><td>Vol Spike(1.5x) + OBV 상승 + 가격 상승 + BB Squeeze</td><td>25pt</td></tr>
+        <tr><td>Vol Spike + OBV 상승 + 가격 상승</td><td>20pt</td></tr>
+        <tr><td>Vol Spike + 가격 방향 일치</td><td>15pt</td></tr>
+        <tr><td>OBV 방향 + 가격 방향 일치</td><td>8pt</td></tr>
+      </table>
+      <p style="color:var(--text2);font-size:12px;margin-top:10px;">BB Squeeze = BW < 50봉 평균 BW × 0.8 · Vol Spike = 현재 거래량 > 20봉 평균 × 1.5</p>
+    </div>
+
+    <div class="flow-arrow"></div>
+
+    <!-- Score Aggregator -->
+    <div class="flow-node" onclick="toggleNode(this)">
+      <div class="node-header">
+        <span class="node-icon">⚖️</span>
+        <span class="node-title">Score Aggregator + Filters</span>
+        <span class="node-badge" style="background:var(--orange-bg);color:var(--orange);">≥ 60pt to fire</span>
+      </div>
+      <div class="node-sub">LONG ≥ 60 · SHORT ≥ 60 · R:R ≥ 2:1 · ATR 돌파 + 페이크아웃 필터</div>
+      <div class="node-detail">
+        <h4 style="font-size:14px;margin-bottom:8px;">필터 체계</h4>
+        <ul class="detail-list">
+          <li><span class="label">ATR 돌파 필터</span><span class="value">bar_range > ATR × 1.2</span></li>
+          <li><span class="label">저거래량 차단</span><span class="value">vol < avg_vol × 0.70</span></li>
+          <li><span class="label">긴 위크 차단</span><span class="value">wick/body > 3.0</span></li>
+          <li><span class="label">R:R 최소</span><span class="value">≥ 2.0 : 1</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="flow-arrow"></div>
+
+    <!-- Exit Engine -->
+    <div class="flow-node" onclick="toggleNode(this)" style="border-left: 3px solid var(--red);">
+      <div class="node-header">
+        <span class="node-icon">🚪</span>
+        <span class="node-title">exit_engine.py — 7-Priority Exit</span>
+        <span class="node-badge" style="background:var(--red-bg);color:var(--red);">7 rules</span>
+      </div>
+      <div class="node-sub">Hard SL → ATR SL → ATR TP → Chandelier → Progressive Trail → MACD ChoCh → Max Hold</div>
+      <div class="node-detail">
+        <p style="color:var(--text2);margin-bottom:8px;">우선순위 낮은 번호가 먼저 트리거. 복수 트리거 시 최우선 1개만 실행.</p>
+        <table class="exit-table">
+          <tr><th>#</th><th>ID</th><th>조건</th><th>설명</th></tr>
+          <tr><td><span class="prio prio-1">1</span></td><td><code>ES1</code></td><td>PnL ≤ -3%</td><td>하드 손절</td></tr>
+          <tr><td><span class="prio prio-2">2</span></td><td><code>ES_ATR_SL</code></td><td>ADX 기반 ATR×mult</td><td>ADX≥25→1.5x / <25→2.0x</td></tr>
+          <tr><td><span class="prio prio-3">3</span></td><td><code>ES_ATR_TP</code></td><td>ATR×3 도달</td><td>R:R ≥ 2:1 익절</td></tr>
+          <tr><td><span class="prio prio-4">4</span></td><td><code>ES_CHANDELIER</code></td><td>고/저가 - 3×ATR</td><td>샹들리에 엑시트</td></tr>
+          <tr><td><span class="prio prio-5">5</span></td><td><code>ES3</code></td><td>+2%에서 활성화</td><td>프로그레시브 트레일링</td></tr>
+          <tr><td><span class="prio prio-6">6</span></td><td><code>ES_CHOCH</code></td><td>MACD 히스토그램 반전</td><td>추세 전환 감지</td></tr>
+          <tr><td><span class="prio prio-7">7</span></td><td><code>ES5</code></td><td>보유 ≥ 20일</td><td>최대 보유기간</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="flow-arrow"></div>
+
+    <!-- Fork: Position Sizer & Slack -->
+    <div class="fork">
+      <div class="fork-branch">
+        <div class="fork-node" onclick="showPanel('sizing')">
+          <div class="node-header">
+            <span class="node-icon">📐</span>
+            <span class="node-title">Position Sizer</span>
+          </div>
+          <div class="node-sub">Kelly · Equity×1.5% / |E-SL|×$50</div>
+        </div>
+      </div>
+      <div class="fork-branch">
+        <div class="fork-node" onclick="showPanel('slack')">
+          <div class="node-header">
+            <span class="node-icon">💬</span>
+            <span class="node-title">slack_notifier.py</span>
+          </div>
+          <div class="node-sub">Webhook · Block Kit 포맷</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-arrow"></div>
+
+    <!-- Runner -->
+    <div class="flow-node" onclick="toggleNode(this)" style="border-left: 3px solid var(--blue);">
+      <div class="node-header">
+        <span class="node-icon">🔄</span>
+        <span class="node-title">runner.py — APScheduler 5분봉</span>
+        <span class="node-badge" style="background:var(--blue-bg);color:var(--blue);">orchestrator</span>
+      </div>
+      <div class="node-sub">Live / Backtest / Once 모드 지원 · 인메모리 포지션 상태 관리</div>
+      <div class="node-detail">
+        <div class="code-block">
+<span class="cm"># 실행 모드</span>
+python runner.py                  <span class="cm"># 라이브 (5분 간격)</span>
+python runner.py <span class="op">--once</span>           <span class="cm"># 1회 실행 후 종료</span>
+python runner.py <span class="op">--backtest</span> <span class="num">7</span>    <span class="cm"># 최근 7일 백테스트</span>
+
+<span class="cm"># Pipeline: fetch → exit check → entry check → slack</span>
+<span class="cm"># Timezone: America/New_York</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════ PANEL 2: ENTRY LOGIC ═══════ -->
+<div id="panel-entry" class="panel">
+  <div class="section-card">
+    <h3>🧠 4-Layer Entry Scoring System</h3>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px;">
+      각 레이어는 독립적으로 0~25점을 산출하고, 합산 ≥ 60점이면 진입 신호가 발생합니다.
+      방향(LONG/SHORT)은 4개 레이어의 다수결 투표로 결정됩니다.
+    </p>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;">
+      <!-- L1 -->
+      <div style="background:var(--surface2);border-radius:10px;padding:16px;border-top:3px solid var(--blue);">
+        <h4 style="color:var(--blue);font-size:14px;margin-bottom:10px;">L1 Z-Score (25pt)</h4>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:10px;">20봉 기준 Z-Score로 통계적 극단 위치 감지</p>
+        <div class="code-block">
+z = (Close - SMA(<span class="num">20</span>)) / StdDev(<span class="num">20</span>)
+
+<span class="kw">if</span> z ≤ <span class="num">-2.0</span>:  <span class="cm"># 25pt → LONG</span>
+<span class="kw">if</span> z ≥ <span class="num">+2.0</span>:  <span class="cm"># 25pt → SHORT</span>
+<span class="kw">if</span> |z| ≥ <span class="num">1.5</span>: <span class="cm"># 15pt</span>
+<span class="kw">if</span> |z| ≥ <span class="num">1.0</span>: <span class="cm">#  8pt</span>
+        </div>
+      </div>
+      <!-- L2 -->
+      <div style="background:var(--surface2);border-radius:10px;padding:16px;border-top:3px solid var(--green);">
+        <h4 style="color:var(--green);font-size:14px;margin-bottom:10px;">L2 Trend (25pt)</h4>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:10px;">EMA(10/20/50) 정렬 + MA200 방향/기울기 확인</p>
+        <div class="code-block">
+<span class="cm"># LONG 25pt: 완전 정렬</span>
+EMA10 > EMA20 > EMA50 <span class="kw">and</span> Close > MA200
+
+<span class="cm"># LONG 18pt: 정렬 + 기울기 상승</span>
+EMA10 > EMA20 > EMA50 <span class="kw">and</span> slope_up
+
+<span class="cm"># LONG 12pt: 부분 정렬</span>
+EMA10 > EMA20 <span class="kw">and</span> Close > MA200
+        </div>
+      </div>
+      <!-- L3 -->
+      <div style="background:var(--surface2);border-radius:10px;padding:16px;border-top:3px solid var(--purple);">
+        <h4 style="color:var(--purple);font-size:14px;margin-bottom:10px;">L3 Momentum (25pt)</h4>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:10px;">MACD 크로스 + ADX/DMI 강도 + RSI 범위 필터</p>
+        <div class="code-block">
+<span class="cm"># 25pt: 3중 확인 (LONG)</span>
+MACD_cross_up <span class="kw">and</span> ADX ≥ <span class="num">25</span>
+  <span class="kw">and</span> DI+ > DI-
+  <span class="kw">and</span> <span class="num">30</span> ≤ RSI ≤ <span class="num">60</span>
+
+<span class="cm"># 15pt: DI + RSI 통과</span>
+<span class="cm"># 8pt: MACD + DI만 통과</span>
+        </div>
+      </div>
+      <!-- L4 -->
+      <div style="background:var(--surface2);border-radius:10px;padding:16px;border-top:3px solid var(--orange);">
+        <h4 style="color:var(--orange);font-size:14px;margin-bottom:10px;">L4 Volume (25pt)</h4>
+        <p style="font-size:13px;color:var(--text2);margin-bottom:10px;">거래량 폭증 + OBV 추세 + Bollinger Band 스퀴즈</p>
+        <div class="code-block">
+vol_spike = Vol > Avg20 × <span class="num">1.5</span>
+obv_up    = OBV[-1] > OBV[-3]
+bb_squeeze = BW < BW_avg50 × <span class="num">0.8</span>
+
+<span class="cm"># 25pt: spike + OBV + squeeze</span>
+<span class="cm"># 20pt: spike + OBV</span>
+<span class="cm"># 15pt: spike + 방향 일치</span>
+<span class="cm">#  8pt: OBV + 방향 일치</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <h3>🛡️ 필터 시스템</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div>
+        <h4 style="font-size:14px;color:var(--orange);margin-bottom:8px;">ATR 돌파 필터</h4>
+        <p style="font-size:13px;color:var(--text2);">현재 봉의 레인지(H-L)가 ATR × 1.2 이상이어야 신호 유효. 변동성이 너무 낮은 구간에서의 잘못된 진입 방지.</p>
+        <div class="code-block">bar_range > ATR(<span class="num">14</span>) × <span class="num">1.2</span></div>
+      </div>
+      <div>
+        <h4 style="font-size:14px;color:var(--red);margin-bottom:8px;">페이크아웃 필터</h4>
+        <p style="font-size:13px;color:var(--text2);">저거래량 캔들(평균의 70% 미만)과 긴 위크 캔들(wick/body > 3.0)을 차단하여 노이즈 신호 제거.</p>
+        <div class="code-block"><span class="kw">if</span> vol < avg × <span class="num">0.70</span>: block
+<span class="kw">if</span> wick/body > <span class="num">3.0</span>: block</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ PANEL 3: EXIT LOGIC ═══════ -->
+<div id="panel-exit" class="panel">
+  <div class="section-card">
+    <h3>🚪 7-Priority Exit Engine</h3>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px;">
+      열린 포지션에 대해 매 바마다 7개 청산 규칙을 순서대로 평가합니다.
+      복수 트리거 시 가장 높은 우선순위(낮은 번호) 1개만 실행됩니다.
+    </p>
+
+    <table class="exit-table">
+      <tr><th style="width:40px">#</th><th style="width:110px">ID</th><th>조건</th><th>상세 로직</th></tr>
+      <tr>
+        <td><span class="prio prio-1">1</span></td>
+        <td><code>ES1</code></td>
+        <td>PnL ≤ -3%</td>
+        <td style="color:var(--text2)">절대 손실 한도. 어떤 상황에서도 -3% 초과 손실 방지.</td>
+      </tr>
+      <tr>
+        <td><span class="prio prio-2">2</span></td>
+        <td><code>ES_ATR_SL</code></td>
+        <td>동적 ATR 손절</td>
+        <td style="color:var(--text2)">ADX ≥ 25 (추세): Entry ± 1.5×ATR<br>ADX < 25 (횡보): Entry ± 2.0×ATR</td>
+      </tr>
+      <tr>
+        <td><span class="prio prio-3">3</span></td>
+        <td><code>ES_ATR_TP</code></td>
+        <td>ATR×3 익절</td>
+        <td style="color:var(--text2)">Entry ± 3×ATR 도달 시 익절. R:R ≥ 2:1 보장.</td>
+      </tr>
+      <tr>
+        <td><span class="prio prio-4">4</span></td>
+        <td><code>ES_CHANDELIER</code></td>
+        <td>최고/최저가 - 3×ATR</td>
+        <td style="color:var(--text2)">22봉 최고가(롱) / 최저가(숏) 기준 3×ATR 이탈 시 청산.</td>
+      </tr>
+      <tr>
+        <td><span class="prio prio-5">5</span></td>
+        <td><code>ES3</code></td>
+        <td>프로그레시브 트레일링</td>
+        <td style="color:var(--text2)">+2% 수익에서 활성화. PnL별 타이트닝:<br>≥5%→0.5%, ≥3%→1.0%, else→1.5%</td>
+      </tr>
+      <tr>
+        <td><span class="prio prio-6">6</span></td>
+        <td><code>ES_CHOCH</code></td>
+        <td>MACD 반전</td>
+        <td style="color:var(--text2)">MACD 히스토그램이 롱→음수 전환 또는 숏→양수 전환 시 청산.</td>
+      </tr>
+      <tr>
+        <td><span class="prio prio-7">7</span></td>
+        <td><code>ES5</code></td>
+        <td>최대 보유 20일</td>
+        <td style="color:var(--text2)">진입 시간 기준 20일 초과 시 무조건 청산.</td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="section-card">
+    <h3>📊 Exit Priority Flow</h3>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:13px;">
+      <span style="background:var(--red-bg);color:var(--red);padding:4px 10px;border-radius:6px;font-weight:600;">ES1 Hard SL</span>
+      <span style="color:var(--text2)">→</span>
+      <span style="background:var(--orange-bg);color:var(--orange);padding:4px 10px;border-radius:6px;font-weight:600;">ES_ATR_SL</span>
+      <span style="color:var(--text2)">→</span>
+      <span style="background:var(--green-bg);color:var(--green);padding:4px 10px;border-radius:6px;font-weight:600;">ES_ATR_TP</span>
+      <span style="color:var(--text2)">→</span>
+      <span style="background:var(--blue-bg);color:var(--blue);padding:4px 10px;border-radius:6px;font-weight:600;">Chandelier</span>
+      <span style="color:var(--text2)">→</span>
+      <span style="background:var(--purple-bg);color:var(--purple);padding:4px 10px;border-radius:6px;font-weight:600;">Trail</span>
+      <span style="color:var(--text2)">→</span>
+      <span style="background:rgba(210,153,34,0.15);color:var(--yellow);padding:4px 10px;border-radius:6px;font-weight:600;">MACD ChoCh</span>
+      <span style="color:var(--text2)">→</span>
+      <span style="background:rgba(139,148,158,0.15);color:var(--text2);padding:4px 10px;border-radius:6px;font-weight:600;">Max Hold</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ PANEL 4: POSITION SIZING ═══════ -->
+<div id="panel-sizing" class="panel">
+  <div class="section-card">
+    <h3>📐 Kelly Criterion Position Sizing</h3>
+    <div class="code-block" style="font-size:16px;text-align:center;padding:24px;">
+contracts = (<span class="str">Equity</span> × <span class="num">1.5%</span>) / (|<span class="str">Entry</span> - <span class="str">SL</span>| × <span class="num">$50</span>)
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-top:16px;">
+      <div style="background:var(--surface2);border-radius:10px;padding:16px;text-align:center;">
+        <div style="color:var(--text2);font-size:12px;">Account Equity</div>
+        <div style="font-size:24px;font-weight:700;color:var(--green);">$100,000</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:10px;padding:16px;text-align:center;">
+        <div style="color:var(--text2);font-size:12px;">Risk per Trade</div>
+        <div style="font-size:24px;font-weight:700;color:var(--orange);">1.5%</div>
+        <div style="font-size:12px;color:var(--text2);">= $1,500</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:10px;padding:16px;text-align:center;">
+        <div style="color:var(--text2);font-size:12px;">Contract Type</div>
+        <div style="font-size:24px;font-weight:700;color:var(--blue);">E-mini</div>
+        <div style="font-size:12px;color:var(--text2);">$50/pt</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:10px;padding:16px;text-align:center;">
+        <div style="color:var(--text2);font-size:12px;">Safety Cap</div>
+        <div style="font-size:24px;font-weight:700;color:var(--red);">1~10</div>
+        <div style="font-size:12px;color:var(--text2);">contracts</div>
+      </div>
+    </div>
+
+    <!-- Interactive Calculator -->
+    <h4 style="margin-top:24px;margin-bottom:12px;">Interactive Calculator</h4>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+      <div>
+        <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px;">Entry Price</label>
+        <input id="calc-entry" type="number" value="5850" step="0.25"
+          style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14px;"
+          oninput="calcSize()">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px;">Stop Loss</label>
+        <input id="calc-sl" type="number" value="5820" step="0.25"
+          style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14px;"
+          oninput="calcSize()">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px;">Equity ($)</label>
+        <input id="calc-equity" type="number" value="100000" step="1000"
+          style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14px;"
+          oninput="calcSize()">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:4px;">Contract</label>
+        <select id="calc-type"
+          style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14px;"
+          onchange="calcSize()">
+          <option value="50">E-mini ($50/pt)</option>
+          <option value="5">Micro ($5/pt)</option>
+        </select>
+      </div>
+    </div>
+    <div id="calc-result" style="margin-top:16px;padding:16px;background:var(--surface2);border-radius:10px;font-size:14px;"></div>
+  </div>
+</div>
+
+<!-- ═══════ PANEL 5: SLACK PREVIEW ═══════ -->
+<div id="panel-slack" class="panel">
+  <div class="section-card">
+    <h3>💬 Slack Alert Preview</h3>
+    <p style="color:var(--text2);font-size:13px;margin-bottom:16px;">
+      Block Kit 기반 리치 포맷팅. 진입/청산 각각 별도 메시지 템플릿 사용.
+    </p>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(480px,1fr));gap:20px;">
+      <!-- Entry Alert -->
+      <div>
+        <h4 style="font-size:13px;color:var(--text2);margin-bottom:8px;">Entry Alert</h4>
+        <div class="slack-preview">
+          <div class="slack-header" style="color:#3fb950;">🟢  ES 진입 신호  |  LONG</div>
+          <div class="slack-field-grid">
+            <div class="slack-field"><label>Ticker</label><div class="val"><code>ES=F</code></div></div>
+            <div class="slack-field"><label>시각</label><div class="val">2026-03-16 09:35</div></div>
+            <div class="slack-field"><label>진입가</label><div class="val"><code>5,847.25</code></div></div>
+            <div class="slack-field"><label>방향</label><div class="val">LONG</div></div>
+            <div class="slack-field"><label>손절가</label><div class="val"><code>5,812.50</code></div></div>
+            <div class="slack-field"><label>익절가</label><div class="val"><code>5,951.00</code></div></div>
+            <div class="slack-field"><label>R:R</label><div class="val">2.98:1</div></div>
+            <div class="slack-field"><label>ATR</label><div class="val">23.17  |  ADX 31.4</div></div>
+          </div>
+          <div style="font-weight:700;font-size:13px;margin:8px 0 4px;">4-Layer 스코어  →  75 / 100</div>
+          <div class="slack-scoreboard">
+L1 Z-Score   ████████░░  20/25
+L2 Trend     ██████████  25/25
+L3 Momentum  ██████░░░░  15/25
+L4 Volume    ██████░░░░  15/25
+──────────────────────────────────────
+TOTAL        ████████░░  75/100
+          </div>
+          <div class="slack-field-grid">
+            <div class="slack-field"><label>포지션 사이징 (Kelly)</label><div class="val"><code>1</code> contracts (emini)</div></div>
+            <div class="slack-field"><label>리스크</label><div class="val">$1,738  (1.74%)</div></div>
+          </div>
+          <div class="slack-context">ES Signal Bot  •  임계값 60pt  •  2026-03-16 09:35</div>
+        </div>
+      </div>
+
+      <!-- Exit Alert -->
+      <div>
+        <h4 style="font-size:13px;color:var(--text2);margin-bottom:8px;">Exit Alert</h4>
+        <div class="slack-preview">
+          <div class="slack-header" style="color:#3fb950;">✅  ES 청산 신호  |  ES_ATR_TP</div>
+          <div class="slack-field-grid">
+            <div class="slack-field"><label>청산 ID</label><div class="val"><code>ES_ATR_TP</code>  (P3)</div></div>
+            <div class="slack-field"><label>방향</label><div class="val">LONG</div></div>
+            <div class="slack-field"><label>진입가</label><div class="val"><code>5,847.25</code></div></div>
+            <div class="slack-field"><label>청산가</label><div class="val"><code>5,916.75</code></div></div>
+            <div class="slack-field"><label>손익</label><div class="val" style="color:#3fb950;"><code>+1.19%</code></div></div>
+            <div class="slack-field"><label>계약수</label><div class="val">1 (emini)</div></div>
+          </div>
+          <div style="margin-top:10px;">
+            <div style="font-weight:700;font-size:12px;color:#e6e6e6;">사유</div>
+            <div style="font-size:13px;color:#d1d5db;">ATR TP hit (3.0×ATR, R:R≥2)</div>
+          </div>
+          <div class="slack-context">ES Signal Bot  •  청산 우선순위 3/7  •  2026-03-16 14:20</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <h3>🔔 Alert Types</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+      <div style="background:var(--green-bg);border:1px solid rgba(63,185,80,0.3);border-radius:10px;padding:14px;text-align:center;">
+        <div style="font-size:24px;">🟢</div>
+        <div style="font-weight:600;font-size:13px;">Entry LONG</div>
+      </div>
+      <div style="background:var(--red-bg);border:1px solid rgba(248,81,73,0.3);border-radius:10px;padding:14px;text-align:center;">
+        <div style="font-size:24px;">🔴</div>
+        <div style="font-weight:600;font-size:13px;">Entry SHORT</div>
+      </div>
+      <div style="background:var(--blue-bg);border:1px solid rgba(88,166,255,0.3);border-radius:10px;padding:14px;text-align:center;">
+        <div style="font-size:24px;">🚨✅⏰</div>
+        <div style="font-weight:600;font-size:13px;">Exit Alerts (7종)</div>
+      </div>
+      <div style="background:var(--purple-bg);border:1px solid rgba(188,140,255,0.3);border-radius:10px;padding:14px;text-align:center;">
+        <div style="font-size:24px;">🚀🛑</div>
+        <div style="font-weight:600;font-size:13px;">Heartbeat</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ PANEL 6: SETUP GUIDE ═══════ -->
+<div id="panel-setup" class="panel">
+  <div class="section-card">
+    <h3>📂 프로젝트 구조</h3>
+    <div class="file-tree">
+      <div><span class="dir">ES-Futures-signal/</span></div>
+      <div>├── <span class="file">config.py</span> <span class="desc">— 모든 파라미터 (임계값, ATR 배수, Kelly 계수 등)</span></div>
+      <div>├── <span class="file">signal_engine.py</span> <span class="desc">— 4-Layer 진입 스코어링 엔진</span></div>
+      <div>├── <span class="file">exit_engine.py</span> <span class="desc">— 7-Priority 청산 엔진</span></div>
+      <div>├── <span class="file">position_sizer.py</span> <span class="desc">— Kelly Criterion 포지션 사이징</span></div>
+      <div>├── <span class="file">slack_notifier.py</span> <span class="desc">— Slack Block Kit 알림</span></div>
+      <div>├── <span class="file">runner.py</span> <span class="desc">— APScheduler 오케스트레이터</span></div>
+      <div>├── <span class="file">requirements.txt</span> <span class="desc">— Python 의존성</span></div>
+      <div>└── <span class="file">es_signal_system_architecture.svg</span> <span class="desc">— 아키텍처 다이어그램</span></div>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <h3>🚀 Setup Guide</h3>
+
+    <div class="setup-step">
+      <div class="step-num">1</div>
+      <div class="step-content">
+        <h4>의존성 설치</h4>
+        <div class="cmd">pip install -r requirements.txt</div>
+        <p>yfinance, pandas, numpy, apscheduler</p>
+      </div>
+    </div>
+
+    <div class="setup-step">
+      <div class="step-num">2</div>
+      <div class="step-content">
+        <h4>Slack Webhook 설정</h4>
+        <p><code>config.py</code>의 <code>SLACK_WEBHOOK_URL</code>을 실제 Webhook URL로 변경하세요.</p>
+        <div class="cmd">SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"</div>
+        <p>Slack App → Incoming Webhooks → Add New Webhook → 채널 선택</p>
+      </div>
+    </div>
+
+    <div class="setup-step">
+      <div class="step-num">3</div>
+      <div class="step-content">
+        <h4>파라미터 커스터마이징</h4>
+        <p><code>config.py</code>에서 계좌 자본금, 리스크 비율, 계약 유형 등을 조정하세요.</p>
+        <div class="code-block">
+EQUITY       = <span class="num">100_000</span>     <span class="cm"># 계좌 자본금</span>
+RISK_PCT     = <span class="num">0.015</span>       <span class="cm"># Kelly 비율 (1.5%)</span>
+CONTRACT_TYPE = <span class="str">"emini"</span>    <span class="cm"># "emini" | "micro"</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="setup-step">
+      <div class="step-num">4</div>
+      <div class="step-content">
+        <h4>실행</h4>
+        <div class="cmd">python runner.py</div>
+        <p>5분 간격으로 ES=F 시세를 수신하고, 신호 발생 시 Slack으로 알림을 보냅니다.</p>
+        <div style="margin-top:8px;">
+          <div class="cmd">python runner.py --once</div>
+          <span style="font-size:12px;color:var(--text2);margin-left:8px;">1회 실행</span>
+        </div>
+        <div style="margin-top:4px;">
+          <div class="cmd">python runner.py --backtest 7</div>
+          <span style="font-size:12px;color:var(--text2);margin-left:8px;">최근 7일 백테스트</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="setup-step">
+      <div class="step-num">5</div>
+      <div class="step-content">
+        <h4>주의사항</h4>
+        <p style="color:var(--orange);">
+          이 시스템은 교육/연구 목적입니다. 실거래 전 반드시 충분한 백테스트와 페이퍼 트레이딩을 수행하세요.
+          yfinance 데이터는 지연될 수 있으며, 실시간 트레이딩에는 브로커 API(IBKR 등)를 권장합니다.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ─── Panel switching ─────────────────────────────────────────────────
+  function showPanel(id) {
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('panel-' + id).classList.add('active');
+    document.querySelectorAll('.tab').forEach(t => {
+      if (t.textContent.toLowerCase().includes(id.substring(0,4)) ||
+          (id === 'arch' && t.textContent === 'Architecture') ||
+          (id === 'entry' && t.textContent === 'Entry Logic') ||
+          (id === 'exit' && t.textContent === 'Exit Logic') ||
+          (id === 'sizing' && t.textContent === 'Position Sizing') ||
+          (id === 'slack' && t.textContent === 'Slack Preview') ||
+          (id === 'setup' && t.textContent === 'Setup Guide')
+      ) t.classList.add('active');
+    });
+  }
+
+  // ─── Expand/collapse architecture nodes ──────────────────────────────
+  function toggleNode(el) {
+    el.classList.toggle('expanded');
+  }
+
+  // ─── Scoring detail panels ───────────────────────────────────────────
+  function showScoringDetail(layer) {
+    document.querySelectorAll('.scoring-detail').forEach(d => {
+      if (d.id === 'scoring-detail-' + layer) {
+        d.classList.toggle('active');
+      } else {
+        d.classList.remove('active');
+      }
+    });
+  }
+
+  // ─── Position size calculator ────────────────────────────────────────
+  function calcSize() {
+    const entry = parseFloat(document.getElementById('calc-entry').value) || 0;
+    const sl    = parseFloat(document.getElementById('calc-sl').value) || 0;
+    const eq    = parseFloat(document.getElementById('calc-equity').value) || 100000;
+    const mult  = parseFloat(document.getElementById('calc-type').value) || 50;
+    const risk  = 0.015;
+
+    const riskPt = Math.abs(entry - sl);
+    if (riskPt < 0.01) {
+      document.getElementById('calc-result').innerHTML = '<span style="color:var(--red)">SL이 Entry와 너무 가깝습니다.</span>';
+      return;
+    }
+    const raw = (eq * risk) / (riskPt * mult);
+    const ct  = Math.max(1, Math.min(10, Math.floor(raw)));
+    const riskDollars = ct * riskPt * mult;
+    const notional    = ct * entry * mult;
+    const tp = entry > sl ? entry + riskPt * 3 : entry - riskPt * 3;
+    const dir = entry > sl ? 'LONG' : 'SHORT';
+
+    document.getElementById('calc-result').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;text-align:center;">
+        <div>
+          <div style="color:var(--text2);font-size:11px;">Direction</div>
+          <div style="font-size:18px;font-weight:700;color:${dir==='LONG'?'var(--green)':'var(--red)'}">${dir}</div>
+        </div>
+        <div>
+          <div style="color:var(--text2);font-size:11px;">Contracts</div>
+          <div style="font-size:18px;font-weight:700;color:var(--blue)">${ct}</div>
+          <div style="font-size:11px;color:var(--text2)">raw: ${raw.toFixed(2)}</div>
+        </div>
+        <div>
+          <div style="color:var(--text2);font-size:11px;">Risk ($)</div>
+          <div style="font-size:18px;font-weight:700;color:var(--orange)">$${riskDollars.toLocaleString()}</div>
+          <div style="font-size:11px;color:var(--text2)">${(riskDollars/eq*100).toFixed(2)}%</div>
+        </div>
+        <div>
+          <div style="color:var(--text2);font-size:11px;">Take Profit</div>
+          <div style="font-size:18px;font-weight:700;color:var(--green)">${tp.toFixed(2)}</div>
+          <div style="font-size:11px;color:var(--text2)">ATR×3 target</div>
+        </div>
+        <div>
+          <div style="color:var(--text2);font-size:11px;">Notional</div>
+          <div style="font-size:18px;font-weight:700;">$${notional.toLocaleString()}</div>
+        </div>
+        <div>
+          <div style="color:var(--text2);font-size:11px;">Risk per Pt</div>
+          <div style="font-size:18px;font-weight:700;">${riskPt.toFixed(2)} pts</div>
+        </div>
+      </div>
+    `;
+  }
+  calcSize();
+</script>
+</body>
+</html>

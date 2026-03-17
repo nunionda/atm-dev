@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
+from dataclasses import asdict
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 
@@ -78,6 +79,10 @@ class IntradayBacktestRequest(BaseModel):
     period: str = "60d"
     initial_equity: float = 10000.0
     is_micro: bool = True
+    mode: str = "intraday"  # "intraday" | "daily"
+    start_date: str = ""    # YYYYMMDD, daily mode only
+    end_date: str = ""      # YYYYMMDD, daily mode only
+    trend_adaptive: bool = False  # trend-adaptive regime detection (daily only)
 
 
 # ══════════════════════════════════════════
@@ -123,12 +128,22 @@ def _safe_float(v, default=0.0) -> float:
 
 
 def _sanitize_for_json(obj):
-    """NaN/Inf를 JSON 직렬화 가능하게 변환."""
+    """NaN/Inf/numpy 타입을 JSON 직렬화 가능하게 변환."""
+    import numpy as np
     if isinstance(obj, float):
         if math.isnan(obj):
             return None
         if math.isinf(obj):
             return 0.0
+    if isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        v = float(obj)
+        return None if math.isnan(v) else (0.0 if math.isinf(v) else v)
+    if isinstance(obj, np.ndarray):
+        return [_sanitize_for_json(v) for v in obj.tolist()]
     if isinstance(obj, dict):
         return {k: _sanitize_for_json(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -303,6 +318,9 @@ async def analyze_esf_intraday(
         else:
             grade = "D"
 
+        # 레짐 정보
+        regime_info = strategy.get_regime_info(df)
+
         # VP 데이터 (간략)
         vp_data = strategy.get_volume_profile_summary(df)
 
@@ -312,6 +330,13 @@ async def analyze_esf_intraday(
         tp = current_price + atr * cfg.tp_atr_mult if is_long else current_price - atr * cfg.tp_atr_mult
         rr_ratio = abs(tp - current_price) / abs(current_price - sl) if abs(current_price - sl) > 0 else 0
 
+        # Magnetic MA 분석
+        magnetic_ma = strategy.compute_magnetic_ma(df)
+
+        # VWATR S/R Zones
+        vwatr_zones = strategy.compute_vwatr_zones(df)
+        vwatr_zones_data = [asdict(z) for z in vwatr_zones]
+
         result = {
             "ticker": ticker,
             "interval": interval,
@@ -320,6 +345,7 @@ async def analyze_esf_intraday(
             "grade": grade,
             "signal_active": grade in ("A", "B") and direction != "NEUTRAL",
             "amt_state": amt_state,
+            "magnetic_ma": magnetic_ma,
             "layers": {
                 "amt_location": {
                     "score": round(l1_score, 1),
@@ -357,6 +383,8 @@ async def analyze_esf_intraday(
             "take_profit": round(tp, 2),
             "risk_reward_ratio": round(rr_ratio, 2),
             "last_updated": curr.name.strftime("%Y-%m-%d %H:%M") if hasattr(curr.name, "strftime") else str(curr.name),
+            "regime": regime_info,
+            "vwatr_zones": vwatr_zones_data,
         }
 
         # 지표가 전부 기본값이면 캐시 저장 안 함
@@ -417,6 +445,33 @@ async def get_esf_signal(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@esf_router.get("/esf/regime/{ticker}")
+async def get_esf_regime(
+    ticker: str = "ES=F",
+    period: str = Query("60d", description="데이터 기간"),
+    interval: str = Query("15m", description="인트라데이 interval"),
+):
+    """현재 레짐 정보 반환 (BULL/NEUTRAL/BEAR/CRISIS + 트렌드 스코어)."""
+    _validate_esf_ticker(ticker)
+    _validate_intraday_period(period)
+    _validate_intraday_interval(interval)
+
+    try:
+        df = _download_intraday_data(ticker, period, interval)
+        if df.empty:
+            raise HTTPException(status_code=404, detail=f"No data for {ticker}")
+
+        strategy = _get_strategy()
+        regime_info = strategy.get_regime_info(df)
+        return JSONResponse(content=_sanitize_for_json(regime_info))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("ESF regime error: %s", str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @esf_router.get("/esf/session-status")
 async def esf_session_status():
     """현재 RTH 세션 상태."""
@@ -457,6 +512,19 @@ async def get_esf_candles(
         if df.empty or len(df) < 2:
             raise HTTPException(status_code=404, detail=f"Insufficient data for {ticker}")
 
+        # Magnetic MA: best MA 값을 캔들에 포함
+        magnetic = strategy.compute_magnetic_ma(df)
+        magnetic_best = magnetic.get("best")
+        if magnetic_best:
+            bp = magnetic_best["period"]
+            bt = magnetic_best["type"]
+            if bt == "SMA":
+                df["magnetic_ma"] = df["close"].astype(float).rolling(bp).mean()
+            else:
+                df["magnetic_ma"] = df["close"].astype(float).ewm(span=bp, adjust=False).mean()
+        else:
+            df["magnetic_ma"] = float("nan")
+
         candles = []
         for idx, row in df.iterrows():
             candle = {
@@ -482,8 +550,14 @@ async def get_esf_candles(
                 "ema_fast": round(_safe_float(row.get("ema_fast")), 2) if not pd.isna(row.get("ema_fast", float("nan"))) else None,
                 "ema_mid": round(_safe_float(row.get("ema_mid")), 2) if not pd.isna(row.get("ema_mid", float("nan"))) else None,
                 "ema_slow": round(_safe_float(row.get("ema_slow")), 2) if not pd.isna(row.get("ema_slow", float("nan"))) else None,
+                "magnetic_ma": round(_safe_float(row.get("magnetic_ma")), 2) if not pd.isna(row.get("magnetic_ma", float("nan"))) else None,
+                "vwatr": round(_safe_float(row.get("vwatr")), 2) if not pd.isna(row.get("vwatr", float("nan"))) else None,
             }
             candles.append(candle)
+
+        # VWATR S/R Zones
+        vwatr_zones = strategy.compute_vwatr_zones(df)
+        vwatr_zones_data = [asdict(z) for z in vwatr_zones]
 
         result = {
             "ticker": ticker,
@@ -491,6 +565,8 @@ async def get_esf_candles(
             "period": period,
             "count": len(candles),
             "candles": candles,
+            "magnetic_ma_info": magnetic_best,
+            "vwatr_zones": vwatr_zones_data,
         }
 
         _analysis_cache[cache_key] = result
@@ -536,7 +612,7 @@ async def get_volume_profile(
             "vah": vp.vah,
             "val": vp.val,
             "lvn_levels": vp.lvn_levels,
-            "nodes": [{"price": n[0], "volume": n[1]} for n in vp.nodes],
+            "nodes": [{"price": n["price"], "volume": n["volume"]} for n in vp.nodes],
             "node_count": len(vp.nodes),
         }
         return _sanitize_for_json(vp_result)
@@ -550,11 +626,35 @@ async def get_volume_profile(
 
 @esf_router.post("/esf/backtest")
 async def run_esf_backtest(req: IntradayBacktestRequest):
-    """인트라데이 백테스트 실행 (백그라운드)."""
+    """인트라데이/데일리 백테스트 실행 (백그라운드).
+
+    mode="intraday": 15분봉 인트라데이 백테스트 (max 60d)
+    mode="daily": 일봉 데일리 백테스트 (최대 10년+, FuturesBacktester 사용)
+    """
     global _backtest_in_progress, _backtest_cache, _backtest_progress
 
     _validate_esf_ticker(req.ticker)
-    _validate_intraday_period(req.period)
+
+    if req.mode not in ("intraday", "daily"):
+        raise HTTPException(status_code=400, detail="mode must be 'intraday' or 'daily'")
+
+    if req.mode == "intraday":
+        _validate_intraday_period(req.period)
+    elif req.mode == "daily":
+        # daily mode: start_date/end_date 필수
+        if not req.start_date or not req.end_date:
+            raise HTTPException(
+                status_code=400,
+                detail="start_date and end_date (YYYYMMDD) required for daily mode",
+            )
+        # 날짜 형식 검증
+        try:
+            s = datetime.strptime(req.start_date, "%Y%m%d")
+            e = datetime.strptime(req.end_date, "%Y%m%d")
+            if s >= e:
+                raise ValueError("start_date must be before end_date")
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=f"Invalid date: {ve}")
 
     if req.initial_equity <= 0:
         raise HTTPException(status_code=400, detail="initial_equity must be positive")
@@ -574,21 +674,37 @@ async def run_esf_backtest(req: IntradayBacktestRequest):
                 global _backtest_progress
                 _backtest_progress = pct
 
-            from backtest.intraday_backtester import IntradayBacktester
-            bt = IntradayBacktester(
-                config=config,
-                ticker=req.ticker,
-                period=req.period,
-                initial_equity=req.initial_equity,
-                is_micro=req.is_micro,
-                progress_callback=_on_progress,
-            )
+            if req.mode == "daily":
+                # Daily mode → FuturesBacktester (SP500FuturesStrategy 4-Layer scoring)
+                from backtest.futures_backtester import FuturesBacktester
+                bt = FuturesBacktester(
+                    config=config,
+                    ticker=req.ticker,
+                    start_date=req.start_date,
+                    end_date=req.end_date,
+                    initial_equity=req.initial_equity,
+                    is_micro=req.is_micro,
+                    progress_callback=_on_progress,
+                    trend_adaptive=req.trend_adaptive,
+                )
+            else:
+                # Intraday mode → IntradayBacktester (15m bars)
+                from backtest.intraday_backtester import IntradayBacktester
+                bt = IntradayBacktester(
+                    config=config,
+                    ticker=req.ticker,
+                    period=req.period,
+                    initial_equity=req.initial_equity,
+                    is_micro=req.is_micro,
+                    progress_callback=_on_progress,
+                )
+
             result = bt.run()
             _backtest_cache = result
             _backtest_progress = 100.0
             return result
         except Exception as e:
-            logger.error("ESF backtest error: %s", str(e), exc_info=True)
+            logger.error("ESF backtest error (mode=%s): %s", req.mode, str(e), exc_info=True)
             _backtest_cache = {"error": str(e)}
             raise
         finally:

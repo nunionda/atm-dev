@@ -54,18 +54,11 @@ export function Navbar() {
                         <span>Rebalance</span>
                     </Link>
                     <Link
-                        to="/futures-trading"
-                        className={`nav-link ${isActive('/futures-trading') || isActive('/scalp-analyzer') ? 'active' : ''}`}
-                    >
-                        <Activity size={18} />
-                        <span>Futures</span>
-                    </Link>
-                    <Link
-                        to="/esf-scalping"
-                        className={`nav-link ${isActive('/esf-scalping') ? 'active' : ''}`}
+                        to="/futures"
+                        className={`nav-link ${isActive('/futures') || isActive('/es-futures') || isActive('/futures-trading') || isActive('/esf-scalping') || isActive('/scalp-analyzer') ? 'active' : ''}`}
                     >
                         <Zap size={18} />
-                        <span>ESF Scalp</span>
+                        <span>Futures</span>
                     </Link>
                     <Link
                         to="/option-calculator"

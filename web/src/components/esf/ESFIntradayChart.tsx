@@ -19,7 +19,7 @@ import {
   type SeriesType,
   type Time,
 } from 'lightweight-charts';
-import type { ESFCandle } from '../../lib/api';
+import type { ESFCandle, VWATRZone } from '../../lib/api';
 
 // ── Types ──
 
@@ -36,6 +36,8 @@ interface SubchartState {
   rsi: boolean;
   macd: boolean;
   zscore: boolean;
+  atr: boolean;
+  adx: boolean;
 }
 
 interface ESFIntradayChartProps {
@@ -47,9 +49,23 @@ interface ESFIntradayChartProps {
     lvn_levels: number[];
   };
   entryPlan?: EntryPlan | null;
+  vwatrZones?: VWATRZone[];
   subcharts?: SubchartState;
   height?: number;
   ticker?: string;
+}
+
+// Rolling average helper
+function rollingAvg(candles: ESFCandle[], key: 'atr_14', window: number): { time: Time; value: number }[] {
+  return dedupByTime(
+    candles
+      .filter((c) => c[key] != null)
+      .map((c, idx, arr) => {
+        const slice = arr.slice(Math.max(0, idx - window + 1), idx + 1).filter((x) => x[key] != null);
+        const avg = slice.reduce((s, x) => s + (x[key] as number), 0) / slice.length;
+        return { time: parseTime(c.datetime), value: avg };
+      })
+  );
 }
 
 // ── Helpers ──
@@ -82,15 +98,28 @@ const SHARED_CHART_OPTIONS = {
     vertLine: { color: 'rgba(99, 102, 241, 0.4)', width: 1 as const, style: 2 as const, labelBackgroundColor: '#6366f1' },
     horzLine: { color: 'rgba(99, 102, 241, 0.4)', width: 1 as const, style: 2 as const, labelBackgroundColor: '#6366f1' },
   },
+  handleScroll: {
+    mouseWheel: false,
+    pressedMouseMove: true,
+    horzTouchDrag: true,
+    vertTouchDrag: false,
+  },
+  handleScale: {
+    mouseWheel: false,
+    pinch: false,
+    axisPressedMouseMove: { time: true, price: true }, // 축 드래그로 스케일 조정 허용
+    axisDoubleClickReset: true,
+  },
   timeScale: {
     borderColor: 'rgba(255, 255, 255, 0.06)',
     timeVisible: true,
     secondsVisible: false,
-    rightOffset: 5,
+    rightOffset: 12,
     barSpacing: 6,
   },
   rightPriceScale: {
     borderColor: 'rgba(255, 255, 255, 0.06)',
+    minimumWidth: 72,
   },
 };
 
@@ -102,6 +131,88 @@ const SUBCHART_OPTIONS = {
   },
 };
 
+// ── Right-axis label deconfliction overlay ──
+interface AxisLabelItem {
+  price: number;
+  text: string;
+  color: string;
+}
+
+function updateAxisLabels(
+  series: ISeriesApi<SeriesType>,
+  items: AxisLabelItem[],
+  overlay: HTMLDivElement,
+  chartHeight: number,
+) {
+  const MIN_GAP = 16;
+  const LABEL_H = 14;
+
+  const mapped = items
+    .map((item) => {
+      const y = series.priceToCoordinate(item.price);
+      return { ...item, origY: (y ?? -1) as number, labelY: (y ?? -1) as number };
+    })
+    .filter((r) => r.origY >= 0 && r.origY <= chartHeight)
+    .sort((a, b) => a.origY - b.origY);
+
+  // Downward pass — push overlapping labels down
+  for (let i = 1; i < mapped.length; i++) {
+    if (mapped[i].labelY - mapped[i - 1].labelY < MIN_GAP) {
+      mapped[i].labelY = mapped[i - 1].labelY + MIN_GAP;
+    }
+  }
+  // Upward pass — fix any that got pushed below bottom
+  for (let i = mapped.length - 2; i >= 0; i--) {
+    if (mapped[i + 1].labelY - mapped[i].labelY < MIN_GAP) {
+      mapped[i].labelY = mapped[i + 1].labelY - MIN_GAP;
+    }
+  }
+
+  overlay.innerHTML = '';
+  mapped.forEach((item) => {
+    const lY = Math.round(item.labelY) - Math.floor(LABEL_H / 2);
+    if (lY < -LABEL_H || lY > chartHeight + LABEL_H) return;
+
+    // Horizontal tick at original price when label was moved
+    if (Math.abs(item.labelY - item.origY) > 4) {
+      const tick = document.createElement('div');
+      tick.style.cssText = [
+        'position:absolute', 'right:0',
+        `top:${Math.round(item.origY)}px`,
+        'width:6px', 'height:1px',
+        `background:${item.color}`, 'opacity:0.6',
+      ].join(';');
+      overlay.appendChild(tick);
+    }
+
+    const el = document.createElement('div');
+    el.style.cssText = [
+      'position:absolute', 'right:0',
+      `top:${lY}px`,
+      `background:${item.color}`,
+      'color:#fff',
+      'font-size:9px',
+      "font-family:'IBM Plex Mono',monospace",
+      'font-weight:700',
+      'padding:1px 4px',
+      'border-radius:2px 0 0 2px',
+      'white-space:nowrap',
+      'line-height:1.4',
+      'text-shadow:0 1px 2px rgba(0,0,0,0.6)',
+      'pointer-events:none',
+      'max-width:70px',
+      'overflow:hidden',
+      'text-overflow:ellipsis',
+    ].join(';');
+    // Shorten label: "VWATR S1 (SMA9)" → "S1", "Mag MA" → "Mag"
+    const shortText = item.text
+      .replace(/^VWATR /, '')
+      .replace(/\s*\([^)]*\)/, '');
+    el.textContent = `${shortText} ${item.price.toFixed(1)}`;
+    overlay.appendChild(el);
+  });
+}
+
 // ══════════════════════════════════════════
 // Component
 // ══════════════════════════════════════════
@@ -110,14 +221,18 @@ export default function ESFIntradayChart({
   candles,
   volumeProfile,
   entryPlan,
-  subcharts = { rsi: true, macd: true, zscore: false },
+  vwatrZones,
+  subcharts = { rsi: true, macd: true, zscore: false, atr: true, adx: true },
   height = 420,
   ticker = 'ES=F',
 }: ESFIntradayChartProps) {
   const mainRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const rsiRef = useRef<HTMLDivElement>(null);
   const macdRef = useRef<HTMLDivElement>(null);
   const zscoreRef = useRef<HTMLDivElement>(null);
+  const atrRef = useRef<HTMLDivElement>(null);
+  const adxRef = useRef<HTMLDivElement>(null);
   const chartApiRef = useRef<IChartApi | null>(null);
 
   const buildChart = useCallback(() => {
@@ -128,6 +243,8 @@ export default function ESFIntradayChart({
     if (rsiRef.current) rsiRef.current.innerHTML = '';
     if (macdRef.current) macdRef.current.innerHTML = '';
     if (zscoreRef.current) zscoreRef.current.innerHTML = '';
+    if (atrRef.current) atrRef.current.innerHTML = '';
+    if (adxRef.current) adxRef.current.innerHTML = '';
 
     // ── Parse candle data ──
     const chartData = dedupByTime(
@@ -148,14 +265,17 @@ export default function ESFIntradayChart({
       }))
     );
 
-    // ── Main Chart ──
+    // ── Main Chart — 16:9 동적 높이 ──
+    const containerWidth = mainRef.current.clientWidth;
+    const chartHeight = Math.max(Math.round(containerWidth * 9 / 16), 300);
     const chart = createChart(mainRef.current, {
       ...SHARED_CHART_OPTIONS,
-      width: mainRef.current.clientWidth,
-      height,
+      width: containerWidth,
+      height: chartHeight,
       rightPriceScale: {
         borderColor: 'rgba(255, 255, 255, 0.06)',
-        scaleMargins: { top: 0.05, bottom: 0.2 },
+        scaleMargins: { top: 0.08, bottom: 0.22 },
+        minimumWidth: 72,
       },
       watermark: {
         visible: true,
@@ -168,6 +288,15 @@ export default function ESFIntradayChart({
     });
 
     chartApiRef.current = chart;
+
+    // ── Right-axis label overlay (deconflicted) ──
+    // overlayRef is rendered in JSX as a sibling, outside chart canvas control
+    const axisOverlay = overlayRef.current;
+    if (axisOverlay) {
+      axisOverlay.innerHTML = '';
+      axisOverlay.style.height = `${chartHeight}px`;
+    }
+    const axisLabelItems: AxisLabelItem[] = [];
 
     // Candlestick series
     const mainSeries: ISeriesApi<SeriesType> = chart.addCandlestickSeries({
@@ -195,7 +324,7 @@ export default function ESFIntradayChart({
       if (emaData.length > 0) {
         const emaSeries = chart.addLineSeries({
           color,
-          lineWidth: 1,
+          lineWidth: 2,
           crosshairMarkerVisible: false,
           lastValueVisible: false,
           priceLineVisible: false,
@@ -234,6 +363,75 @@ export default function ESFIntradayChart({
       bbLowSeries.setData(bbLower);
     }
 
+    // ── Magnetic MA (가장 자력 강한 MA) ──
+    const magneticData = dedupByTime(
+      candles
+        .filter((c) => c.magnetic_ma != null)
+        .map((c) => ({ time: parseTime(c.datetime), value: c.magnetic_ma! }))
+    );
+    if (magneticData.length > 0) {
+      const magneticSeries = chart.addLineSeries({
+        color: '#ff6b6b',
+        lineWidth: 2,
+        lineStyle: 0,
+        crosshairMarkerVisible: true,
+        lastValueVisible: false, // overlay handles label
+        priceLineVisible: false,
+        title: '',
+      });
+      magneticSeries.setData(magneticData);
+      const lastMag = magneticData[magneticData.length - 1]?.value;
+      if (lastMag) axisLabelItems.push({ price: lastMag, text: 'Mag MA', color: '#c0392b' });
+    }
+
+    // ── VWATR S/R Zones (top 2 SUPPORT + top 2 RESISTANCE) ──
+    if (vwatrZones && vwatrZones.length > 0) {
+      // strength 순으로 이미 정렬됨 — 타입별 최대 2개씩 선택
+      const supZones = vwatrZones.filter((z) => z.zone_type === 'SUPPORT').slice(0, 2);
+      const resZones = vwatrZones.filter((z) => z.zone_type === 'RESISTANCE').slice(0, 2);
+      const topZones = [...supZones, ...resZones];
+      // 타입별 독립 카운터 (S1/S2, R1/R2)
+      const typeCounter: Record<string, number> = { SUPPORT: 0, RESISTANCE: 0 };
+      topZones.forEach((zone) => {
+        const isSup = zone.zone_type === 'SUPPORT';
+        typeCounter[zone.zone_type] += 1;
+        const rank = typeCounter[zone.zone_type];
+        const color = isSup ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)';
+        const label = `VWATR ${isSup ? 'S' : 'R'}${rank} (${zone.ma_type}${zone.ma_period})`;
+
+        // Zone upper edge
+        mainSeries.createPriceLine({
+          price: isSup ? zone.support_upper : zone.resistance_upper,
+          color: color,
+          lineWidth: 2,
+          lineStyle: 2, // Dashed
+          axisLabelVisible: false,
+          title: '',
+        });
+        // Zone lower edge
+        mainSeries.createPriceLine({
+          price: isSup ? zone.support_lower : zone.resistance_lower,
+          color: color,
+          lineWidth: 2,
+          lineStyle: 2,
+          axisLabelVisible: false,
+          title: '',
+        });
+        // Zone center (MA value) — overlay handles axis label
+        mainSeries.createPriceLine({
+          price: zone.ma_value,
+          color: color,
+          lineWidth: 3,
+          lineStyle: 0, // Solid — 중심선은 실선으로 강조
+          axisLabelVisible: false,
+          title: '',
+        });
+        // Solid color for overlay label
+        const solidColor = isSup ? '#22c55e' : '#ef4444';
+        axisLabelItems.push({ price: zone.ma_value, text: label, color: solidColor });
+      });
+    }
+
     // ── Volume Histogram ──
     const volumeSeries = chart.addHistogramSeries({
       priceFormat: { type: 'volume' },
@@ -251,20 +449,22 @@ export default function ESFIntradayChart({
           price: volumeProfile.poc,
           color: 'rgba(59, 130, 246, 0.7)',
           lineWidth: 2,
-          lineStyle: 0, // solid
-          axisLabelVisible: true,
-          title: 'POC',
+          lineStyle: 0,
+          axisLabelVisible: false,
+          title: '',
         });
+        axisLabelItems.push({ price: volumeProfile.poc, text: 'POC', color: '#3b82f6' });
       }
       if (volumeProfile.vah > 0) {
         mainSeries.createPriceLine({
           price: volumeProfile.vah,
           color: 'rgba(255, 255, 255, 0.35)',
           lineWidth: 1,
-          lineStyle: 2, // dashed
-          axisLabelVisible: true,
-          title: 'VAH',
+          lineStyle: 2,
+          axisLabelVisible: false,
+          title: '',
         });
+        axisLabelItems.push({ price: volumeProfile.vah, text: 'VAH', color: '#6b7280' });
       }
       if (volumeProfile.val > 0) {
         mainSeries.createPriceLine({
@@ -272,12 +472,13 @@ export default function ESFIntradayChart({
           color: 'rgba(255, 255, 255, 0.35)',
           lineWidth: 1,
           lineStyle: 2,
-          axisLabelVisible: true,
-          title: 'VAL',
+          axisLabelVisible: false,
+          title: '',
         });
+        axisLabelItems.push({ price: volumeProfile.val, text: 'VAL', color: '#6b7280' });
       }
       // LVN levels
-      (volumeProfile.lvn_levels || []).slice(0, 5).forEach((lvn, i) => {
+      (volumeProfile.lvn_levels || []).slice(0, 5).forEach((lvn) => {
         if (lvn > 0) {
           mainSeries.createPriceLine({
             price: lvn,
@@ -285,7 +486,7 @@ export default function ESFIntradayChart({
             lineWidth: 1,
             lineStyle: 3, // dotted
             axisLabelVisible: false,
-            title: i === 0 ? 'LVN' : '',
+            title: '',
           });
         }
       });
@@ -414,6 +615,120 @@ export default function ESFIntradayChart({
       zsSeries.setData(zsData);
     }
 
+    // ── ATR(14) ──
+    if (subcharts.atr && atrRef.current) {
+      const atrChart = createChart(atrRef.current, {
+        ...SUBCHART_OPTIONS,
+        width: atrRef.current.clientWidth,
+        height: 100,
+        watermark: {
+          visible: true,
+          text: 'ATR(14)',
+          color: 'rgba(245, 158, 11, 0.08)',
+          fontSize: 28,
+          horzAlign: 'center',
+          vertAlign: 'center',
+        },
+      });
+      subchartList.push(atrChart);
+
+      // ATR line
+      const atrSeries = atrChart.addLineSeries({
+        color: '#f59e0b',
+        lineWidth: 2,
+        crosshairMarkerVisible: true,
+        lastValueVisible: true,
+        priceLineVisible: false,
+        title: 'ATR',
+      });
+
+      // 20-bar rolling average (reference)
+      const atrAvgSeries = atrChart.addLineSeries({
+        color: 'rgba(255, 255, 255, 0.25)',
+        lineWidth: 1,
+        lineStyle: 2,
+        crosshairMarkerVisible: false,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        title: 'Avg',
+      });
+
+      const atrData = dedupByTime(
+        candles
+          .filter((c) => c.atr_14 != null)
+          .map((c) => ({ time: parseTime(c.datetime), value: c.atr_14! }))
+      );
+      const atrAvgData = rollingAvg(candles, 'atr_14', 20);
+
+      atrSeries.setData(atrData);
+      atrAvgSeries.setData(atrAvgData);
+    }
+
+    // ── ADX / DMI ──
+    if (subcharts.adx && adxRef.current) {
+      const adxChart = createChart(adxRef.current, {
+        ...SUBCHART_OPTIONS,
+        width: adxRef.current.clientWidth,
+        height: 100,
+        watermark: {
+          visible: true,
+          text: 'ADX / DMI',
+          color: 'rgba(255, 255, 255, 0.05)',
+          fontSize: 28,
+          horzAlign: 'center',
+          vertAlign: 'center',
+        },
+      });
+      subchartList.push(adxChart);
+
+      // ADX line (trend strength)
+      const adxLine = adxChart.addLineSeries({
+        color: '#e0e0e0',
+        lineWidth: 2,
+        crosshairMarkerVisible: true,
+        lastValueVisible: true,
+        priceLineVisible: false,
+        title: 'ADX',
+      });
+      // +DI (bullish pressure)
+      const plusDiLine = adxChart.addLineSeries({
+        color: '#22c55e',
+        lineWidth: 1.5,
+        crosshairMarkerVisible: false,
+        lastValueVisible: true,
+        priceLineVisible: false,
+        title: '+DI',
+      });
+      // -DI (bearish pressure)
+      const minusDiLine = adxChart.addLineSeries({
+        color: '#ef4444',
+        lineWidth: 1.5,
+        crosshairMarkerVisible: false,
+        lastValueVisible: true,
+        priceLineVisible: false,
+        title: '-DI',
+      });
+
+      // Reference levels
+      adxLine.createPriceLine({ price: 40, color: 'rgba(245, 158, 11, 0.45)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Strong' });
+      adxLine.createPriceLine({ price: 25, color: 'rgba(59, 130, 246, 0.45)', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'Trend' });
+      adxLine.createPriceLine({ price: 20, color: 'rgba(255, 255, 255, 0.12)', lineWidth: 1, lineStyle: 3, axisLabelVisible: false, title: '' });
+
+      const adxData = dedupByTime(
+        candles.filter((c) => c.adx != null).map((c) => ({ time: parseTime(c.datetime), value: c.adx! }))
+      );
+      const plusDiData = dedupByTime(
+        candles.filter((c) => c.plus_di != null).map((c) => ({ time: parseTime(c.datetime), value: c.plus_di! }))
+      );
+      const minusDiData = dedupByTime(
+        candles.filter((c) => c.minus_di != null).map((c) => ({ time: parseTime(c.datetime), value: c.minus_di! }))
+      );
+
+      adxLine.setData(adxData);
+      plusDiLine.setData(plusDiData);
+      minusDiLine.setData(minusDiData);
+    }
+
     // ── Time Scale Sync ──
     let syncing = false;
     chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
@@ -453,21 +768,45 @@ export default function ESFIntradayChart({
       });
     });
 
-    // ── Resize Handler ──
+    // ── Axis Label Overlay — subscribe + initial render ──
+    const refreshAxisLabels = () => {
+      if (axisOverlay) updateAxisLabels(mainSeries, axisLabelItems, axisOverlay, chartHeight);
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(refreshAxisLabels);
+    // Initial render after layout settles
+    setTimeout(refreshAxisLabels, 80);
+
+    // Y축 드래그 시에도 라벨 갱신 — pointerdown 중 pointermove에서 호출
+    let dragging = false;
+    const chartContainer = mainRef.current!;
+    const onPointerDown = () => { dragging = true; };
+    const onPointerUp = () => { dragging = false; refreshAxisLabels(); };
+    const onPointerMove = () => { if (dragging) refreshAxisLabels(); };
+    chartContainer.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', onPointerUp);
+    chartContainer.addEventListener('pointermove', onPointerMove);
+
+    // ── Resize Handler — 16:9 비율 유지 ──
     const handleResize = () => {
       if (!mainRef.current) return;
       const w = mainRef.current.clientWidth;
-      chart.applyOptions({ width: w });
+      const h = Math.max(Math.round(w * 9 / 16), 300);
+      chart.applyOptions({ width: w, height: h });
+      if (axisOverlay) axisOverlay.style.height = `${h}px`;
       subchartList.forEach((c) => c.applyOptions({ width: w }));
+      refreshAxisLabels();
     };
     window.addEventListener('resize', handleResize);
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      chartContainer.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      chartContainer.removeEventListener('pointermove', onPointerMove);
       subchartList.forEach((c) => c.remove());
       chart.remove();
     };
-  }, [candles, volumeProfile, entryPlan, subcharts, height, ticker]);
+  }, [candles, volumeProfile, entryPlan, vwatrZones, subcharts, ticker]);
 
   useEffect(() => {
     const cleanup = buildChart();
@@ -484,12 +823,80 @@ export default function ESFIntradayChart({
     );
   }
 
+  // ── Legend items ──
+  const MONO = "'IBM Plex Mono', monospace";
+  type LegendItem = { color: string; dash?: boolean; label: string; desc: string };
+  const legendItems: LegendItem[] = [
+    { color: '#f59e0b',                     label: 'EMA8',    desc: 'Fast EMA (8)' },
+    { color: '#3b82f6',                     label: 'EMA21',   desc: 'Mid EMA (21)' },
+    { color: '#a855f7',                     label: 'EMA55',   desc: 'Slow EMA (55)' },
+    { color: 'rgba(99,102,241,0.7)',  dash: true, label: 'BB',      desc: 'Bollinger Bands 20·2σ' },
+    { color: '#ff6b6b',              dash: true, label: 'Mag MA',  desc: 'Magnetic MA — Mean-Rev. Target' },
+    ...(vwatrZones && vwatrZones.length > 0 ? [
+      { color: '#22c55e', dash: true, label: 'VWATR S', desc: 'VWATR Support Zone' },
+      { color: '#ef4444', dash: true, label: 'VWATR R', desc: 'VWATR Resistance Zone' },
+    ] as LegendItem[] : []),
+    ...(volumeProfile ? [
+      { color: '#3b82f6',                     label: 'POC', desc: 'Point of Control — 최대거래량' },
+      { color: 'rgba(255,255,255,0.55)', dash: true, label: 'VAH', desc: 'Value Area High — 상위 70%' },
+      { color: 'rgba(255,255,255,0.55)', dash: true, label: 'VAL', desc: 'Value Area Low — 하위 70%' },
+      { color: 'rgba(234,179,8,0.6)',    dash: true, label: 'LVN', desc: 'Low Volume Node — 저항 약함' },
+    ] as LegendItem[] : []),
+  ];
+
   return (
     <div className="esf-chart-section">
-      <div ref={mainRef} className="esf-chart-container" />
+
+      {/* ── Price Line Legend Bar (차트 위 수평 스트립) ── */}
+      <div style={{
+        display: 'flex',
+        flexWrap: 'nowrap',
+        gap: '4px 10px',
+        padding: '4px 10px',
+        background: 'rgba(255,255,255,0.03)',
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        marginBottom: 2,
+        overflowX: 'auto',
+      }}>
+        {legendItems.map((item) => (
+          <div key={item.label} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            flexShrink: 0,
+          }}>
+            {/* Line swatch */}
+            <svg width="16" height="8" style={{ flexShrink: 0 }}>
+              {item.dash
+                ? <line x1="0" y1="4" x2="16" y2="4" stroke={item.color} strokeWidth="1.5" strokeDasharray="4,2" />
+                : <line x1="0" y1="4" x2="16" y2="4" stroke={item.color} strokeWidth="2.5" />}
+            </svg>
+            {/* Label */}
+            <span style={{
+              fontSize: '0.6rem',
+              fontFamily: MONO,
+              fontWeight: 700,
+              color: item.color,
+              letterSpacing: '0.02em',
+              whiteSpace: 'nowrap',
+            }}>{item.label}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ position: 'relative', display: 'block' }}>
+        <div ref={mainRef} className="esf-chart-container" />
+        <div ref={overlayRef} style={{
+          position: 'absolute', top: 0, right: 0,
+          width: '72px', height: '0',
+          pointerEvents: 'none', zIndex: 10, overflow: 'visible',
+        }} />
+      </div>
       {subcharts.rsi && <div ref={rsiRef} className="esf-subchart-container" />}
       {subcharts.macd && <div ref={macdRef} className="esf-subchart-container" />}
       {subcharts.zscore && <div ref={zscoreRef} className="esf-subchart-container" />}
+      {subcharts.atr && <div ref={atrRef} className="esf-subchart-container" />}
+      {subcharts.adx && <div ref={adxRef} className="esf-subchart-container" />}
     </div>
   );
 }

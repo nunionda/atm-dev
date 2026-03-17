@@ -484,8 +484,8 @@ class ESFIntradayConfig:
     weight_volume_aggression: float = 25.0
 
     # Grade 임계값
-    grade_a_threshold: float = 55.0
-    grade_b_threshold: float = 45.0
+    grade_a_threshold: float = 50.0
+    grade_b_threshold: float = 40.0
     grade_c_threshold: float = 35.0
 
     # AMT 파라미터
@@ -497,7 +497,7 @@ class ESFIntradayConfig:
     # 청산
     sl_hard_pct: float = 0.015
     sl_atr_mult: float = 1.5
-    tp_atr_mult: float = 2.5
+    tp_atr_mult: float = 2.0
     trailing_activation_pct: float = 0.008
     trailing_atr_mult: float = 1.0
 
@@ -522,6 +522,32 @@ class ESFIntradayConfig:
     rsi_long_range_max: float = 70.0
     rsi_short_range_min: float = 30.0
     rsi_short_range_max: float = 60.0
+
+    # Phase C: Regime-aware scoring
+    ma_alignment_bonus: float = 5.0          # MA alignment bonus (re-enabled: full alignment +5, partial +2.5)
+    ma_counter_penalty: float = 0.0         # MA counter-trend penalty (keep disabled — EMA veto handles this)
+    regime_bull_threshold: float = 50.0     # Grade A threshold (lowered from 55 — realistic max ~49+bonus)
+    regime_neutral_threshold: float = 50.0  # Grade A threshold in NEUTRAL
+    regime_bear_threshold: float = 50.0     # Grade A threshold in BEAR
+    atr_expand_ratio: float = 99.0           # ATR expanding threshold (disabled — set extreme)
+    atr_contract_ratio: float = 0.01        # ATR contracting threshold (disabled — set extreme)
+    atr_expand_sl_mult: float = 1.0         # SL/TP multiplier when expanding (1.0 = no change)
+    atr_contract_sl_mult: float = 1.0       # SL/TP multiplier when contracting (1.0 = no change)
+
+    # Phase E: Time-of-day filter & strategy refinement
+    entry_window_optimal: str = "09:30-12:59"                  # Morning session (best WR)
+    entry_window_avoid: str = "12:00-12:59,14:00-15:30"        # Lunch lull + late session (100% loss)
+    use_time_filter: bool = True                              # Enabled — 14시 진입 WR=0% 확인
+    long_penalty_neutral: float = 0.0       # Disabled — Phase D showed degradation
+
+    # VWATR S/R Zones
+    vwatr_period: int = 20            # VWATR rolling window
+    vwatr_zone_mult: float = 0.5     # Zone width = VWATR * mult
+    vwatr_ma_periods: str = "9,20,50" # S/R 존 구성할 MA 기간들
+    vwatr_strength_min: float = 30.0  # 최소 존 강도
+    vwatr_touch_lookback: int = 50    # Touch-Reaction 분석 lookback
+    vwatr_max_score: float = 8.0     # L1 서브스코어 최대
+    vwatr_enabled: bool = True        # Feature flag (A/B 테스트용)
 
 
 @dataclass

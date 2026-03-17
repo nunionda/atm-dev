@@ -1187,6 +1187,14 @@ export interface ESFLayerScore {
     signals: string[];
 }
 
+export interface ESFRegimeInfo {
+    regime: 'BULL' | 'NEUTRAL' | 'BEAR' | 'CRISIS';
+    trend_score: number;
+    recommended_strategy: string;
+    confidence: number;
+    components: Record<string, number>;
+}
+
 export interface ESFAnalysis {
     ticker: string;
     session_status: string;
@@ -1208,6 +1216,37 @@ export interface ESFAnalysis {
     z_score: number;
     atr: number;
     indicators: Record<string, number>;
+    regime?: ESFRegimeInfo;
+    magnetic_ma?: {
+        rankings: Array<{
+            period: number; type: string;
+            reversion_rate: number; avg_reversion_bars: number;
+            avg_distance_atr: number; magnetic_score: number;
+            current_value: number; current_distance_atr: number;
+            total_samples: number;
+        }>;
+        best: {
+            period: number; type: string;
+            reversion_rate: number; avg_reversion_bars: number;
+            avg_distance_atr: number; magnetic_score: number;
+            current_value: number; current_distance_atr: number;
+            total_samples: number;
+        } | null;
+    };
+    vwatr_zones?: VWATRZone[];
+}
+
+export interface VWATRZone {
+    ma_type: string;
+    ma_period: number;
+    ma_value: number;
+    support_lower: number;
+    support_upper: number;
+    resistance_lower: number;
+    resistance_upper: number;
+    strength: number;
+    zone_type: 'SUPPORT' | 'RESISTANCE';
+    distance_atr: number;
 }
 
 export interface VolumeProfileNode {
@@ -1253,6 +1292,8 @@ export interface ESFCandle {
     ema_fast: number | null;
     ema_mid: number | null;
     ema_slow: number | null;
+    magnetic_ma: number | null;
+    vwatr: number | null;
 }
 
 export interface IntradayTrade {
@@ -1323,6 +1364,10 @@ export interface ESFBacktestParams {
     period: string;
     initial_equity: number;
     is_micro: boolean;
+    mode?: 'intraday' | 'daily';
+    start_date?: string;  // YYYYMMDD, daily mode only
+    end_date?: string;    // YYYYMMDD, daily mode only
+    trend_adaptive?: boolean;  // trend-adaptive regime detection (daily only)
 }
 
 // ══════════════════════════════════════════
@@ -1383,6 +1428,9 @@ export async function fetchESFAnalysis(
         atr: raw.indicators?.atr || 0,
         indicators: raw.indicators || {},
         signal_active: raw.signal_active || false,
+        regime: raw.regime || undefined,
+        magnetic_ma: raw.magnetic_ma || undefined,
+        vwatr_zones: raw.vwatr_zones || undefined,
     } as ESFAnalysis;
 }
 
@@ -1454,6 +1502,269 @@ export async function fetchESFBacktestResult(): Promise<ESFBacktestResult> {
         }));
     }
 
+    // Daily mode returns FuturesBacktester shape — normalize to ESFBacktestResult
+    if (raw.metrics && !raw.sessions) {
+        // Map equity_curve: {date, total_value} → {timestamp, equity}
+        if (raw.equity_curve) {
+            raw.equity_curve = raw.equity_curve.map((e: any) => ({
+                timestamp: e.date ?? e.timestamp,
+                equity: e.total_value ?? e.equity ?? 0,
+                drawdown_pct: e.drawdown_pct ?? 0,
+            }));
+        }
+        // Ensure monte_carlo exists
+        if (!raw.monte_carlo && raw.metrics?.monte_carlo) {
+            raw.monte_carlo = raw.metrics.monte_carlo;
+        }
+    }
+
     return raw as ESFBacktestResult;
+}
+
+// ══════════════════════════════════════════
+// ESF Strategy Evolution System
+// ══════════════════════════════════════════
+
+export interface ESFHypothesis {
+  hypothesis_id: number;
+  trade_date: string;
+  ticker: string;
+  variant_id: number | null;
+  experiment_id: number | null;
+  direction: 'LONG' | 'SHORT' | 'NEUTRAL';
+  entry_price: number;
+  stop_loss: number;
+  take_profit: number;
+  total_score: number;
+  grade: string;
+  confidence: number;
+  regime: string;
+  entry_hour_et: number | null;
+  reasoning_json: Record<string, any>;
+  params_json: Record<string, any> | null;
+  status: 'PENDING' | 'ACTIVE' | 'CLOSED' | 'SKIPPED';
+  created_at: string;
+  updated_at: string;
+  // Extra fields from generation
+  risk_reward_ratio?: number;
+  contracts?: number;
+  primary_signals?: string[];
+}
+
+export interface ESFResult {
+  result_id: number;
+  hypothesis_id: number;
+  actual_entry_price: number;
+  actual_exit_price: number;
+  actual_direction: string;
+  contracts: number;
+  pnl_dollars: number;
+  pnl_pct: number;
+  is_win: number;
+  exit_reason: string;
+  holding_minutes: number;
+  direction_correct: number;
+  sl_hit: number;
+  tp_hit: number;
+  created_at: string;
+}
+
+export interface ESFVariant {
+  variant_id: number;
+  name: string;
+  description: string;
+  is_baseline: number;
+  is_active: number;
+  param_overrides_json: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ESFExperiment {
+  experiment_id: number;
+  name: string;
+  description: string;
+  status: 'RUNNING' | 'PAUSED' | 'CONCLUDED';
+  variant_a_id: number;
+  variant_b_id: number;
+  min_trades_per_variant: number;
+  max_days: number;
+  winner_variant_id: number | null;
+  conclusion_reason: string | null;
+  start_date: string;
+  end_date: string | null;
+  created_at: string;
+}
+
+export interface ESFCumulativeStat {
+  stat_id: number;
+  dimension: string;
+  dimension_value: string;
+  variant_id: number | null;
+  total_trades: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  total_pnl: number;
+  avg_pnl: number;
+  sharpe_approx: number;
+  profit_factor: number;
+  avg_holding_minutes: number;
+  direction_accuracy: number;
+}
+
+export interface ESFExperimentStatus {
+  experiment_id: number;
+  experiment_name: string;
+  status: string;
+  ready: boolean;
+  variant_a: { name: string; variant_id: number; trades: number; wins: number; win_rate: number; avg_pnl: number; total_pnl: number; sharpe: number };
+  variant_b: { name: string; variant_id: number; trades: number; wins: number; win_rate: number; avg_pnl: number; total_pnl: number; sharpe: number };
+  min_trades_per_variant: number;
+  p_value: number | null;
+  days_elapsed: number;
+  max_days: number;
+}
+
+// ── ESF Journal API ──
+
+export async function createHypothesis(ticker = 'ES=F', variantId?: number): Promise<ESFHypothesis> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/hypothesis`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ticker, variant_id: variantId ?? null }),
+  });
+  // 400 means no signal / no data — return the error body so hook can show it
+  if (res.status === 400) return res.json();
+  if (!res.ok) throw new Error(`createHypothesis failed: ${res.status}`);
+  return res.json();
+}
+
+export async function createABHypotheses(ticker: string, experimentId: number): Promise<ESFHypothesis[]> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/hypothesis/ab`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ticker, experiment_id: experimentId }),
+  });
+  if (!res.ok) throw new Error(`createABHypotheses failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchTodayHypotheses(): Promise<ESFHypothesis[]> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/hypothesis/today`);
+  if (!res.ok) throw new Error(`fetchTodayHypotheses failed: ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data.items ?? []);
+}
+
+export async function fetchHypotheses(params: {
+  offset?: number; limit?: number; direction?: string; regime?: string; grade?: string;
+  date_from?: string; date_to?: string;
+} = {}): Promise<{ items: ESFHypothesis[]; total: number }> {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => { if (v != null) qs.set(k, String(v)); });
+  const res = await fetch(`${API_BASE_URL}/esf/journal/hypotheses?${qs}`);
+  if (!res.ok) throw new Error(`fetchHypotheses failed: ${res.status}`);
+  return res.json();
+}
+
+export async function recordResult(data: {
+  hypothesis_id: number; actual_entry_price: number; actual_exit_price: number;
+  actual_direction?: string; contracts?: number; exit_reason?: string;
+  holding_minutes?: number; actual_high?: number; actual_low?: number; actual_close?: number;
+}): Promise<ESFResult> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/result`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`recordResult failed: ${res.status}`);
+  return res.json();
+}
+
+export async function skipHypothesis(hypothesisId: number, reason = ''): Promise<void> {
+  await fetch(`${API_BASE_URL}/esf/journal/hypothesis/${hypothesisId}/skip`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export async function fetchCumulativeStats(dimension?: string, variantId?: number): Promise<ESFCumulativeStat[]> {
+  const qs = new URLSearchParams();
+  if (dimension) qs.set('dimension', dimension);
+  if (variantId != null) qs.set('variant_id', String(variantId));
+  const res = await fetch(`${API_BASE_URL}/esf/journal/stats?${qs}`);
+  if (!res.ok) throw new Error(`fetchCumulativeStats failed: ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data.items ?? []);
+}
+
+export async function fetchStatsComparison(variantAId: number, variantBId: number): Promise<{ variant_a: ESFCumulativeStat[]; variant_b: ESFCumulativeStat[] }> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/stats/comparison?variant_a_id=${variantAId}&variant_b_id=${variantBId}`);
+  if (!res.ok) throw new Error(`fetchStatsComparison failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchStatsTrends(days = 30): Promise<any[]> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/stats/trends?days=${days}`);
+  if (!res.ok) throw new Error(`fetchStatsTrends failed: ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data.items ?? []);
+}
+
+export async function createVariant(data: { name: string; description?: string; param_overrides?: Record<string, any> }): Promise<ESFVariant> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/variants`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`createVariant failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchVariants(): Promise<ESFVariant[]> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/variants`);
+  if (!res.ok) throw new Error(`fetchVariants failed: ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data.items ?? []);
+}
+
+export async function createExperiment(data: {
+  name: string; variant_a_id: number; variant_b_id: number;
+  min_trades?: number; max_days?: number; description?: string;
+}): Promise<ESFExperiment> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/experiments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`createExperiment failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchExperiments(): Promise<ESFExperiment[]> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/experiments`);
+  if (!res.ok) throw new Error(`fetchExperiments failed: ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data) ? data : (data.items ?? []);
+}
+
+export async function fetchExperimentStatus(experimentId: number): Promise<ESFExperimentStatus> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/experiments/${experimentId}`);
+  if (!res.ok) throw new Error(`fetchExperimentStatus failed: ${res.status}`);
+  return res.json();
+}
+
+export async function concludeExperiment(experimentId: number): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/experiments/${experimentId}/conclude`, { method: 'POST' });
+  if (!res.ok) throw new Error(`concludeExperiment failed: ${res.status}`);
+  return res.json();
+}
+
+export async function graduateWinner(experimentId: number): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/esf/journal/experiments/${experimentId}/graduate`, { method: 'POST' });
+  if (!res.ok) throw new Error(`graduateWinner failed: ${res.status}`);
+  return res.json();
 }
 

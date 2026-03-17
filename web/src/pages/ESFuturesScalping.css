@@ -1,0 +1,1089 @@
+/* ══════════════════════════════════════════
+   ES Futures Scalping — Unified Page
+   ══════════════════════════════════════════ */
+
+.esfu-page {
+  padding: 1.5rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.esfu-header {
+  margin-bottom: 1.5rem;
+}
+.esfu-header h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin: 0 0 0.3rem;
+}
+.esfu-header p {
+  color: #888;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+/* ── Top Bar ── */
+.esfu-top-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 1.2rem;
+  padding: 10px 16px;
+  background: var(--card-bg, #16213e);
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #1a1a3e);
+  flex-wrap: wrap;
+}
+
+.esfu-ticker-label {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.esfu-price {
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.esfu-badge {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.esfu-last-updated {
+  font-size: 0.72rem;
+  color: #666;
+  margin-left: auto;
+}
+
+.esfu-refresh-btn {
+  padding: 6px 16px;
+  background: rgba(52, 152, 219, 0.2);
+  color: #3498db;
+  border: 1px solid rgba(52, 152, 219, 0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.esfu-refresh-btn:hover { background: rgba(52, 152, 219, 0.3); }
+.esfu-refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Tab Bar ── */
+.esfu-tab-bar {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 1.2rem;
+  background: var(--card-bg, #16213e);
+  border-radius: 8px;
+  padding: 4px;
+  border: 1px solid var(--border-color, #1a1a3e);
+}
+
+.esfu-tab {
+  flex: 1;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: #888;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.esfu-tab:hover { color: #ccc; background: rgba(255,255,255,0.03); }
+.esfu-tab.active {
+  background: rgba(52, 152, 219, 0.15);
+  color: #3498db;
+  border: 1px solid rgba(52, 152, 219, 0.3);
+}
+
+/* ── Error / Loading / Empty ── */
+.esfu-error {
+  background: rgba(231, 76, 60, 0.15);
+  color: #e74c3c;
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+
+.esfu-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+  padding: 3rem;
+  color: #888;
+}
+.esfu-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #333;
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: esfu-spin 0.8s linear infinite;
+}
+@keyframes esfu-spin { to { transform: rotate(360deg); } }
+
+.esfu-empty {
+  text-align: center;
+  color: #666;
+  padding: 3rem;
+}
+
+/* ── Panel (generic) ── */
+.esfu-panel {
+  background: var(--card-bg, #16213e);
+  border: 1px solid var(--border-color, #1a1a3e);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.esfu-panel-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 12px;
+}
+
+/* ── Toggle Switch (ES/MES) ── */
+.esfu-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.82rem;
+  color: #888;
+}
+.esfu-toggle-active { color: #fff; font-weight: 600; }
+.esfu-toggle-switch {
+  width: 40px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 11px;
+  cursor: pointer;
+  position: relative;
+  padding: 0;
+}
+.esfu-toggle-thumb {
+  width: 16px;
+  height: 16px;
+  background: #3498db;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: left 0.2s;
+}
+.esfu-toggle-thumb.on { left: 20px; }
+
+/* ── Analysis Grid (3 columns) ── */
+.esfu-analysis-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 1.2rem;
+}
+@media (max-width: 1100px) {
+  .esfu-analysis-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 700px) {
+  .esfu-analysis-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Mid Grid (VP + Session) ── */
+.esfu-mid-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+  margin-bottom: 1.2rem;
+}
+@media (max-width: 900px) {
+  .esfu-mid-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Chart wrapper ── */
+.esfu-chart-wrapper {
+  margin-bottom: 1.5rem;
+  background: var(--card-bg, #16213e);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.esfu-chart-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.esfu-chart-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.esfu-chart-select {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ccc;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  outline: none;
+}
+.esfu-chart-select:focus { border-color: rgba(99, 102, 241, 0.5); }
+
+.esfu-subchart-toggles {
+  display: flex;
+  gap: 12px;
+}
+
+.esfu-subchart-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: #888;
+  user-select: none;
+}
+.esfu-subchart-toggle input[type="checkbox"] {
+  accent-color: #6366f1;
+  cursor: pointer;
+}
+.esfu-subchart-toggle span { letter-spacing: 0.5px; }
+
+/* ── Backtest Section ── */
+.esfu-backtest-section {
+  margin-bottom: 2rem;
+}
+
+.esfu-bt-mode-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  padding: 3px;
+}
+
+.esfu-bt-mode-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #888;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+}
+.esfu-bt-mode-btn.active {
+  background: rgba(52, 152, 219, 0.15);
+  border-color: rgba(52, 152, 219, 0.3);
+  color: #3498db;
+}
+.esfu-bt-mode-desc {
+  font-size: 0.65rem;
+  color: #666;
+  display: block;
+  margin-top: 2px;
+}
+
+.esfu-bt-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+
+.esfu-bt-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.esfu-bt-field label {
+  font-size: 0.72rem;
+  color: #888;
+}
+.esfu-bt-field select,
+.esfu-bt-field input {
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  color: #ddd;
+  font-size: 0.82rem;
+  min-width: 100px;
+}
+
+.esfu-bt-run {
+  padding: 8px 20px;
+  background: rgba(52, 152, 219, 0.25);
+  border: 1px solid rgba(52, 152, 219, 0.4);
+  color: #3498db;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.esfu-bt-run:hover { background: rgba(52, 152, 219, 0.35); }
+.esfu-bt-run:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Progress bar */
+.esfu-progress-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.esfu-progress-fill {
+  height: 100%;
+  background: #3498db;
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+
+/* Preset buttons */
+.esfu-bt-presets {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.esfu-bt-preset-btn {
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color, #333);
+  background: rgba(255, 255, 255, 0.03);
+  color: #888;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.esfu-bt-preset-btn:hover { border-color: #3498db; color: #3498db; }
+
+/* Metric cards */
+.esfu-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.esfu-metric-card {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  padding: 10px;
+  text-align: center;
+}
+.esfu-metric-label {
+  font-size: 0.68rem;
+  color: #888;
+  margin-bottom: 4px;
+}
+.esfu-metric-value {
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+.esfu-metric-value.positive { color: #2ecc71; }
+.esfu-metric-value.negative { color: #e74c3c; }
+
+/* ── Specs mini grid ── */
+.esfu-specs-mini {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: #aaa;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.esfu-specs-mini .esfu-label { margin-right: 4px; }
+
+/* ── Session PnL Chart ── */
+.esfu-session-chart { margin-bottom: 16px; }
+.esfu-session-bars {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 120px;
+}
+.esfu-session-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+.esfu-session-bar-area {
+  flex: 1;
+  position: relative;
+  width: 100%;
+}
+.esfu-session-bar { min-width: 4px; border-radius: 2px; }
+.esfu-session-bar-label {
+  font-size: 0.55rem;
+  color: #666;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* ── Exit Reasons ── */
+.esfu-exit-reasons { margin-bottom: 16px; }
+.esfu-exit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.esfu-exit-label {
+  font-size: 0.75rem;
+  color: #aaa;
+  min-width: 120px;
+}
+.esfu-exit-bar-track {
+  flex: 1;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.esfu-exit-bar-fill {
+  height: 100%;
+  background: rgba(52, 152, 219, 0.6);
+  border-radius: 4px;
+}
+.esfu-exit-count {
+  font-size: 0.72rem;
+  color: #888;
+  min-width: 60px;
+  text-align: right;
+}
+
+/* ── MC Section ── */
+.esfu-mc-section { margin-bottom: 16px; }
+
+/* ── Trade log table ── */
+.esfu-trade-log { margin-bottom: 16px; }
+.esfu-trade-table-wrap {
+  max-height: 320px;
+  overflow-y: auto;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.esfu-trade-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+}
+.esfu-trade-table th {
+  position: sticky;
+  top: 0;
+  background: rgba(15, 52, 96, 0.95);
+  padding: 6px 8px;
+  text-align: left;
+  color: #888;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.esfu-trade-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  color: #ccc;
+}
+.esfu-trade-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.esfu-dir-long { color: #2ecc71; font-weight: 600; }
+.esfu-dir-short { color: #e74c3c; font-weight: 600; }
+
+/* Grade mini badges */
+.esfu-grade-mini {
+  font-size: 0.65rem;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.esfu-grade-a { background: rgba(46,204,113,0.2); color: #2ecc71; }
+.esfu-grade-b { background: rgba(241,196,15,0.2); color: #f1c40f; }
+.esfu-grade-c { background: rgba(230,126,34,0.2); color: #e67e22; }
+.esfu-grade-no_trade { background: rgba(149,165,166,0.15); color: #95a5a6; }
+
+/* ── Equity ── */
+.esfu-equity-spark { margin-bottom: 16px; }
+.esfu-spark-svg {
+  width: 100%;
+  height: 140px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+}
+.esfu-spark-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  color: #666;
+  margin-top: 4px;
+}
+
+/* ── Results container ── */
+.esfu-bt-results { margin-top: 12px; }
+
+/* ── Decision Layout (chart + strategy + engine) ── */
+.esfu-decision-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.esfu-decision-chart {
+  background: var(--card-bg, #16213e);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+/* ── Strategy Dashboard ── */
+.esfu-strategy-dashboard {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 900px) {
+  .esfu-strategy-dashboard { grid-template-columns: 1fr; }
+}
+
+.esfu-strategy-bar {
+  grid-column: 1 / -1;
+  background: var(--card-bg, #16213e);
+  border: 1px solid var(--border-color, #1a1a3e);
+  border-radius: 8px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.esfu-strategy-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+.esfu-strategy-item .label {
+  color: #888;
+  font-size: 0.72rem;
+}
+
+.esfu-confidence-bar {
+  width: 80px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.esfu-confidence-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.esfu-reason-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.esfu-reason-tag {
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+  color: #999;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .esfu-tab-bar { flex-wrap: wrap; }
+  .esfu-tab { font-size: 0.72rem; padding: 6px 10px; }
+  .esfu-top-bar { flex-direction: column; align-items: flex-start; }
+  .esfu-chart-toolbar { flex-direction: column; align-items: flex-start; }
+}
+
+/* ══════════════════════════════════════════
+   Strategy Tab
+   ══════════════════════════════════════════ */
+
+.esfu-strategy-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.esfu-strategy-hero {
+  background: #16213e;
+  border: 1px solid rgba(52,152,219,0.2);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.esfu-hero-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.esfu-hero-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: #e2e8f0;
+}
+
+.esfu-hero-empty {
+  text-align: center;
+  padding: 2rem;
+  color: #7f8c8d;
+}
+
+.esfu-hero-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Hypothesis Card */
+.esfu-hypothesis-card {
+  background: rgba(15,23,42,0.6);
+  border: 1px solid rgba(52,152,219,0.15);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.esfu-hyp-direction {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-left: 0.75rem;
+  border-left: 3px solid #95a5a6;
+  margin-bottom: 0.75rem;
+}
+
+.esfu-hyp-arrow {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.esfu-hyp-dir-text {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.esfu-hyp-levels {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.esfu-hyp-level {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.5rem;
+  background: rgba(52,152,219,0.08);
+  border-radius: 6px;
+}
+
+.esfu-hyp-level.sl {
+  background: rgba(231,76,60,0.08);
+}
+
+.esfu-hyp-level.tp {
+  background: rgba(46,204,113,0.08);
+}
+
+.esfu-hyp-level-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: #94a3b8;
+  letter-spacing: 0.5px;
+}
+
+.esfu-hyp-level-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.esfu-hyp-confidence {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: #94a3b8;
+  margin-bottom: 0.5rem;
+}
+
+.esfu-hyp-reasoning {
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.esfu-hyp-reasoning summary {
+  cursor: pointer;
+  color: #3498db;
+}
+
+.esfu-reasoning-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.25rem 0.75rem;
+  padding: 0.5rem 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.esfu-hyp-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(52,152,219,0.1);
+}
+
+.esfu-hyp-status {
+  margin-top: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.esfu-hyp-status.closed {
+  background: rgba(46,204,113,0.15);
+  color: #2ecc71;
+}
+
+.esfu-hyp-status.skipped {
+  background: rgba(149,165,166,0.15);
+  color: #95a5a6;
+}
+
+.esfu-record-form {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.esfu-record-form input {
+  background: rgba(15,23,42,0.8);
+  border: 1px solid rgba(52,152,219,0.2);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  width: 120px;
+}
+
+/* Buttons */
+.esfu-btn {
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  border: 1px solid rgba(52,152,219,0.3);
+  background: rgba(52,152,219,0.1);
+  color: #3498db;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 500;
+  transition: all 0.15s;
+}
+
+.esfu-btn:hover {
+  background: rgba(52,152,219,0.2);
+}
+
+.esfu-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.esfu-btn-primary {
+  background: rgba(52,152,219,0.25);
+  border-color: rgba(52,152,219,0.5);
+}
+
+.esfu-btn-sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.esfu-btn-ghost {
+  background: transparent;
+  border-color: rgba(149,165,166,0.3);
+  color: #95a5a6;
+}
+
+/* Live Tracking */
+.esfu-live-tracking {
+  margin-top: 0;
+}
+
+.esfu-tracking-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  flex-wrap: wrap;
+}
+
+.esfu-tracking-price {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  color: #94a3b8;
+}
+
+.esfu-tracking-pnl {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.esfu-tracking-pnl.positive { color: #2ecc71; }
+.esfu-tracking-pnl.negative { color: #e74c3c; }
+
+.esfu-progress-container {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 200px;
+}
+
+.esfu-progress-track {
+  flex: 1;
+  height: 6px;
+  background: rgba(52,152,219,0.1);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.esfu-strategy-tab .esfu-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s;
+  background: #3498db;
+}
+
+.esfu-strategy-tab .esfu-progress-fill.sl { background: #e74c3c; }
+.esfu-strategy-tab .esfu-progress-fill.tp { background: #2ecc71; }
+
+.esfu-progress-label {
+  font-size: 0.65rem;
+  color: #7f8c8d;
+  text-transform: uppercase;
+  min-width: 16px;
+}
+
+/* Status badges */
+.esfu-status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.esfu-status-badge.pending { background: rgba(243,156,18,0.15); color: #f39c12; }
+.esfu-status-badge.active { background: rgba(52,152,219,0.15); color: #3498db; }
+.esfu-status-badge.closed { background: rgba(46,204,113,0.15); color: #2ecc71; }
+.esfu-status-badge.skipped { background: rgba(149,165,166,0.15); color: #95a5a6; }
+.esfu-status-badge.running { background: rgba(52,152,219,0.15); color: #3498db; }
+.esfu-status-badge.concluded { background: rgba(155,89,182,0.15); color: #9b59b6; }
+
+/* Pagination */
+.esfu-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0 0;
+  font-size: 0.82rem;
+  color: #94a3b8;
+}
+
+.esfu-pagination button {
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid rgba(52,152,219,0.2);
+  background: rgba(52,152,219,0.08);
+  color: #3498db;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.esfu-pagination button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ══════════════════════════════════════════
+   Evolution Tab
+   ══════════════════════════════════════════ */
+
+.esfu-evolution-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.esfu-evolution-stats-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.esfu-stat-section h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: #3498db;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.esfu-trade-table.compact {
+  font-size: 0.78rem;
+}
+
+.esfu-trade-table.compact th,
+.esfu-trade-table.compact td {
+  padding: 0.3rem 0.5rem;
+}
+
+/* A/B Experiment */
+.esfu-ab-active {
+  padding: 1rem 0;
+}
+
+.esfu-ab-active h4 {
+  margin: 0 0 0.75rem;
+  color: #e2e8f0;
+}
+
+.esfu-ab-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.esfu-ab-variant {
+  background: rgba(15,23,42,0.5);
+  border: 1px solid rgba(52,152,219,0.15);
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.esfu-ab-variant h5 {
+  margin: 0 0 0.5rem;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+}
+
+.esfu-ab-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: #94a3b8;
+  margin-bottom: 0.5rem;
+}
+
+.esfu-ab-pvalue {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.esfu-ab-actions {
+  margin-top: 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Variant List */
+.esfu-variant-list h4 {
+  margin: 0 0 0.5rem;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+}
+
+.esfu-variant-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(52,152,219,0.08);
+  font-size: 0.82rem;
+}
+
+.esfu-variant-name {
+  color: #e2e8f0;
+  font-weight: 500;
+}
+
+.esfu-variant-overrides {
+  color: #7f8c8d;
+  font-size: 0.75rem;
+}
+
+/* Experiment History */
+.esfu-experiment-history h4 {
+  margin: 0 0 0.5rem;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+}
+
+.esfu-experiment-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(52,152,219,0.08);
+  font-size: 0.82rem;
+  color: #94a3b8;
+}
+
+/* Responsive — Strategy & Evolution */
+@media (max-width: 768px) {
+  .esfu-hyp-levels {
+    grid-template-columns: 1fr;
+  }
+  .esfu-ab-comparison {
+    grid-template-columns: 1fr;
+  }
+  .esfu-reasoning-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

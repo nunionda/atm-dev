@@ -40,6 +40,7 @@ from common.types import ExitSignal, FuturesSignal, PriceData, Signal
 from data.config_manager import ATSConfig, SP500FuturesConfig
 from infra.logger import get_logger
 from strategy.base import BaseStrategy
+from strategy.trend_regime_detector import detect_regime, get_counter_bias_penalty, get_short_bonus
 
 logger = get_logger("sp500_futures")
 
@@ -158,14 +159,17 @@ class SP500FuturesStrategy(BaseStrategy):
     - 거래량 확인으로 가짜 돌파 배제
     """
 
-    def __init__(self, config: ATSConfig):
+    def __init__(self, config: ATSConfig, trend_adaptive: bool = False):
         self.config = config
         self.fc: SP500FuturesConfig = config.sp500_futures
+        self.trend_adaptive = trend_adaptive
         self._position_states: Dict[str, FuturesPositionState] = {}
         # EV Engine + Dynamic Kelly (Phase 3)
         self._trade_history: List[float] = []  # 최근 N건 PnL% 기록
         # 연속 손절 추적 (Phase 4A)
         self._consecutive_losses: int = 0
+        # 마지막 레짐 결과 캐시 (trend_adaptive 모드)
+        self._last_regime_result = None
 
     # ══════════════════════════════════════════
     # 1. 기술적 지표 계산
@@ -366,17 +370,8 @@ class SP500FuturesStrategy(BaseStrategy):
         all_confirms = l3_signals + l4_signals
 
         # ── Market Regime 적용 ──
-        regime = self._determine_market_regime(df)
-        if regime == "BULL":
-            threshold = self.fc.regime_bull_entry_threshold
-            if not is_long:
-                total_score -= self.fc.regime_counter_bias_penalty
-        elif regime == "BEAR":
-            threshold = self.fc.regime_bear_entry_threshold
-            if is_long:
-                total_score -= self.fc.regime_counter_bias_penalty
-        else:
-            threshold = self.fc.entry_threshold
+        regime, threshold, score_adj = self._apply_regime(df, is_long)
+        total_score += score_adj
 
         # ── 진입 임계값 체크 ──
         if total_score < threshold:
@@ -460,17 +455,8 @@ class SP500FuturesStrategy(BaseStrategy):
         total_score = l1_score + l2_score + l3_score + l4_score
 
         # ── Market Regime 적용 ──
-        regime = self._determine_market_regime(df)
-        if regime == "BULL":
-            threshold = self.fc.regime_bull_entry_threshold
-            if not is_long:
-                total_score -= self.fc.regime_counter_bias_penalty
-        elif regime == "BEAR":
-            threshold = self.fc.regime_bear_entry_threshold
-            if is_long:
-                total_score -= self.fc.regime_counter_bias_penalty
-        else:
-            threshold = self.fc.entry_threshold
+        regime, threshold, score_adj = self._apply_regime(df, is_long)
+        total_score += score_adj
 
         if total_score < threshold:
             return None
@@ -572,10 +558,21 @@ class SP500FuturesStrategy(BaseStrategy):
             short_score += 1
 
         # Z-Score 극단
-        if zscore <= self.fc.zscore_long_threshold:
-            long_score += 2  # 과매도 → 롱
-        elif zscore >= self.fc.zscore_short_threshold:
-            short_score += 2  # 과매수 → 숏
+        if self.trend_adaptive:
+            # Trend-adaptive: 완화된 Z-Score 임계값 (±1.5)
+            if zscore <= -1.5:
+                long_score += 2  # 과매도 → 롱
+            elif zscore >= 1.5:
+                short_score += 2  # 과매수 → 숏
+            elif zscore <= self.fc.zscore_long_threshold:
+                long_score += 1  # mild 과매도
+            elif zscore >= self.fc.zscore_short_threshold:
+                short_score += 1  # mild 과매수
+        else:
+            if zscore <= self.fc.zscore_long_threshold:
+                long_score += 2  # 과매도 → 롱
+            elif zscore >= self.fc.zscore_short_threshold:
+                short_score += 2  # 과매수 → 숏
 
         # 최소 3점 이상 차이로 방향 결정
         if long_score >= 3 and long_score > short_score:
@@ -623,6 +620,65 @@ class SP500FuturesStrategy(BaseStrategy):
             return "BEAR"
 
         return "NEUTRAL"
+
+    def _apply_regime(
+        self, df: pd.DataFrame, is_long: bool
+    ) -> Tuple[str, float, float]:
+        """
+        레짐 기반 임계값/페널티/보너스 적용.
+
+        trend_adaptive 모드:
+          - TrendRegimeDetector로 정밀 레짐 판단
+          - 레짐별 차등 counter-bias 페널티
+          - CRISIS에서 SHORT 보너스
+          - Z-Score lean threshold 완화 (1.5)
+
+        Returns:
+            (regime, entry_threshold, score_adjustment)
+        """
+        if self.trend_adaptive:
+            regime_result = detect_regime(df)
+            self._last_regime_result = regime_result
+            regime = regime_result.regime
+
+            # CRISIS → 진입 차단 (극단적 하락에서 신규 진입 위험)
+            if regime == "CRISIS":
+                return regime, 999.0, 0.0  # 불가능한 임계값 = 진입 차단
+
+            # 레짐별 차등 임계값
+            if regime == "BULL":
+                threshold = self.fc.regime_bull_entry_threshold
+            elif regime == "BEAR":
+                threshold = self.fc.regime_bear_entry_threshold  # 보수적 (65)
+            else:
+                threshold = self.fc.entry_threshold  # NEUTRAL: 50
+
+            # 레짐별 차등 counter-bias 페널티
+            penalty = get_counter_bias_penalty(regime)
+
+            score_adj = 0.0
+            # BULL에서 SHORT → 강한 페널티 (5.0)
+            if not is_long and regime == "BULL":
+                score_adj -= penalty
+            # BEAR에서 LONG → 페널티 없음 (mean reversion 허용)
+
+            return regime, threshold, score_adj
+        else:
+            # 기존 로직
+            regime = self._determine_market_regime(df)
+            score_adj = 0.0
+            if regime == "BULL":
+                threshold = self.fc.regime_bull_entry_threshold
+                if not is_long:
+                    score_adj -= self.fc.regime_counter_bias_penalty
+            elif regime == "BEAR":
+                threshold = self.fc.regime_bear_entry_threshold
+                if is_long:
+                    score_adj -= self.fc.regime_counter_bias_penalty
+            else:
+                threshold = self.fc.entry_threshold
+
+            return regime, threshold, score_adj
 
     # ══════════════════════════════════════════
     # 3b. EV Engine + Dynamic Kelly + 연속손절

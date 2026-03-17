@@ -164,6 +164,129 @@ class SystemLog(Base):
     created_at = Column(String(30), nullable=False, index=True)
 
 
+# ──────────────────────────────────────
+# ESF Strategy Evolution System
+# ──────────────────────────────────────
+
+class ESFVariant(Base):
+    """전략 변형 정의 — 파라미터 오버라이드 셋."""
+    __tablename__ = "esf_variants"
+
+    variant_id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True)
+    description = Column(Text)
+    is_baseline = Column(Integer, default=0)
+    is_active = Column(Integer, default=1)
+    param_overrides_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(String(30), nullable=False)
+    updated_at = Column(String(30), nullable=False)
+
+
+class ESFExperiment(Base):
+    """A/B 실험 — 두 변형 비교."""
+    __tablename__ = "esf_experiments"
+
+    experiment_id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text)
+    status = Column(String(20), nullable=False, default="RUNNING", index=True)
+
+    variant_a_id = Column(Integer, ForeignKey("esf_variants.variant_id"), nullable=False)
+    variant_b_id = Column(Integer, ForeignKey("esf_variants.variant_id"), nullable=False)
+
+    min_trades_per_variant = Column(Integer, default=20)
+    max_days = Column(Integer, default=30)
+    significance_threshold = Column(Float, default=0.05)
+
+    winner_variant_id = Column(Integer)
+    conclusion_reason = Column(Text)
+    concluded_at = Column(String(30))
+
+    start_date = Column(String(10), nullable=False)
+    end_date = Column(String(10))
+    created_at = Column(String(30), nullable=False)
+
+
+class ESFHypothesis(Base):
+    """일별 전략 가설 — 오늘의 전략 추천."""
+    __tablename__ = "esf_hypotheses"
+
+    hypothesis_id = Column(Integer, primary_key=True, autoincrement=True)
+    trade_date = Column(String(10), nullable=False, index=True)
+    ticker = Column(String(10), nullable=False, default="ES=F")
+    variant_id = Column(Integer, ForeignKey("esf_variants.variant_id"), index=True)
+    experiment_id = Column(Integer, ForeignKey("esf_experiments.experiment_id"), index=True)
+
+    direction = Column(String(10), nullable=False)
+    entry_price = Column(Float, nullable=False)
+    stop_loss = Column(Float, nullable=False)
+    take_profit = Column(Float, nullable=False)
+    total_score = Column(Float, nullable=False)
+    grade = Column(String(2), nullable=False)
+    confidence = Column(Float, default=0.0)
+    regime = Column(String(10), nullable=False)
+    entry_hour_et = Column(Integer)
+
+    reasoning_json = Column(Text, nullable=False)
+    params_json = Column(Text)
+
+    status = Column(String(20), nullable=False, default="PENDING", index=True)
+    created_at = Column(String(30), nullable=False)
+    updated_at = Column(String(30), nullable=False)
+
+
+class ESFResult(Base):
+    """전략 가설의 실제 결과."""
+    __tablename__ = "esf_results"
+
+    result_id = Column(Integer, primary_key=True, autoincrement=True)
+    hypothesis_id = Column(Integer, ForeignKey("esf_hypotheses.hypothesis_id"), nullable=False, index=True)
+
+    actual_entry_price = Column(Float)
+    actual_exit_price = Column(Float)
+    actual_direction = Column(String(10))
+    contracts = Column(Integer, default=0)
+
+    pnl_dollars = Column(Float, default=0.0)
+    pnl_pct = Column(Float, default=0.0)
+    is_win = Column(Integer, default=0)
+    exit_reason = Column(String(30))
+    holding_minutes = Column(Integer, default=0)
+
+    actual_high = Column(Float)
+    actual_low = Column(Float)
+    actual_close = Column(Float)
+
+    direction_correct = Column(Integer, default=0)
+    sl_hit = Column(Integer, default=0)
+    tp_hit = Column(Integer, default=0)
+
+    created_at = Column(String(30), nullable=False)
+
+
+class ESFCumulativeStat(Base):
+    """누적 통계 — dimension별 집계."""
+    __tablename__ = "esf_cumulative_stats"
+
+    stat_id = Column(Integer, primary_key=True, autoincrement=True)
+    dimension = Column(String(20), nullable=False, index=True)
+    dimension_value = Column(String(30), nullable=False, index=True)
+    variant_id = Column(Integer, index=True)
+
+    total_trades = Column(Integer, default=0)
+    wins = Column(Integer, default=0)
+    losses = Column(Integer, default=0)
+    win_rate = Column(Float, default=0.0)
+    total_pnl = Column(Float, default=0.0)
+    avg_pnl = Column(Float, default=0.0)
+    sharpe_approx = Column(Float, default=0.0)
+    profit_factor = Column(Float, default=0.0)
+    avg_holding_minutes = Column(Float, default=0.0)
+    direction_accuracy = Column(Float, default=0.0)
+
+    updated_at = Column(String(30), nullable=False)
+
+
 class ReplayResult(Base):
     """리플레이 시뮬레이션 결과 저장."""
     __tablename__ = "replay_results"

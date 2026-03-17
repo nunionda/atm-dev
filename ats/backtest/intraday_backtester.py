@@ -56,6 +56,8 @@ class IntradayPosition:
     trailing_low: float = 999999.0
     trailing_active: bool = False
     grade: str = "C"
+    regime: str = ""
+    ma_alignment: str = ""
 
     def __post_init__(self):
         if self.trailing_high <= 0:
@@ -498,6 +500,19 @@ class IntradayBacktester:
         if position.direction == "SHORT" and low <= position.take_profit:
             return ExitReason.ATR_TAKE_PROFIT.value
 
+        # ── BE(Break-Even) 이동: 1.5R 수익 도달 시 SL → 진입가 ──
+        # 1R은 너무 타이트: 인트라데이에서 whipsaw로 큰 승자 잘림
+        sl_distance = abs(position.entry_price - position.stop_loss)
+        if sl_distance > 0:
+            if position.direction == "LONG":
+                unrealized_r = (high - position.entry_price) / sl_distance
+                if unrealized_r >= 1.5 and position.stop_loss < position.entry_price:
+                    position.stop_loss = position.entry_price
+            else:
+                unrealized_r = (position.entry_price - low) / sl_distance
+                if unrealized_r >= 1.5 and position.stop_loss > position.entry_price:
+                    position.stop_loss = position.entry_price
+
         # 트레일링 업데이트
         if position.direction == "LONG":
             position.trailing_high = max(position.trailing_high, high)
@@ -587,7 +602,9 @@ class IntradayBacktester:
             session_pnl = 0.0
             session_peak = equity
             session_max_dd = 0.0
-            consecutive_losses = 0
+            # consecutive_losses는 글로벌 — 세션 간 유지 (첫 세션만 초기화)
+            if s_idx == 0:
+                consecutive_losses = 0
             session_halted = False
             position: Optional[IntradayPosition] = None
             session_signals: List[str] = []
@@ -657,6 +674,14 @@ class IntradayBacktester:
                             "holding_minutes": holding_minutes,
                             "exit_reason": exit_reason,
                             "grade": position.grade,
+                            "total_score": getattr(position, "total_score", None),
+                            "l1_score": getattr(position, "l1_score", None),
+                            "l2_score": getattr(position, "l2_score", None),
+                            "l3_score": getattr(position, "l3_score", None),
+                            "l4_score": getattr(position, "l4_score", None),
+                            "regime": getattr(position, "regime", ""),
+                            "ma_alignment": getattr(position, "ma_alignment", ""),
+                            "entry_hour": int(position.entry_time.split(" ")[-1].split(":")[0]) if " " in position.entry_time else 0,
                         }
                         trades.append(trade_record)
                         session_trades += 1
@@ -696,6 +721,7 @@ class IntradayBacktester:
 
                             grade = signal.metadata.get("grade", "C") if signal.metadata else "C"
 
+                            meta = signal.metadata or {}
                             position = IntradayPosition(
                                 ticker=self.ticker,
                                 entry_price=signal.entry_price,
@@ -706,7 +732,15 @@ class IntradayBacktester:
                                 stop_loss=signal.stop_loss,
                                 take_profit=signal.take_profit,
                                 grade=grade,
+                                regime=meta.get("regime", ""),
+                                ma_alignment=meta.get("ma_alignment", ""),
                             )
+                            # 4-Layer 스코어 기록
+                            position.total_score = round(signal.signal_strength, 1) if signal.signal_strength else None
+                            position.l1_score = meta.get("l1_amt_location")
+                            position.l2_score = meta.get("l2_zscore")
+                            position.l3_score = meta.get("l3_momentum")
+                            position.l4_score = meta.get("l4_volume_aggression")
                             session_signals.append(
                                 f"{signal.direction}@{signal.entry_price:.2f}"
                             )
@@ -753,6 +787,9 @@ class IntradayBacktester:
         # 6. Monte Carlo (세션 P&L 리샘플링)
         monte_carlo = self._run_monte_carlo(session_pnls)
 
+        # 7. Trade pattern analysis
+        trade_analysis = self.analyze_trades(trades)
+
         return {
             "ticker": self.ticker,
             "period": self.period,
@@ -764,6 +801,7 @@ class IntradayBacktester:
             "trades": trades,
             "sessions": session_results,
             "monte_carlo": monte_carlo,
+            "trade_analysis": trade_analysis,
         }
 
     # ══════════════════════════════════════════
@@ -1022,4 +1060,98 @@ class IntradayBacktester:
                 "return_distribution": [], "mdd_distribution": [],
                 "return_percentiles": {"p5": 0, "p25": 0, "p50": 0, "p75": 0, "p95": 0},
             },
+        }
+
+    # ══════════════════════════════════════════
+    # Trade Pattern Analysis
+    # ══════════════════════════════════════════
+
+    @staticmethod
+    def analyze_trades(trades: List[dict]) -> dict:
+        """Analyze trade patterns: hourly distribution, regime, direction, grade."""
+        if not trades:
+            return {"hourly": {}, "regime": {}, "direction": {}, "grade": {}, "optimal_windows": [], "recommendations": []}
+
+        def _dist(group: List[dict]) -> dict:
+            wins = [t for t in group if t["pnl_dollar"] > 0]
+            return {
+                "count": len(group),
+                "wins": len(wins),
+                "wr": round(len(wins) / len(group) * 100, 1) if group else 0,
+                "avg_pnl": round(sum(t["pnl_dollar"] for t in group) / len(group), 2) if group else 0,
+                "total_pnl": round(sum(t["pnl_dollar"] for t in group), 2),
+            }
+
+        # Hourly distribution
+        hourly: dict = {}
+        for t in trades:
+            h = t.get("entry_hour", 0)
+            if h not in hourly:
+                hourly[h] = []
+            hourly[h].append(t)
+        hourly_dist = {str(h): _dist(ts) for h, ts in sorted(hourly.items())}
+
+        # Regime distribution
+        regime_groups: dict = {}
+        for t in trades:
+            r = t.get("regime", "UNKNOWN") or "UNKNOWN"
+            if r not in regime_groups:
+                regime_groups[r] = []
+            regime_groups[r].append(t)
+        regime_dist = {r: _dist(ts) for r, ts in regime_groups.items()}
+
+        # Direction distribution
+        dir_groups: dict = {}
+        for t in trades:
+            d = t.get("direction", "UNKNOWN")
+            if d not in dir_groups:
+                dir_groups[d] = []
+            dir_groups[d].append(t)
+        direction_dist = {d: _dist(ts) for d, ts in dir_groups.items()}
+
+        # Grade distribution
+        grade_groups: dict = {}
+        for t in trades:
+            g = t.get("grade", "UNKNOWN")
+            if g not in grade_groups:
+                grade_groups[g] = []
+            grade_groups[g].append(t)
+        grade_dist = {g: _dist(ts) for g, ts in grade_groups.items()}
+
+        # Find optimal entry windows (hours with WR > 55% and >= 3 trades)
+        optimal = []
+        for h_str, stats in hourly_dist.items():
+            if stats["count"] >= 3 and stats["wr"] >= 55:
+                optimal.append({"hour": int(h_str), "wr": stats["wr"], "count": stats["count"], "avg_pnl": stats["avg_pnl"]})
+        optimal.sort(key=lambda x: x["wr"], reverse=True)
+
+        # Auto-generate recommendations
+        recs = []
+        if optimal:
+            best_hours = [str(o["hour"]) for o in optimal[:3]]
+            recs.append(f"Best entry hours: {', '.join(best_hours)}h ET")
+
+        # Find worst hours
+        worst_hours = [(int(h), s) for h, s in hourly_dist.items() if s["count"] >= 3 and s["wr"] < 40]
+        if worst_hours:
+            avoid = [str(h) for h, _ in worst_hours]
+            recs.append(f"Avoid entry at: {', '.join(avoid)}h ET (WR < 40%)")
+
+        # Regime recommendations
+        for r, stats in regime_dist.items():
+            if stats["count"] >= 3 and stats["wr"] < 35:
+                recs.append(f"Consider blocking trades in {r} regime (WR {stats['wr']}%)")
+
+        # Direction imbalance
+        for d, stats in direction_dist.items():
+            if stats["count"] >= 5 and stats["wr"] < 35:
+                recs.append(f"{d} trades underperforming (WR {stats['wr']}%) — consider reducing")
+
+        return {
+            "hourly": hourly_dist,
+            "regime": regime_dist,
+            "direction": direction_dist,
+            "grade": grade_dist,
+            "optimal_windows": optimal,
+            "recommendations": recs,
         }
