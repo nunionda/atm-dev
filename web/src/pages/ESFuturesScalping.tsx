@@ -2061,8 +2061,8 @@ export function ESFuturesScalping() {
   return (
     <div className="esfu-page container">
       <div className="esfu-header">
-        <h1>Futures</h1>
-        <p>오늘의 단타 스캘핑 전략은? — 가설 → 검증 → 분석 → 진화</p>
+        <h1 className="page-title">Futures</h1>
+        <p className="page-subtitle">오늘의 단타 스캘핑 전략은? — 가설 → 검증 → 분석 → 진화</p>
       </div>
 
       {/* Top Bar */}
@@ -2116,9 +2116,9 @@ export function ESFuturesScalping() {
       {error && <div className="esfu-error">{error}</div>}
 
       {/* Tab Bar */}
-      <div className="esfu-tab-bar">
+      <div className="market-tabs">
         {tabs.map(t => (
-          <button key={t.key} className={`esfu-tab ${activeTab === t.key ? 'active' : ''}`}
+          <button key={t.key} className={`market-tab-btn ${activeTab === t.key ? 'active' : ''}`}
             onClick={() => setActiveTab(t.key)}>
             {t.label}
           </button>

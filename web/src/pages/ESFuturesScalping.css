@@ -3,25 +3,14 @@
    ══════════════════════════════════════════ */
 
 .esfu-page {
-  padding: var(--space-8) var(--space-6);
-  max-width: 1400px;
-  margin: 0 auto;
+  padding-top: var(--space-8);
+  padding-bottom: var(--space-10);
 }
 
 .esfu-header {
   margin-bottom: var(--space-6);
 }
-.esfu-header h1 {
-  font-size: var(--text-2xl);
-  font-weight: 700;
-  margin: 0 0 var(--space-1);
-  letter-spacing: -0.02em;
-}
-.esfu-header p {
-  color: var(--text-muted);
-  font-size: var(--text-base);
-  margin: 0;
-}
+/* .page-title and .page-subtitle defined globally in index.css */
 
 /* ── Top Bar ── */
 .esfu-top-bar {
@@ -73,38 +62,9 @@
 .esfu-refresh-btn:hover { background: rgba(59, 130, 246, 0.2); }
 .esfu-refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* ── Tab Bar ── */
-.esfu-tab-bar {
-  display: flex;
-  gap: 2px;
-  margin-bottom: 1.2rem;
-  background: var(--bg-secondary);
-  border-radius: 8px;
-  padding: 4px;
-  border: 1px solid var(--glass-border);
-}
-
-.esfu-tab {
-  flex: 1;
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-sm);
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-.esfu-tab:hover { color: var(--text-secondary); background: rgba(255,255,255,0.03); }
-.esfu-tab.active {
-  background: var(--color-info-bg);
-  color: var(--color-info);
-  border: 1px solid var(--color-info-border);
+/* ── Tab Bar — uses global .market-tabs / .market-tab-btn ── */
+.esfu-page .market-tabs {
+  margin-bottom: var(--space-5);
 }
 
 /* ── Error / Loading / Empty ── */
@@ -622,8 +582,7 @@
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
-  .esfu-tab-bar { flex-wrap: wrap; }
-  .esfu-tab { font-size: 0.72rem; padding: 6px 10px; }
+  .esfu-page .market-tabs { flex-wrap: wrap; }
   .esfu-top-bar { flex-direction: column; align-items: flex-start; }
   .esfu-chart-toolbar { flex-direction: column; align-items: flex-start; }
 }
