@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LineChart, BookOpen, Radio, Shield, BarChart3, ChevronRight, Activity, Calculator, RefreshCw, Zap } from 'lucide-react';
+import { LineChart, BookOpen, Radio, Shield, BarChart3, ChevronRight, Activity, Calculator, Zap, RefreshCw } from 'lucide-react';
 import './Navbar.css';
 
 export function Navbar() {

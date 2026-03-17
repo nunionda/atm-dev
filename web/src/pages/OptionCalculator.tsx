@@ -84,12 +84,14 @@ export function OptionCalculator() {
   }, [postToIframe]);
 
   // 가격 업데이트 → iframe 전달
+  // XSP = SPX/10 이므로 live 가격(^GSPC) 수신 시 ÷10 변환
   useEffect(() => {
     if (spotPrice === null) return;
+    const divisor = preset === 'xsp' ? 10 : 1;
     postToIframe({
       type: 'updatePrices',
-      spot: spotPrice,
-      futures: futPrice ?? spotPrice,
+      spot: spotPrice / divisor,
+      futures: (futPrice ?? spotPrice) / divisor,
       preset,
     });
   }, [spotPrice, futPrice, preset, postToIframe]);
@@ -108,17 +110,21 @@ export function OptionCalculator() {
     v === null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 
   return (
-    <div className="option-calc-page">
-      {/* ── Toolbar ── */}
-      <div className="option-calc-toolbar">
-        <div className="option-calc-toolbar-left">
+    <div className="option-calc-page container">
+      {/* ── Page Header ── */}
+      <div className="option-calc-header">
+        <div>
+          <h1 className="page-title">Options</h1>
+          <p className="page-subtitle">KOSPI200 / SPX 옵션 가격 계산 및 Greeks 분석</p>
+        </div>
+        <div className="option-calc-header-controls">
           <select
             value={preset}
             onChange={e => {
               const v = e.target.value;
               if (v === 'custom') {
                 postToIframe({ type: 'openCustomModal' });
-                e.target.value = preset; // revert visual
+                e.target.value = preset;
               } else {
                 setPreset(v);
               }
@@ -142,9 +148,7 @@ export function OptionCalculator() {
           {spotPrice !== null && (
             <div className="option-calc-prices">
               <span className="option-calc-price-tag">현물</span>
-              <span className="option-calc-price-val">
-                {fmtPrice(spotPrice)}
-              </span>
+              <span className="option-calc-price-val">{fmtPrice(spotPrice)}</span>
               {spotChange !== null && (
                 <span className={`option-calc-change ${spotChange >= 0 ? 'up' : 'down'}`}>
                   {spotChange >= 0 ? '+' : ''}{spotChange.toFixed(2)}%
@@ -154,26 +158,24 @@ export function OptionCalculator() {
                 <>
                   <span className="option-calc-price-divider">│</span>
                   <span className="option-calc-price-tag">선물</span>
-                  <span className="option-calc-price-val">
-                    {fmtPrice(futPrice)}
-                  </span>
+                  <span className="option-calc-price-val">{fmtPrice(futPrice)}</span>
                 </>
               )}
             </div>
           )}
-        </div>
 
-        <PollingControl
-          enabled={spotPoll.enabled}
-          onToggle={handlePollingToggle}
-          interval={spotPoll.interval}
-          onIntervalChange={handleIntervalChange}
-          status={spotPoll.status}
-          lastUpdated={spotPoll.lastUpdated}
-          consecutiveErrors={spotPoll.consecutiveErrors}
-          onRefresh={handleRefresh}
-          compact
-        />
+          <PollingControl
+            enabled={spotPoll.enabled}
+            onToggle={handlePollingToggle}
+            interval={spotPoll.interval}
+            onIntervalChange={handleIntervalChange}
+            status={spotPoll.status}
+            lastUpdated={spotPoll.lastUpdated}
+            consecutiveErrors={spotPoll.consecutiveErrors}
+            onRefresh={handleRefresh}
+            compact
+          />
+        </div>
       </div>
 
       {/* ── Calculator iframe ── */}
