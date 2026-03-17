@@ -18,7 +18,7 @@ MARKET_INDICES = [
     {"symbol": "^IXIC", "name": "NASDAQ", "name_kr": "나스닥", "group": "global"},
     {"symbol": "^SOX", "name": "SOX", "name_kr": "반도체지수", "group": "global"},
     {"symbol": "^VIX", "name": "VIX", "name_kr": "변동성지수", "group": "global"},
-    {"symbol": "DX-Y.NYB", "name": "DXY", "name_kr": "달러인덱스", "group": "global"},
+    {"symbol": "DX=F", "name": "DXY", "name_kr": "달러인덱스", "group": "global"},
     # === Korean ===
     {"symbol": "^KS11", "name": "KOSPI", "name_kr": "코스피", "group": "korea"},
     {"symbol": "^KS200", "name": "KOSPI 200", "name_kr": "코스피200", "group": "korea"},
@@ -29,7 +29,7 @@ MARKET_INDICES = [
 
 # Cache storage
 _cache: dict = {"data": None, "timestamp": 0}
-CACHE_TTL = 300  # 5 minutes
+CACHE_TTL = 60  # 1 minute (SSE가 primary, REST는 fallback)
 
 
 def _fetch_all_indices() -> dict[str, dict | None]:
@@ -90,7 +90,7 @@ def _calculate_regime(indices: list[dict]) -> dict:
     # Find indices by name
     vix = next((i for i in indices if i["symbol"] == "^VIX"), None)
     sp500 = next((i for i in indices if i["symbol"] == "^GSPC"), None)
-    dxy = next((i for i in indices if i["symbol"] == "DX-Y.NYB"), None)
+    dxy = next((i for i in indices if i["symbol"] == "DX=F"), None)
 
     # VIX analysis
     if vix and vix.get("price"):
@@ -160,7 +160,7 @@ def get_market_overview() -> dict:
 
     # Return cached if fresh
     if _cache["data"] and (now - _cache["timestamp"]) < CACHE_TTL:
-        return _cache["data"]
+        return {**_cache["data"], "cache_ts": _cache["timestamp"], "cache_ttl": CACHE_TTL}
 
     # Fetch all indices in a single batch request
     indices = []
@@ -186,6 +186,8 @@ def get_market_overview() -> dict:
         "indices": indices,
         "regime": regime,
         "updated_at": datetime.now().isoformat(),
+        "cache_ts": now,
+        "cache_ttl": CACHE_TTL,
     }
 
     # Update cache

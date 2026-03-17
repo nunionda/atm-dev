@@ -24,11 +24,11 @@ router = APIRouter()
 # ── Analyze 캐시 ──────────────────────────────────────────────────────
 _analyze_cache: dict[str, dict] = {}
 _analyze_cache_ts: dict[str, float] = {}
-ANALYZE_CACHE_TTL = 300  # 5분 (리프레시 최적화)
+ANALYZE_CACHE_TTL = 60  # 1분 (SSE가 primary, REST는 fallback)
 
 # ── Quote 캐시 (경량 폴링용) ──────────────────────────────────────────
 _quote_cache: dict[str, dict] = {}
-QUOTE_CACHE_TTL = 300  # 5분 (리프레시 최적화)
+QUOTE_CACHE_TTL = 30  # 30초 (SSE price_update와 정렬)
 
 # ── Naver Finance 데이터 소스 (KRX 파생상품) ─────────────────────────
 
@@ -117,7 +117,7 @@ async def analyze_ticker(ticker: str, period: str = "1mo", interval: str = "1d")
         now = time.time()
         if cache_key in _analyze_cache and (now - _analyze_cache_ts.get(cache_key, 0)) < ANALYZE_CACHE_TTL:
             return JSONResponse(
-                content=_analyze_cache[cache_key],
+                content={**_analyze_cache[cache_key], "cache_ts": _analyze_cache_ts[cache_key], "cache_ttl": ANALYZE_CACHE_TTL},
                 headers={"Cache-Control": "no-cache"},
             )
 
@@ -132,7 +132,8 @@ async def analyze_ticker(ticker: str, period: str = "1mo", interval: str = "1d")
 
             result_df = calculate_basic_indicators(data)
             records = result_df.to_dict(orient="records")
-            result = {"ticker": ticker, "period": period, "interval": interval, "data": records}
+            result = {"ticker": ticker, "period": period, "interval": interval, "data": records,
+                      "cache_ts": now, "cache_ttl": ANALYZE_CACHE_TTL}
             _analyze_cache[cache_key] = result
             _analyze_cache_ts[cache_key] = now
             return result
@@ -202,7 +203,9 @@ async def analyze_ticker(ticker: str, period: str = "1mo", interval: str = "1d")
             "ticker": ticker,
             "period": period,
             "interval": interval,
-            "data": records
+            "data": records,
+            "cache_ts": now,
+            "cache_ttl": ANALYZE_CACHE_TTL,
         }
         _analyze_cache[cache_key] = result
         _analyze_cache_ts[cache_key] = now
@@ -234,7 +237,7 @@ def get_quote(ticker: str, count: int = 5):
     # 캐시 히트 체크
     cached = _quote_cache.get(cache_key)
     if cached and (now - cached["_ts"]) < QUOTE_CACHE_TTL:
-        result = {**cached["data"], "cached": True}
+        result = {**cached["data"], "cached": True, "cache_ts": cached["_ts"], "cache_ttl": QUOTE_CACHE_TTL}
         return result
 
     try:
@@ -293,6 +296,8 @@ def get_quote(ticker: str, count: int = 5):
             "ticker": ticker,
             "updated_at": datetime.datetime.now().isoformat(),
             "cached": False,
+            "cache_ts": now,
+            "cache_ttl": QUOTE_CACHE_TTL,
             "candles": candles,
             "latest": {
                 "price": last["close"],
@@ -325,9 +330,9 @@ def search_ticker_endpoint(q: str = ""):
 
 
 @router.get("/market-overview")
-def market_overview_endpoint():
+async def market_overview_endpoint():
     """
     주요 시장 지수 현황 및 시장 국면(Regime) 분석을 반환합니다.
     5분 캐싱 적용.
     """
-    return get_market_overview()
+    return await asyncio.to_thread(get_market_overview)

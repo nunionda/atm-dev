@@ -1,86 +1,29 @@
 .risk-page {
-    padding-top: 100px;
-    padding-bottom: 40px;
+    padding-top: var(--space-8);
+    padding-bottom: var(--space-10);
 }
 
 .risk-header {
-    margin-bottom: 24px;
+    margin-bottom: var(--space-6);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: var(--space-4);
     flex-wrap: wrap;
 }
 
-.risk-header .page-title {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-}
-
-.risk-header .page-subtitle {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-}
-
-/* Market Tabs */
-.market-tabs {
-    display: flex;
-    gap: 6px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 10px;
-    padding: 4px;
-}
-
-.market-tab-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text-muted);
-    font-size: 0.82rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-}
-
-.market-tab-btn:hover {
-    background: rgba(255, 255, 255, 0.04);
-    color: var(--text-secondary);
-}
-
-.market-tab-btn.active {
-    background: rgba(59, 130, 246, 0.12);
-    border-color: rgba(59, 130, 246, 0.3);
-    color: #60a5fa;
-    font-weight: 600;
-}
-
-.market-flag {
-    font-size: 1rem;
-    line-height: 1;
-}
-
-.market-label {
-    letter-spacing: 0.02em;
-}
+/* .page-title, .page-subtitle, .market-tabs defined globally in index.css */
 
 /* Halt Banner */
 .halt-banner {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 14px 20px;
-    margin-bottom: 16px;
-    background: rgba(239, 68, 68, 0.08);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    color: #f87171;
+    gap: var(--space-3);
+    padding: 14px var(--space-5);
+    margin-bottom: var(--space-4);
+    background: var(--color-danger-bg);
+    border: 1px solid var(--color-danger-border);
+    color: var(--color-danger);
 }
 
 .halt-banner strong {
@@ -98,31 +41,31 @@
 .risk-top-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    margin-bottom: 16px;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
 }
 
 .risk-gauges {
-    padding: 20px;
+    padding: var(--space-5);
 }
 
 .risk-right-panel {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--space-4);
     min-width: 0;
 }
 
 .risk-counters {
-    padding: 20px;
+    padding: var(--space-5);
 }
 
 /* Counters */
 .counter-grid {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    margin-top: 16px;
+    gap: var(--space-4);
+    margin-top: var(--space-4);
 }
 
 .counter-item {
@@ -130,7 +73,7 @@
     align-items: flex-start;
     gap: 14px;
     padding: 14px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     background: rgba(255, 255, 255, 0.02);
 }
 
@@ -147,36 +90,37 @@
 }
 
 .counter-label {
-    font-size: 0.78rem;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
     font-weight: 500;
 }
 
 .counter-value {
-    font-size: 1.1rem;
+    font-size: var(--text-lg);
     font-weight: 700;
     color: var(--text-primary);
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
 }
 
 .counter-value.danger {
-    color: #ef4444;
+    color: var(--color-danger);
 }
 
 .counter-desc {
-    font-size: 0.68rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
 }
 
 /* Full-width sections */
 .risk-events {
-    margin-bottom: 16px;
+    margin-bottom: var(--space-4);
 }
 
 /* ===== Emergency Controls ===== */
 .emergency-actions {
-    padding: 16px 20px;
-    margin-bottom: 16px;
+    padding: var(--space-4) var(--space-5);
+    margin-bottom: var(--space-4);
     border: 1px solid rgba(239, 68, 68, 0.15);
 }
 
@@ -200,45 +144,45 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 16px;
-    border-radius: 8px;
-    font-size: 0.78rem;
+    padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all var(--transition-fast);
     border: 1px solid;
 }
 
 .emergency-btn.pause-btn {
-    color: #eab308;
-    background: rgba(234, 179, 8, 0.08);
-    border-color: rgba(234, 179, 8, 0.3);
+    color: var(--color-warning);
+    background: var(--color-warning-bg);
+    border-color: var(--color-warning-border);
 }
 
 .emergency-btn.pause-btn:hover {
-    background: rgba(234, 179, 8, 0.15);
+    background: rgba(234, 179, 8, 0.2);
     border-color: rgba(234, 179, 8, 0.5);
 }
 
 .emergency-btn.liquidate-btn {
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.08);
-    border-color: rgba(239, 68, 68, 0.3);
+    color: var(--color-danger);
+    background: var(--color-danger-bg);
+    border-color: var(--color-danger-border);
 }
 
 .emergency-btn.liquidate-btn:hover {
-    background: rgba(239, 68, 68, 0.15);
+    background: rgba(239, 68, 68, 0.18);
     border-color: rgba(239, 68, 68, 0.5);
 }
 
 .emergency-btn.ops-btn {
-    color: #60a5fa;
-    background: rgba(59, 130, 246, 0.08);
-    border-color: rgba(59, 130, 246, 0.3);
+    color: var(--color-info);
+    background: var(--color-info-bg);
+    border-color: var(--color-info-border);
 }
 
 .emergency-btn.ops-btn:hover {
-    background: rgba(59, 130, 246, 0.15);
+    background: rgba(59, 130, 246, 0.18);
     border-color: rgba(59, 130, 246, 0.5);
 }
 
@@ -260,31 +204,31 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: var(--z-modal);
 }
 
 .modal-content {
     max-width: 420px;
     width: 90%;
-    padding: 24px;
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    padding: var(--space-6);
+    border: 1px solid var(--color-danger-border);
 }
 
 .modal-title {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 1rem;
+    gap: var(--space-2);
+    font-size: var(--text-md);
     font-weight: 700;
-    color: #ef4444;
-    margin: 0 0 16px;
+    color: var(--color-danger);
+    margin: 0 0 var(--space-4);
 }
 
 .modal-message {
-    font-size: 0.85rem;
+    font-size: var(--text-base);
     color: var(--text-secondary);
     line-height: 1.6;
-    margin: 0 0 20px;
+    margin: 0 0 var(--space-5);
 }
 
 .modal-message strong {
@@ -298,15 +242,15 @@
 }
 
 .modal-cancel {
-    padding: 8px 18px;
-    border-radius: 8px;
-    font-size: 0.8rem;
+    padding: var(--space-2) 18px;
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
     font-weight: 600;
     color: var(--text-secondary);
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.1);
     cursor: pointer;
-    transition: all 0.15s;
+    transition: all var(--transition-fast);
 }
 
 .modal-cancel:hover {
@@ -314,15 +258,15 @@
 }
 
 .modal-confirm-danger {
-    padding: 8px 18px;
-    border-radius: 8px;
-    font-size: 0.8rem;
+    padding: var(--space-2) 18px;
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
     font-weight: 600;
     color: #fff;
     background: #dc2626;
-    border: 1px solid #ef4444;
+    border: 1px solid var(--color-danger);
     cursor: pointer;
-    transition: all 0.15s;
+    transition: all var(--transition-fast);
 }
 
 .modal-confirm-danger:hover {

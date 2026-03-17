@@ -1,6 +1,8 @@
 import { useState, useReducer, useMemo, useCallback } from 'react';
 import { useAnalyticsData } from '../hooks/useAnalyticsData';
 import { usePolling } from '../hooks/usePolling';
+import { useMarketSession } from '../hooks/useMarketSession';
+import { useLivePrice } from '../hooks/useLivePrice';
 import { fetchAnalyticsData, type AnalyticsResponse } from '../lib/api';
 import { PollingControl } from '../components/PollingControl';
 import { TechnicalChart } from '../components/dashboard/TechnicalChart';
@@ -87,13 +89,14 @@ export function Dashboard() {
     const fetchInterval = interval === '4h' ? '1h' : interval;
     const { data: initialData, loading, error, refetch } = useAnalyticsData(ticker, period, fetchInterval);
 
-    // Real-time polling
+    // Real-time polling — 간격을 백엔드 캐시 TTL(300s)과 정렬, 장외시간에는 600s
+    const session = useMarketSession(ticker);
     const pollingFetchFn = useCallback(
       () => fetchAnalyticsData(ticker, period, fetchInterval),
       [ticker, period, fetchInterval],
     );
     const polling = usePolling<AnalyticsResponse>(pollingFetchFn, {
-      interval: 30000,
+      interval: session.interval,
       enabled: true,
       cacheKey: `analytics:${ticker}:${period}:${fetchInterval}`,
     });
@@ -101,7 +104,10 @@ export function Dashboard() {
     // Merge: polling data takes priority when available
     const data = polling.data ?? initialData;
 
-    // Data pipeline: raw → 4H aggregate → Heikin-Ashi
+    // Real-time price via SSE
+    const livePrice = useLivePrice(ticker);
+
+    // Data pipeline: raw → 4H aggregate → Heikin-Ashi → live price merge
     // Guard: skip processing if data interval doesn't match current interval (stale data during switch)
     const chartData = useMemo(() => {
         if (!data?.data) return [];
@@ -111,8 +117,17 @@ export function Dashboard() {
         if (interval === '4h') processed = aggregate4HCandles(processed);
         if (chartState.chartType === 'heikin-ashi') processed = computeHeikinAshi(processed);
         // Pre-sort by datetime so TechnicalChart can skip redundant sorts
-        return [...processed].sort((a, b) => a.datetime.localeCompare(b.datetime));
-    }, [data, interval, chartState.chartType]);
+        let sorted = [...processed].sort((a, b) => a.datetime.localeCompare(b.datetime));
+        // Merge live price into last candle
+        if (livePrice && sorted.length > 0) {
+            const last = sorted[sorted.length - 1];
+            sorted = [
+                ...sorted.slice(0, -1),
+                { ...last, close: livePrice.price, high: Math.max(last.high, livePrice.price), low: Math.min(last.low, livePrice.price) },
+            ];
+        }
+        return sorted;
+    }, [data, interval, chartState.chartType, livePrice]);
 
     const handleSelect = (newTicker: string, nameKr?: string, nameEn?: string) => {
         setTicker(newTicker);
@@ -225,11 +240,25 @@ export function Dashboard() {
                     {/* Main Chart Area */}
                     <ErrorBoundary>
                     <div className="chart-section glass-panel">
-                        {(stockName.nameKr || stockName.nameEn) && (
-                            <div className="stock-info">
+                        {(stockName.nameKr || stockName.nameEn || livePrice) && (
+                            <div className="stock-info" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                 <span className="stock-ticker">{ticker}</span>
                                 {stockName.nameKr && <span className="stock-name-kr">{stockName.nameKr}</span>}
                                 {stockName.nameEn && <span className="stock-name-en">{stockName.nameEn}</span>}
+                                {livePrice && (
+                                    <span style={{
+                                        fontSize: '0.85rem',
+                                        fontWeight: 700,
+                                        color: livePrice.change >= 0 ? 'var(--text-success)' : 'var(--text-error)',
+                                        marginLeft: 'auto',
+                                    }}>
+                                        {currencySymbol}{livePrice.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        {' '}
+                                        <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
+                                            {livePrice.change >= 0 ? '+' : ''}{livePrice.change_pct.toFixed(2)}%
+                                        </span>
+                                    </span>
+                                )}
                             </div>
                         )}
                         <div className="section-head" style={{ padding: 0, borderBottom: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>

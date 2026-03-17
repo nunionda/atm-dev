@@ -1,27 +1,16 @@
 .dashboard-page {
-    padding-top: 2rem;
-    padding-bottom: 5rem;
-    min-height: calc(100vh - 100px);
+    padding-top: var(--space-8);
+    padding-bottom: var(--space-20);
+    min-height: calc(100vh - var(--navbar-height));
 }
 
 .dashboard-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
-    margin-bottom: 2.5rem;
+    margin-bottom: var(--space-10);
     position: relative;
-    z-index: 10;
-}
-
-.page-title {
-    font-size: 2.5rem;
-    font-weight: 700;
-    margin-bottom: 0.5rem;
-}
-
-.page-subtitle {
-    color: var(--text-secondary);
-    font-size: 1.1rem;
+    z-index: var(--z-raised);
 }
 
 .search-box {
@@ -58,11 +47,11 @@
 }
 
 .text-error {
-    color: #ef4444;
+    color: var(--color-danger);
 }
 
 .text-success {
-    color: #22c55e;
+    color: var(--color-success);
 }
 
 .loading-state {
@@ -287,8 +276,8 @@
 
 .ind-value {
     font-weight: 600;
-    font-size: 1.05rem;
-    font-family: monospace;
+    font-size: var(--text-lg);
+    font-family: var(--font-mono);
 }
 
 @media (max-width: 1024px) {

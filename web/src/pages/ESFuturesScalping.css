@@ -3,22 +3,23 @@
    ══════════════════════════════════════════ */
 
 .esfu-page {
-  padding: 1.5rem;
+  padding: var(--space-8) var(--space-6);
   max-width: 1400px;
   margin: 0 auto;
 }
 
 .esfu-header {
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--space-6);
 }
 .esfu-header h1 {
-  font-size: 1.6rem;
+  font-size: var(--text-2xl);
   font-weight: 700;
-  margin: 0 0 0.3rem;
+  margin: 0 0 var(--space-1);
+  letter-spacing: -0.02em;
 }
 .esfu-header p {
-  color: #888;
-  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-size: var(--text-base);
   margin: 0;
 }
 
@@ -29,9 +30,9 @@
   gap: 12px;
   margin-bottom: 1.2rem;
   padding: 10px 16px;
-  background: var(--card-bg, #16213e);
+  background: var(--bg-secondary);
   border-radius: 8px;
-  border: 1px solid var(--border-color, #1a1a3e);
+  border: 1px solid var(--glass-border);
   flex-wrap: wrap;
 }
 
@@ -43,7 +44,7 @@
 .esfu-price {
   font-size: 1rem;
   font-weight: 600;
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 .esfu-badge {
@@ -55,21 +56,21 @@
 }
 
 .esfu-last-updated {
-  font-size: 0.72rem;
-  color: #666;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
   margin-left: auto;
 }
 
 .esfu-refresh-btn {
-  padding: 6px 16px;
-  background: rgba(52, 152, 219, 0.2);
-  color: #3498db;
-  border: 1px solid rgba(52, 152, 219, 0.3);
-  border-radius: 6px;
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border: 1px solid var(--color-info-border);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: var(--text-base);
 }
-.esfu-refresh-btn:hover { background: rgba(52, 152, 219, 0.3); }
+.esfu-refresh-btn:hover { background: rgba(59, 130, 246, 0.2); }
 .esfu-refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Tab Bar ── */
@@ -77,43 +78,44 @@
   display: flex;
   gap: 2px;
   margin-bottom: 1.2rem;
-  background: var(--card-bg, #16213e);
+  background: var(--bg-secondary);
   border-radius: 8px;
   padding: 4px;
-  border: 1px solid var(--border-color, #1a1a3e);
+  border: 1px solid var(--glass-border);
 }
 
 .esfu-tab {
   flex: 1;
-  padding: 8px 16px;
-  border-radius: 6px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
   border: none;
   background: transparent;
-  color: #888;
-  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--transition-fast);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
 }
-.esfu-tab:hover { color: #ccc; background: rgba(255,255,255,0.03); }
+.esfu-tab:hover { color: var(--text-secondary); background: rgba(255,255,255,0.03); }
 .esfu-tab.active {
-  background: rgba(52, 152, 219, 0.15);
-  color: #3498db;
-  border: 1px solid rgba(52, 152, 219, 0.3);
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border: 1px solid var(--color-info-border);
 }
 
 /* ── Error / Loading / Empty ── */
 .esfu-error {
-  background: rgba(231, 76, 60, 0.15);
-  color: #e74c3c;
-  padding: 10px 14px;
-  border-radius: 6px;
-  margin-bottom: 1rem;
-  font-size: 0.85rem;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger-border);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-4);
+  font-size: var(--text-base);
 }
 
 .esfu-loading {
@@ -121,14 +123,14 @@
   align-items: center;
   gap: 10px;
   justify-content: center;
-  padding: 3rem;
-  color: #888;
+  padding: var(--space-12);
+  color: var(--text-muted);
 }
 .esfu-spinner {
   width: 20px;
   height: 20px;
-  border: 2px solid #333;
-  border-top-color: #3498db;
+  border: 2px solid var(--bg-tertiary);
+  border-top-color: var(--accent-primary);
   border-radius: 50%;
   animation: esfu-spin 0.8s linear infinite;
 }
@@ -136,25 +138,25 @@
 
 .esfu-empty {
   text-align: center;
-  color: #666;
-  padding: 3rem;
+  color: var(--text-muted);
+  padding: var(--space-12);
 }
 
 /* ── Panel (generic) ── */
 .esfu-panel {
-  background: var(--card-bg, #16213e);
-  border: 1px solid var(--border-color, #1a1a3e);
-  border-radius: 8px;
-  padding: 16px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
 }
 
 .esfu-panel-title {
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--text-secondary, #888);
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-3);
 }
 
 /* ── Toggle Switch (ES/MES) ── */
@@ -162,10 +164,10 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 0.82rem;
-  color: #888;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
-.esfu-toggle-active { color: #fff; font-weight: 600; }
+.esfu-toggle-active { color: var(--text-primary); font-weight: 600; }
 .esfu-toggle-switch {
   width: 40px;
   height: 22px;
@@ -179,12 +181,12 @@
 .esfu-toggle-thumb {
   width: 16px;
   height: 16px;
-  background: #3498db;
+  background: var(--accent-primary);
   border-radius: 50%;
   position: absolute;
   top: 2px;
   left: 2px;
-  transition: left 0.2s;
+  transition: left var(--transition-fast);
 }
 .esfu-toggle-thumb.on { left: 20px; }
 
@@ -215,11 +217,11 @@
 
 /* ── Chart wrapper ── */
 .esfu-chart-wrapper {
-  margin-bottom: 1.5rem;
-  background: var(--card-bg, #16213e);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  padding: 12px;
+  margin-bottom: var(--space-6);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
 }
 
 .esfu-chart-toolbar {
@@ -295,13 +297,13 @@
   text-align: center;
 }
 .esfu-bt-mode-btn.active {
-  background: rgba(52, 152, 219, 0.15);
-  border-color: rgba(52, 152, 219, 0.3);
-  color: #3498db;
+  background: var(--color-info-bg);
+  border-color: var(--color-info-border);
+  color: var(--color-info);
 }
 .esfu-bt-mode-desc {
-  font-size: 0.65rem;
-  color: #666;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
   display: block;
   margin-top: 2px;
 }
@@ -335,16 +337,16 @@
 }
 
 .esfu-bt-run {
-  padding: 8px 20px;
-  background: rgba(52, 152, 219, 0.25);
-  border: 1px solid rgba(52, 152, 219, 0.4);
-  color: #3498db;
-  border-radius: 6px;
+  padding: var(--space-2) var(--space-5);
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid var(--color-info-border);
+  color: var(--color-info);
+  border-radius: var(--radius-sm);
   font-weight: 600;
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
 }
-.esfu-bt-run:hover { background: rgba(52, 152, 219, 0.35); }
+.esfu-bt-run:hover { background: rgba(59, 130, 246, 0.3); }
 .esfu-bt-run:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Progress bar */
@@ -552,7 +554,7 @@
 }
 
 .esfu-decision-chart {
-  background: var(--card-bg, #16213e);
+  background: var(--bg-secondary);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
   padding: 12px;
@@ -570,8 +572,8 @@
 
 .esfu-strategy-bar {
   grid-column: 1 / -1;
-  background: var(--card-bg, #16213e);
-  border: 1px solid var(--border-color, #1a1a3e);
+  background: var(--bg-secondary);
+  border: 1px solid var(--glass-border);
   border-radius: 8px;
   padding: 12px 16px;
   display: flex;
@@ -730,7 +732,7 @@
   font-size: 1rem;
   font-weight: 600;
   color: #e2e8f0;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 .esfu-hyp-confidence {
@@ -758,7 +760,7 @@
   grid-template-columns: repeat(3, 1fr);
   gap: 0.25rem 0.75rem;
   padding: 0.5rem 0;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.75rem;
 }
 
@@ -858,13 +860,13 @@
 }
 
 .esfu-tracking-price {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
   color: #94a3b8;
 }
 
 .esfu-tracking-pnl {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
   font-size: 0.9rem;
   font-weight: 600;
 }
@@ -1023,7 +1025,7 @@
   margin-top: 0.75rem;
   font-size: 0.85rem;
   color: #94a3b8;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-mono);
 }
 
 .esfu-ab-actions {
