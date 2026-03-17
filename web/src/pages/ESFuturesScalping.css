@@ -359,9 +359,9 @@
 }
 .esfu-progress-fill {
   height: 100%;
-  background: #3498db;
+  background: var(--accent-primary);
   border-radius: 2px;
-  transition: width 0.3s;
+  transition: width var(--transition-normal);
 }
 
 /* Preset buttons */
@@ -497,23 +497,23 @@
 .esfu-trade-table th {
   position: sticky;
   top: 0;
-  background: rgba(15, 52, 96, 0.95);
+  background: var(--bg-secondary);
   padding: 6px 8px;
   text-align: left;
-  color: #888;
+  color: var(--text-muted);
   font-weight: 600;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--border-color);
 }
 .esfu-trade-table td {
   padding: 5px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-  color: #ccc;
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-secondary);
 }
 .esfu-trade-table tbody tr:hover {
   background: rgba(255, 255, 255, 0.03);
 }
-.esfu-dir-long { color: #2ecc71; font-weight: 600; }
-.esfu-dir-short { color: #e74c3c; font-weight: 600; }
+.esfu-dir-long { color: var(--color-success); font-weight: 600; }
+.esfu-dir-short { color: var(--color-danger); font-weight: 600; }
 
 /* Grade mini badges */
 .esfu-grade-mini {
