@@ -166,7 +166,7 @@ async def analyze_ticker(ticker: str, period: str = "1mo", interval: str = "1d")
         # ── yfinance 경로 (async) ──
         ticker = resolve_ticker(ticker)
 
-        data = await asyncio.to_thread(yf.download, ticker, period=period, interval=interval, progress=False)
+        data = await asyncio.to_thread(yf.download, ticker, period=period, interval=interval, progress=False, auto_adjust=False)
 
         if data.empty:
             raise HTTPException(status_code=404, detail="Data not found for the given ticker")

@@ -121,6 +121,7 @@ class LiveDataService:
                 period="1d",
                 interval="1m",
                 progress=False,
+                auto_adjust=False,
             )
 
             if data is None or data.empty:

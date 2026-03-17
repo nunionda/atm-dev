@@ -815,7 +815,7 @@ export default function ESFIntradayChart({
         <div ref={mainRef} className="esf-chart-container" />
         <div ref={overlayRef} style={{
           position: 'absolute', top: 0, right: 0,
-          width: '72px', height: '0',
+          width: '100px', height: '0',
           pointerEvents: 'none', zIndex: 10, overflow: 'visible',
         }} />
       </div>
