@@ -403,8 +403,8 @@
   font-size: 0.92rem;
   font-weight: 600;
 }
-.esfu-metric-value.positive { color: #2ecc71; }
-.esfu-metric-value.negative { color: #e74c3c; }
+.esfu-metric-value.positive { color: var(--color-success); }
+.esfu-metric-value.negative { color: var(--color-danger); }
 
 /* ── Specs mini grid ── */
 .esfu-specs-mini {
@@ -522,10 +522,10 @@
   border-radius: 3px;
   font-weight: 600;
 }
-.esfu-grade-a { background: rgba(46,204,113,0.2); color: #2ecc71; }
-.esfu-grade-b { background: rgba(241,196,15,0.2); color: #f1c40f; }
-.esfu-grade-c { background: rgba(230,126,34,0.2); color: #e67e22; }
-.esfu-grade-no_trade { background: rgba(149,165,166,0.15); color: #95a5a6; }
+.esfu-grade-a { background: var(--color-success-bg); color: var(--color-success); }
+.esfu-grade-b { background: var(--color-warning-bg); color: var(--color-warning); }
+.esfu-grade-c { background: rgba(234, 88, 12, 0.15); color: #fb923c; }
+.esfu-grade-no_trade { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
 
 /* ── Equity ── */
 .esfu-equity-spark { margin-bottom: 16px; }
@@ -639,10 +639,10 @@
 }
 
 .esfu-strategy-hero {
-  background: #16213e;
-  border: 1px solid rgba(52,152,219,0.2);
-  border-radius: 12px;
-  padding: 1.5rem;
+  background: var(--glass-bg);
+  border: 1px solid var(--color-info-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
 }
 
 .esfu-hero-header {
@@ -654,8 +654,8 @@
 
 .esfu-hero-header h2 {
   margin: 0;
-  font-size: 1.25rem;
-  color: #e2e8f0;
+  font-size: var(--text-xl);
+  color: var(--text-primary);
 }
 
 .esfu-hero-empty {
@@ -672,10 +672,10 @@
 
 /* Hypothesis Card */
 .esfu-hypothesis-card {
-  background: rgba(15,23,42,0.6);
-  border: 1px solid rgba(52,152,219,0.15);
-  border-radius: 8px;
-  padding: 1rem;
+  background: rgba(17, 17, 17, 0.6);
+  border: 1px solid var(--color-info-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
 }
 
 .esfu-hyp-direction {
@@ -729,9 +729,9 @@
 }
 
 .esfu-hyp-level-value {
-  font-size: 1rem;
+  font-size: var(--text-md);
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--text-primary);
   font-family: var(--font-mono);
 }
 
@@ -782,13 +782,13 @@
 }
 
 .esfu-hyp-status.closed {
-  background: rgba(46,204,113,0.15);
-  color: #2ecc71;
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .esfu-hyp-status.skipped {
-  background: rgba(149,165,166,0.15);
-  color: #95a5a6;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
 }
 
 .esfu-record-form {
@@ -810,19 +810,19 @@
 
 /* Buttons */
 .esfu-btn {
-  padding: 0.4rem 0.8rem;
-  border-radius: 6px;
-  border: 1px solid rgba(52,152,219,0.3);
-  background: rgba(52,152,219,0.1);
-  color: #3498db;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-info-border);
+  background: var(--color-info-bg);
+  color: var(--color-info);
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   font-weight: 500;
-  transition: all 0.15s;
+  transition: all var(--transition-fast);
 }
 
 .esfu-btn:hover {
-  background: rgba(52,152,219,0.2);
+  background: rgba(59, 130, 246, 0.2);
 }
 
 .esfu-btn:disabled {
@@ -831,19 +831,19 @@
 }
 
 .esfu-btn-primary {
-  background: rgba(52,152,219,0.25);
-  border-color: rgba(52,152,219,0.5);
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.5);
 }
 
 .esfu-btn-sm {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.75rem;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
 }
 
 .esfu-btn-ghost {
   background: transparent;
-  border-color: rgba(149,165,166,0.3);
-  color: #95a5a6;
+  border-color: var(--border-color);
+  color: var(--text-muted);
 }
 
 /* Live Tracking */
@@ -871,8 +871,8 @@
   font-weight: 600;
 }
 
-.esfu-tracking-pnl.positive { color: #2ecc71; }
-.esfu-tracking-pnl.negative { color: #e74c3c; }
+.esfu-tracking-pnl.positive { color: var(--color-success); }
+.esfu-tracking-pnl.negative { color: var(--color-danger); }
 
 .esfu-progress-container {
   display: flex;
@@ -893,12 +893,12 @@
 .esfu-strategy-tab .esfu-progress-fill {
   height: 100%;
   border-radius: 3px;
-  transition: width 0.3s;
-  background: #3498db;
+  transition: width var(--transition-normal);
+  background: var(--accent-primary);
 }
 
-.esfu-strategy-tab .esfu-progress-fill.sl { background: #e74c3c; }
-.esfu-strategy-tab .esfu-progress-fill.tp { background: #2ecc71; }
+.esfu-strategy-tab .esfu-progress-fill.sl { background: var(--color-danger); }
+.esfu-strategy-tab .esfu-progress-fill.tp { background: var(--color-success); }
 
 .esfu-progress-label {
   font-size: 0.65rem;
@@ -917,12 +917,12 @@
   text-transform: uppercase;
 }
 
-.esfu-status-badge.pending { background: rgba(243,156,18,0.15); color: #f39c12; }
-.esfu-status-badge.active { background: rgba(52,152,219,0.15); color: #3498db; }
-.esfu-status-badge.closed { background: rgba(46,204,113,0.15); color: #2ecc71; }
-.esfu-status-badge.skipped { background: rgba(149,165,166,0.15); color: #95a5a6; }
-.esfu-status-badge.running { background: rgba(52,152,219,0.15); color: #3498db; }
-.esfu-status-badge.concluded { background: rgba(155,89,182,0.15); color: #9b59b6; }
+.esfu-status-badge.pending { background: var(--color-warning-bg); color: var(--color-warning); }
+.esfu-status-badge.active { background: var(--color-info-bg); color: var(--color-info); }
+.esfu-status-badge.closed { background: var(--color-success-bg); color: var(--color-success); }
+.esfu-status-badge.skipped { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
+.esfu-status-badge.running { background: var(--color-info-bg); color: var(--color-info); }
+.esfu-status-badge.concluded { background: rgba(139, 92, 246, 0.15); color: var(--accent-secondary); }
 
 /* Pagination */
 .esfu-pagination {
@@ -967,9 +967,9 @@
 }
 
 .esfu-stat-section h4 {
-  margin: 0 0 0.5rem;
-  font-size: 0.85rem;
-  color: #3498db;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-base);
+  color: var(--color-info);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -1000,10 +1000,10 @@
 }
 
 .esfu-ab-variant {
-  background: rgba(15,23,42,0.5);
-  border: 1px solid rgba(52,152,219,0.15);
-  border-radius: 8px;
-  padding: 0.75rem;
+  background: rgba(17, 17, 17, 0.5);
+  border: 1px solid var(--color-info-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
 }
 
 .esfu-ab-variant h5 {
