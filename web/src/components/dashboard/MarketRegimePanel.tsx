@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
 import { Globe, TrendingUp, TrendingDown, Activity, Shield, RefreshCw } from 'lucide-react';
+import { usePolling } from '../../hooks/usePolling';
+import { useLiveMarketOverview } from '../../hooks/useLiveMarketOverview';
 import { fetchMarketOverview, type MarketOverview, type MarketIndex } from '../../lib/api';
 import './MarketRegimePanel.css';
 
@@ -9,6 +11,15 @@ interface MarketRegimePanelProps {
 
 const US_SYMBOLS = ['^GSPC', '^IXIC', '^SOX'];
 const KR_SYMBOLS = ['^KS11', '^KQ11', '^KS200', '091160.KS', 'KRW=X'];
+
+/** 장 마감 후 경과 시간을 사람이 읽을 수 있는 형태로 */
+function formatTimeAgo(ts: number): string {
+    const sec = Math.round((Date.now() - ts) / 1000);
+    if (sec < 60) return `${sec}초 전`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}분 전`;
+    return `${Math.floor(min / 60)}시간 전`;
+}
 
 function getVixLabel(price: number): { text: string; color: string } {
     if (price < 16) return { text: 'Low Fear', color: '#22c55e' };
@@ -39,29 +50,24 @@ function findIndex(indices: MarketIndex[], symbol: string): MarketIndex | undefi
 }
 
 export function MarketRegimePanel({ onSelectIndex }: MarketRegimePanelProps) {
-    const [data, setData] = useState<MarketOverview | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(false);
+    // SSE 기반 실시간 마켓 오버뷰 (primary)
+    const liveOverview = useLiveMarketOverview();
 
-    const load = useCallback(async (signal?: AbortSignal) => {
-        setLoading(true);
-        setError(false);
-        const result = await fetchMarketOverview(signal);
-        if (signal?.aborted) return;
-        if (result) {
-            setData(result);
-        } else {
-            setError(true);
-        }
-        setLoading(false);
+    // REST 폴링 fallback — SSE 데이터가 없을 때만 활성화
+    const pollFn = useCallback(async () => {
+        const result = await fetchMarketOverview();
+        if (!result) throw new Error('market-overview fetch failed');
+        return result;
     }, []);
 
-    useEffect(() => {
-        const controller = new AbortController();
-        load(controller.signal);
-        const interval = setInterval(() => load(), 5 * 60 * 1000);
-        return () => { controller.abort(); clearInterval(interval); };
-    }, [load]);
+    const { data: pollingData, loading, error, status, lastUpdated, fetchNow } = usePolling<MarketOverview>(pollFn, {
+        interval: 300_000, // 5분 fallback
+        enabled: !liveOverview, // SSE 데이터가 있으면 폴링 비활성화
+        cacheKey: 'market-overview',
+    });
+
+    // SSE가 primary, polling이 fallback
+    const data = liveOverview ?? pollingData;
 
     if (loading && !data) {
         return (
@@ -77,9 +83,9 @@ export function MarketRegimePanel({ onSelectIndex }: MarketRegimePanelProps) {
         return (
             <div className="regime-panel glass-panel">
                 <div className="regime-loading">
-                    시장 데이터를 불러올 수 없습니다.
+                    시장 데이터를 불러올 수 없습니다.{status === 'stale' && ' (연결 끊김)'}
                     <button
-                        onClick={() => load()}
+                        onClick={fetchNow}
                         style={{
                             marginLeft: 8,
                             padding: '3px 10px',
@@ -104,7 +110,7 @@ export function MarketRegimePanel({ onSelectIndex }: MarketRegimePanelProps) {
 
     const usIndices = US_SYMBOLS.map(s => findIndex(data.indices, s)).filter(Boolean) as MarketIndex[];
     const vix = findIndex(data.indices, '^VIX');
-    const dxy = findIndex(data.indices, 'DX-Y.NYB');
+    const dxy = findIndex(data.indices, 'DX=F');
     const krIndices = KR_SYMBOLS.map(s => findIndex(data.indices, s)).filter(Boolean) as MarketIndex[];
 
     const vixInfo = vix?.price ? getVixLabel(vix.price) : null;
@@ -117,6 +123,11 @@ export function MarketRegimePanel({ onSelectIndex }: MarketRegimePanelProps) {
                 <div className="regime-title">
                     <Globe size={16} />
                     <span>Market Regime</span>
+                    {lastUpdated && (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginLeft: 8 }}>
+                            {formatTimeAgo(lastUpdated)}
+                        </span>
+                    )}
                 </div>
                 <div className={`regime-badge ${regimeClass}`}>
                     <span className="regime-dot" />

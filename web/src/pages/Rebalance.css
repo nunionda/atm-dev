@@ -1,23 +1,18 @@
 .rebalance-page {
-    padding-top: 100px;
-    padding-bottom: 40px;
+    padding-top: var(--space-8);
+    padding-bottom: var(--space-10);
 }
 
 .rebalance-page-header {
-    margin: 20px 0;
+    margin: var(--space-5) 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
+    gap: var(--space-4);
     flex-wrap: wrap;
 }
 
-.rebalance-page-header .page-title {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 0;
-}
+/* .page-title defined globally in index.css */
 
 /* Rebalance Header Bar */
 .rebalance-header {
@@ -49,8 +44,8 @@
 }
 
 .status-dot.active {
-    background: #22c55e;
-    box-shadow: 0 0 6px rgba(34, 197, 94, 0.4);
+    background: var(--color-success);
+    box-shadow: 0 0 6px var(--color-success-bg);
 }
 
 .status-dot.inactive {
@@ -88,13 +83,13 @@
 
 /* Error */
 .rebalance-error {
-    padding: 12px 20px;
-    margin-bottom: 16px;
-    color: #f87171;
-    background: rgba(248, 113, 113, 0.08);
-    border: 1px solid rgba(248, 113, 113, 0.2);
-    border-radius: 8px;
-    font-size: 0.88rem;
+    padding: var(--space-3) var(--space-5);
+    margin-bottom: var(--space-4);
+    color: var(--color-danger);
+    background: var(--color-danger-bg);
+    border: 1px solid var(--color-danger-border);
+    border-radius: var(--radius-md);
+    font-size: var(--text-base);
 }
 
 /* Scan Summary */
@@ -113,7 +108,7 @@
 .scan-summary-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 20px;
+    gap: var(--space-5);
 }
 
 .scan-stat {
@@ -140,8 +135,8 @@
 .rebalance-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    margin-bottom: 16px;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
 }
 
 @media (max-width: 1024px) {
@@ -247,18 +242,18 @@
 }
 
 .score-high {
-    background: rgba(34, 197, 94, 0.15);
-    color: #4ade80;
+    background: var(--color-success-bg);
+    color: var(--color-success);
 }
 
 .score-mid {
-    background: rgba(234, 179, 8, 0.15);
-    color: #facc15;
+    background: var(--color-warning-bg);
+    color: var(--color-warning);
 }
 
 .score-low {
-    background: rgba(248, 113, 113, 0.15);
-    color: #f87171;
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
 }
 
 .price-cell {
@@ -271,11 +266,11 @@
 }
 
 .positive {
-    color: #4ade80 !important;
+    color: var(--color-success) !important;
 }
 
 .negative {
-    color: #f87171 !important;
+    color: var(--color-danger) !important;
 }
 
 .days-cell {
@@ -289,15 +284,15 @@
 
 /* Type-specific borders */
 .rec-buy .rec-table-header {
-    border-left: 3px solid #22c55e;
+    border-left: 3px solid var(--color-success);
 }
 
 .rec-hold .rec-table-header {
-    border-left: 3px solid #3b82f6;
+    border-left: 3px solid var(--accent-primary);
 }
 
 .rec-sell .rec-table-header {
-    border-left: 3px solid #ef4444;
+    border-left: 3px solid var(--color-danger);
 }
 
 /* ── Backtest Section ── */
@@ -697,18 +692,18 @@
 }
 
 .exit-stop {
-    background: rgba(248, 113, 113, 0.15);
-    color: #f87171;
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
 }
 
 .exit-profit {
-    background: rgba(34, 197, 94, 0.15);
-    color: #4ade80;
+    background: var(--color-success-bg);
+    color: var(--color-success);
 }
 
 .exit-rebal {
-    background: rgba(59, 130, 246, 0.15);
-    color: #60a5fa;
+    background: var(--color-info-bg);
+    color: var(--color-info);
 }
 
 .exit-choch {

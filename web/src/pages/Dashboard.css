@@ -1,27 +1,16 @@
 .dashboard-page {
-    padding-top: 2rem;
-    padding-bottom: 5rem;
-    min-height: calc(100vh - 100px);
+    padding-top: var(--space-8);
+    padding-bottom: var(--space-10);
+    min-height: calc(100vh - var(--navbar-height));
 }
 
 .dashboard-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-end;
-    margin-bottom: 2.5rem;
-    position: relative;
-    z-index: 10;
-}
-
-.page-title {
-    font-size: 2.5rem;
-    font-weight: 700;
-    margin-bottom: 0.5rem;
-}
-
-.page-subtitle {
-    color: var(--text-secondary);
-    font-size: 1.1rem;
+    align-items: center;
+    margin-bottom: var(--space-6);
+    gap: var(--space-4);
+    flex-wrap: wrap;
 }
 
 .search-box {
@@ -58,11 +47,11 @@
 }
 
 .text-error {
-    color: #ef4444;
+    color: var(--color-danger);
 }
 
 .text-success {
-    color: #22c55e;
+    color: var(--color-success);
 }
 
 .loading-state {
@@ -97,16 +86,49 @@
     }
 }
 
-.dashboard-grid {
-    display: grid;
-    grid-template-columns: 1fr 360px;
-    gap: 1.5rem;
-}
-
 .chart-section {
     padding: 1.5rem;
     display: flex;
     flex-direction: column;
+    margin-bottom: 1.5rem;
+}
+
+/* Index quick-select bar — above chart for index tickers */
+.index-quick-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 1rem;
+}
+
+/* Signal Analysis panels — responsive grid below the chart */
+.signal-panels-below {
+    margin-bottom: 1.5rem;
+}
+
+.signal-panels-below .signal-analysis {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-auto-flow: row dense;
+    gap: 1rem;
+    align-items: stretch;
+}
+
+.signal-panels-below .signal-analysis > * {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* 버튼/퀵셀렉트: 전체 행 차지, 패널 슬롯 방해 안 함 */
+.signal-panels-below .sa-view-ops-btn,
+.signal-panels-below .index-quick-btns {
+    grid-column: 1 / -1;
+}
+
+/* Key Levels + Exit Reference: 2열 span으로 빈 열 채움 */
+.signal-panels-below .sa-exit-section {
+    grid-column: span 2;
 }
 
 .stock-info {
@@ -163,6 +185,28 @@
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+    .signal-panels-below .signal-analysis {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 640px) {
+    .signal-panels-below .signal-analysis {
+        grid-template-columns: 1fr;
+        grid-auto-flow: row;
+    }
+
+    .signal-panels-below .sa-exit-section {
+        grid-column: span 1;
+    }
+
+    .signal-panels-below .sa-view-ops-btn,
+    .signal-panels-below .index-quick-btns {
+        grid-column: 1;
+    }
 }
 
 .metric-card {
@@ -287,8 +331,8 @@
 
 .ind-value {
     font-weight: 600;
-    font-size: 1.05rem;
-    font-family: monospace;
+    font-size: var(--text-lg);
+    font-family: var(--font-mono);
 }
 
 @media (max-width: 1024px) {

@@ -12,7 +12,7 @@ import asyncio
 import json
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -26,9 +26,11 @@ from .esf_intraday_routes import esf_router
 from .esf_journal_routes import esf_journal_router
 from simulation.event_bus import SSEEventBus
 from simulation.controller import SimulationController
+from .live_data_service import LiveDataService
 
 event_bus = SSEEventBus()
 sim_controller = SimulationController(event_bus)
+live_data = LiveDataService(event_bus)
 
 
 def _prewarm_cache():
@@ -51,8 +53,10 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(asyncio.to_thread(_prewarm_cache))
     # 모든 마켓 엔진 시작
     await sim_controller.start_all()
+    await live_data.start()
     yield
     # 모든 엔진 종료
+    await live_data.stop()
     await sim_controller.shutdown_all()
 
 
@@ -118,3 +122,27 @@ async def sse_stream(request: Request):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.post("/api/v1/live/subscribe")
+def live_subscribe(ticker: str = Query(...)):
+    """실시간 가격 피드에 티커 구독 추가."""
+    live_data.subscribe_ticker(ticker)
+    return {"status": "subscribed", "ticker": ticker, "total": len(live_data.subscribed_tickers)}
+
+
+@app.post("/api/v1/live/unsubscribe")
+def live_unsubscribe(ticker: str = Query(...)):
+    """실시간 가격 피드에서 티커 구독 해제."""
+    live_data.unsubscribe_ticker(ticker)
+    return {"status": "unsubscribed", "ticker": ticker, "total": len(live_data.subscribed_tickers)}
+
+
+@app.get("/api/v1/live/status")
+def live_status():
+    """LiveDataService 상태 조회."""
+    return {
+        "running": live_data._is_running,
+        "subscribed_tickers": sorted(live_data.subscribed_tickers),
+        "sse_clients": event_bus.client_count,
+    }

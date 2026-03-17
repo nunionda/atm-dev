@@ -21,6 +21,7 @@ interface SignalAnalysisProps {
     isKorean: boolean;
     onSelectTicker?: (symbol: string) => void;
     refetch?: () => void;
+    hideIndexButtons?: boolean;
 }
 
 const INDEX_BUTTONS = [
@@ -626,7 +627,7 @@ function SMCPanel({ smc, fmtPrice }: { smc: SMCAnalysis; fmtPrice: (v: number) =
 
 // --- Main Component ---
 
-export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelectTicker, refetch }: SignalAnalysisProps) {
+export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelectTicker, refetch, hideIndexButtons }: SignalAnalysisProps) {
     const { navigateToOperations } = useAppState();
     const isIndex = ticker.startsWith('^');
     const current = data.length > 0 ? data[data.length - 1] : null;
@@ -707,7 +708,7 @@ export function SignalAnalysis({ data, ticker, currencySymbol, isKorean, onSelec
             )}
 
             {/* Index Quick Select */}
-            {isIndex && onSelectTicker && (
+            {isIndex && onSelectTicker && !hideIndexButtons && (
                 <div className="index-quick-btns">
                     {INDEX_BUTTONS.map(idx => (
                         <button

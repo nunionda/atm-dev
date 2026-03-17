@@ -53,8 +53,10 @@ function connect() {
     // 각 이벤트 타입에 대한 리스너 등록 (마켓별 접두사)
     const BASE_EVENTS = ['system_state', 'positions', 'signals', 'orders', 'risk_metrics', 'risk_events', 'replay_progress', 'equity_curve', 'performance'];
     const MARKET_IDS = ['kospi', 'sp500', 'ndx'];
+    const GLOBAL_EVENTS = ['price_update', 'market_overview', 'regime_change'];
     const eventTypes = [
         'heartbeat',
+        ...GLOBAL_EVENTS,
         ...MARKET_IDS.flatMap(m => BASE_EVENTS.map(e => `${m}:${e}`)),
     ];
     for (const type of eventTypes) {

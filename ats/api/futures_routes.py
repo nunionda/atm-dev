@@ -114,7 +114,7 @@ def _safe_float(v, default=0.0) -> float:
 
 def _download_futures_data(ticker: str, period: str = "1y") -> pd.DataFrame:
     """yfinance로 선물 OHLCV 다운로드."""
-    raw = yf.download(ticker, period=period, auto_adjust=True, progress=False)
+    raw = yf.download(ticker, period=period, auto_adjust=False, progress=False)
     if raw.empty:
         return pd.DataFrame()
 

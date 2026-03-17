@@ -48,17 +48,17 @@
 
 .nav-links {
     display: flex;
-    gap: 1.5rem;
+    gap: 0.25rem;
 }
 
 .nav-link {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.95rem;
+    gap: 0.4rem;
+    font-size: 0.875rem;
     font-weight: 500;
     color: var(--text-secondary);
-    padding: 0.5rem 1rem;
+    padding: 0.45rem 0.75rem;
     border-radius: 100px;
     transition: all var(--transition-fast);
 }

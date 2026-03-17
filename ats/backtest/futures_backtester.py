@@ -162,7 +162,7 @@ class FuturesBacktester:
             self.ticker,
             start=warmup_start.strftime("%Y-%m-%d"),
             end=end_dt.strftime("%Y-%m-%d"),
-            auto_adjust=True,
+            auto_adjust=False,
             progress=False,
         )
 

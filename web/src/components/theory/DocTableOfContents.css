@@ -1,0 +1,43 @@
+.doc-toc {
+  position: sticky;
+  top: 6rem;
+  max-height: calc(100vh - 8rem);
+  overflow-y: auto;
+  padding: 1rem 0;
+}
+
+.doc-toc-title {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+}
+
+.doc-toc-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.doc-toc-item a {
+  display: block;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  border-left: 2px solid transparent;
+  transition: all var(--transition-fast);
+  line-height: 1.4;
+}
+
+.doc-toc-item a:hover {
+  color: var(--text-primary);
+  border-left-color: var(--accent-primary);
+}
+
+.doc-toc-item.level-3 a {
+  padding-left: 1.25rem;
+  font-size: 0.75rem;
+}
