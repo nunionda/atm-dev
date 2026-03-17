@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LineChart, BookOpen, Radio, Shield, BarChart3, ChevronRight, Activity, Calculator, Zap, RefreshCw } from 'lucide-react';
+import { LineChart, BookOpen, Radio, Shield, BarChart3, Calculator, Zap, RefreshCw } from 'lucide-react';
 import './Navbar.css';
 
 export function Navbar() {
@@ -76,13 +76,6 @@ export function Navbar() {
                     </Link>
                 </div>
 
-                <div className="nav-actions">
-                    <button className="btn-secondary nav-btn">Log In</button>
-                    <button className="btn-primary nav-btn">
-                        Get Started
-                        <ChevronRight size={16} />
-                    </button>
-                </div>
             </div>
         </nav>
     );

@@ -254,7 +254,7 @@ def get_quote(ticker: str, count: int = 5):
         else:
             resolved = resolve_ticker(ticker)
             yf_period = "3mo" if count > 10 else "1mo"
-            df = yf.download(resolved, period=yf_period, interval="1d", progress=False)
+            df = yf.download(resolved, period=yf_period, interval="1d", progress=False, auto_adjust=False)
             if df.empty:
                 raise HTTPException(status_code=404, detail=f"No quote data for {ticker}")
 

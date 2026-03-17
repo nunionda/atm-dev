@@ -837,3 +837,18 @@
     font-weight: 600;
     margin-top: 10px;
 }
+
+/* ===== Grid layout overrides (when inside .signal-panels-below) ===== */
+
+.signal-panels-below .signal-analysis > * {
+    min-width: 0;
+}
+
+.signal-panels-below .sa-view-ops-btn {
+    align-self: start;
+    justify-self: start;
+}
+
+.signal-panels-below .index-quick-btns {
+    align-self: start;
+}

@@ -189,8 +189,6 @@ export function Dashboard() {
 
     return (
         <div className="dashboard-page container">
-            <MarketRegimePanel onSelectIndex={(symbol) => { setTicker(symbol); setStockName({ nameKr: '', nameEn: '' }); }} />
-
             <div className="dashboard-header">
                 <div>
                     <h1 className="page-title">Stock Analytics(분석)</h1>
@@ -217,6 +215,8 @@ export function Dashboard() {
                 </div>
             </div>
 
+            <MarketRegimePanel onSelectIndex={(symbol) => { setTicker(symbol); setStockName({ nameKr: '', nameEn: '' }); }} />
+
             {loading && !error && (
                 <div className="dashboard-grid">
                     <div className="chart-section">
@@ -235,9 +235,29 @@ export function Dashboard() {
                 </div>
             )}
 
+            {/* Index Quick-Select — above chart, only for index tickers */}
+            {isIndex && (
+                <div className="index-quick-bar">
+                    {[
+                        { label: 'S&P 500', symbol: '^GSPC' },
+                        { label: 'NASDAQ', symbol: '^IXIC' },
+                        { label: 'KOSPI', symbol: '^KS11' },
+                        { label: 'KOSPI 200', symbol: '^KS200' },
+                    ].map(idx => (
+                        <button
+                            key={idx.symbol}
+                            className={`index-btn ${ticker === idx.symbol ? 'active' : ''}`}
+                            onClick={() => handleSelect(idx.symbol)}
+                        >
+                            {idx.label}
+                        </button>
+                    ))}
+                </div>
+            )}
+
             {!loading && !error && data && (
-                <div className="dashboard-grid">
-                    {/* Main Chart Area */}
+                <>
+                    {/* Main Chart — full width */}
                     <ErrorBoundary>
                     <div className="chart-section glass-panel">
                         {(stockName.nameKr || stockName.nameEn || livePrice) && (
@@ -323,9 +343,9 @@ export function Dashboard() {
                     </div>
                     </ErrorBoundary>
 
-                    {/* Signal Analysis Sidebar */}
+                    {/* Signal Analysis — below chart in responsive panel grid */}
                     <ErrorBoundary>
-                    <div className="metrics-sidebar">
+                    <div className="signal-panels-below">
                         <SignalAnalysis
                             data={data.data}
                             ticker={ticker}
@@ -333,10 +353,11 @@ export function Dashboard() {
                             isKorean={isKorean}
                             onSelectTicker={setTicker}
                             refetch={refetch}
+                            hideIndexButtons
                         />
                     </div>
                     </ErrorBoundary>
-                </div>
+                </>
             )}
         </div>
     );
