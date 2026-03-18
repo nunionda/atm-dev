@@ -603,6 +603,13 @@ Intraday intervals (1m, 5m, 15m, 30m, 1h) only support period values of `1d`, `5
 
 Do not attempt interactive CLI authentication flows (e.g., `gh auth login`, interactive menus). Instead, instruct the user to run those commands in their own terminal, or use token-based auth.
 
+### Assumptions & Uncertainty
+
+When uncertain about intent, trade-offs, or side effects — **stop and ask** before proceeding. Especially:
+- 전략 파라미터 변경 시: weight/threshold 변경은 non-linear 효과를 내므로, 변경 전 가정과 예상 영향을 명시하고 확인받을 것
+- 여러 해석이 가능한 요청: 가능한 해석들을 제시하고 선택받을 것
+- 기존 코드 의도가 불분명할 때: 추측하지 말고 질문할 것
+
 ### Git Workflow
 
 Before attempting `git push` or `gh pr create`, verify a git remote is configured with `git remote -v`. If none exists, ask the user for the remote URL before proceeding.
