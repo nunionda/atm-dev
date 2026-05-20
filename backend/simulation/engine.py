@@ -650,15 +650,25 @@ class SimulationEngine:
 
             try:
                 def _download_batch(t=tickers_str):
-                    with SimulationEngine._yf_thread_lock:
+                    # P0-2: lock.acquire(timeout=60) — 무한 대기 차단
+                    acquired = SimulationEngine._yf_thread_lock.acquire(timeout=60)
+                    if not acquired:
+                        raise TimeoutError("yf_thread_lock acquire timeout (60s) — another download stuck")
+                    try:
                         # yfinance 내부 캐시 클리어 (마켓 간 데이터 오염 방지)
                         yf.shared._DFS.clear()
                         yf.shared._ERRORS.clear()
                         return yf.download(t, period="1y", interval="1d", progress=False)
+                    finally:
+                        SimulationEngine._yf_thread_lock.release()
 
-                data = await loop.run_in_executor(None, _download_batch)
-            except Exception as e:
-                print(f"[SimEngine:{self.market_id}] Batch {i // BATCH_SIZE + 1} fetch failed: {e}")
+                # P0-1: asyncio.wait_for로 강제 timeout (120초 = batch당 max 2분)
+                data = await asyncio.wait_for(
+                    loop.run_in_executor(None, _download_batch),
+                    timeout=120
+                )
+            except (Exception, asyncio.TimeoutError) as e:
+                print(f"[SimEngine:{self.market_id}] Batch {i // BATCH_SIZE + 1} fetch failed: {type(e).__name__}: {e}")
                 failed_tickers.extend(w["ticker"] for w in batch)
                 continue
 
@@ -719,7 +729,11 @@ class SimulationEngine:
                     ticker_obj = yf.Ticker(t)
                     return ticker_obj.history(period="1y", interval="1d")
 
-                data = await loop.run_in_executor(None, _retry_ticker)
+                # P0-1: 개별 ticker 다운로드도 timeout 30초
+                data = await asyncio.wait_for(
+                    loop.run_in_executor(None, _retry_ticker),
+                    timeout=30
+                )
                 if data is not None and not data.empty:
                     if hasattr(data.index, 'tz') and data.index.tz is not None:
                         if self.market_id == "kospi":
@@ -757,9 +771,13 @@ class SimulationEngine:
         tickers = " ".join(w["ticker"] for w in self._watchlist)
         loop = asyncio.get_event_loop()
         try:
-            data = await loop.run_in_executor(
-                None,
-                lambda: yf.download(tickers, period="1d", interval="1m", progress=False),
+            # P0-1: 현재가 다운로드 timeout 30초 (1분봉이라 빨라야 함)
+            data = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: yf.download(tickers, period="1d", interval="1m", progress=False),
+                ),
+                timeout=30
             )
             if data.empty:
                 return
@@ -774,8 +792,11 @@ class SimulationEngine:
                         self._current_prices[w["code"]] = float(close_series.iloc[-1])
                 except Exception:
                     pass
-        except Exception:
-            pass  # 다음 사이클에 재시도
+        except (Exception, asyncio.TimeoutError) as e:
+            # P0-1: timeout 발생 시 로그 + 다음 사이클 재시도
+            if isinstance(e, asyncio.TimeoutError):
+                print(f"[SimEngine:{self.market_id}] _fetch_current_prices timeout (30s) — 다음 사이클 재시도")
+            pass
 
     # ══════════════════════════════════════════
     # 지표 계산 (momentum_swing.py 복제)
