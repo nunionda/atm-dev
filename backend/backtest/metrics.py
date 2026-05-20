@@ -67,6 +67,10 @@ class PhaseStats:
     es2b_tier_LONG: int = 0
     es2b_tier_MID: int = 0
     es2b_tier_SHORT: int = 0
+    # ── H8: 패시브 ETF 카운터 ──
+    passive_etf_entries: int = 0         # STRONG_BULL/BULL 시 ETF 직매수 횟수
+    passive_etf_regime_exits: int = 0    # 레짐 다운그레이드로 청산
+    es_passive_etf: int = 0              # ETF 포지션 청산 (ES1 -10% 또는 REGIME_DOWN)
 
     # SMC 전용
     es_smc_sl: int = 0        # ATR 기반 스탑 로스

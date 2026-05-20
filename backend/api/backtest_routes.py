@@ -184,6 +184,10 @@ def _serialize_metrics(metrics: Any) -> Dict[str, Any]:
         "es2b_tier_LONG": ps.es2b_tier_LONG,
         "es2b_tier_MID": ps.es2b_tier_MID,
         "es2b_tier_SHORT": ps.es2b_tier_SHORT,
+        # H8: 패시브 ETF 카운터
+        "passive_etf_entries": ps.passive_etf_entries,
+        "passive_etf_regime_exits": ps.passive_etf_regime_exits,
+        "es_passive_etf": ps.es_passive_etf,
         # 종목별 레짐 분류
         "stock_regime_distribution": ps.stock_regime_distribution,
         "stock_regime_strategy_map": ps.stock_regime_strategy_map,

@@ -33,7 +33,7 @@ from .engine_constants import (  # noqa: F401
     REGIME_STRATEGY_WEIGHTS, INDEX_TREND_STRATEGY_WEIGHTS,
     REGIME_DISPLAY_NAMES, STRATEGY_DISPLAY_NAMES,
     REGIME_STRATEGY_COMPOSITION,
-    INVERSE_ETFS, SAFE_HAVEN_ETFS,
+    INVERSE_ETFS, SAFE_HAVEN_ETFS, PASSIVE_INDEX_ETFS,
     MULTI_STRATEGIES, REGIME_STRATEGY_MODES,
 )
 from .strategy_allocator import StrategyAllocator  # noqa: F401
@@ -89,7 +89,7 @@ class SimulationEngine:
         self.rsi_lower = 52   # CF1 RSI 하한 (CLAUDE.md Phase 3: 52-78)
         self.rsi_upper = 78   # CF1 RSI 상한
         self.volume_multiplier = 1.5
-        self.stop_loss_pct = -0.05    # ES1 손절 -5% (CLAUDE.md Phase 5)
+        self.stop_loss_pct = -0.10    # H6: ES1 손절 -10% (종목당 = 일일 한도와 통일)
         self.take_profit_pct = 0.20   # ES2 익절 BULL 기준 (체제별 동적)
         self.trailing_stop_pct = -0.04  # ES3 기본 floor -4% (Progressive ATR)
         self.trailing_activation_pct = 0.05
@@ -231,10 +231,10 @@ class SimulationEngine:
                 from data.config_manager import PortfolioAllocationConfig
                 alloc_cfg = PortfolioAllocationConfig(
                     enabled=True,
-                    kelly_fraction=0.30,
+                    kelly_fraction=0.50,  # H7: Half-Kelly 표준 (이전 0.30 → 너무 보수적)
                 )
                 self._allocator = PortfolioAllocator(alloc_cfg)
-                self.min_cash_ratio = 1.0 - alloc_cfg.kelly_fraction  # 0.70
+                self.min_cash_ratio = 1.0 - alloc_cfg.kelly_fraction  # 0.50 (이전 0.70)
                 self.max_positions = alloc_cfg.tactical.top_n  # tactical 60종목
             except ImportError as e:
                 print(f"[SimEngine:{self.market_id}] PortfolioAllocator 모듈 임포트 실패: {e}")
@@ -624,6 +624,13 @@ class SimulationEngine:
                 if not any(e["code"] == sh_code for e in extra_items):
                     extra_items.append({"code": sh_code, "ticker": sh_ticker, "name": item["name"]})
 
+        # H8: 패시브 인덱스 ETF (STRONG_BULL/BULL 매수용)
+        passive_etf = PASSIVE_INDEX_ETFS.get(market_key) or PASSIVE_INDEX_ETFS.get(self.market_id)
+        if passive_etf:
+            if not any(w["code"] == passive_etf["code"] for w in self._watchlist):
+                if not any(e["code"] == passive_etf["code"] for e in extra_items):
+                    extra_items.append(passive_etf)
+
         all_items = list(self._watchlist) + extra_items
 
         BATCH_SIZE = 20
@@ -946,22 +953,28 @@ class SimulationEngine:
 
         composite_score = breadth_score + adx_score + vix_score + bw_score
 
-        # ── 레짐 결정 ──
+        # ── 레짐 결정 (Bug 3 fix: 약세장 감지 강화) ──
         if composite_score >= 65:
             raw_regime = "BULL"
-        elif composite_score >= 40:
+        elif composite_score >= 45:
             # NEUTRAL vs RANGE_BOUND 구분: ADX<20 AND BB bandwidth 하위20%
+            # Bug 3 fix: 임계 40 → 45 (NEUTRAL 영역 좁힘)
             is_range_bound = (
                 adx_values
                 and avg_adx < 20
                 and bb_bandwidths
-                and avg_bw < 3.5  # 좁은 bandwidth
+                and avg_bw < 3.5
             )
             raw_regime = "RANGE_BOUND" if is_range_bound else "NEUTRAL"
-        elif composite_score >= 25:
-            raw_regime = "NEUTRAL" if breadth_pct > 45 else "BEAR"
+        elif composite_score >= 30:
+            # Bug 3 fix: 25 → 30 임계 상향 + breadth 50 → 55로 엄격화
+            # 약세장 (breadth 50% 미만)을 BEAR로 더 잘 감지
+            raw_regime = "NEUTRAL" if breadth_pct > 55 else "BEAR"
+        elif composite_score >= 15:
+            # Bug 3 fix: 신규 BEAR vs CRISIS 구분
+            raw_regime = "BEAR" if vix < 25 else "CRISIS"
         else:
-            raw_regime = "BEAR"
+            raw_regime = "CRISIS"  # 매우 낮은 점수 = 위기
 
         return self._smooth_regime(raw_regime)
 
@@ -1700,18 +1713,29 @@ class SimulationEngine:
         if self._allocator:
             ac = sum(1 for p in self.positions.values() if p.status == "ACTIVE")
             if ac <= 2:
-                effective_rg4 = max(0.50, self.min_cash_ratio - 0.20)
-        # RG4b: 레짐별 현금 비율 오버라이드 (BEAR: 50%, CRISIS: 70%)
+                # H7: 초기 진입 시 완화 (이전 max(0.50, ...) → max(0.25, ...))
+                effective_rg4 = max(0.25, self.min_cash_ratio - 0.20)
+        # H7: RG4b 레짐별 cash floor — regime_cash 명시 시 직접 override
+        # (이전 max(effective_rg4, regime_cash) → regime이 더 보수적일 때만 적용 = STRONG_BULL 25% 무력화)
         regime_cash = REGIME_OVERRIDES.get(self._market_regime, {}).get("min_cash_override")
         if regime_cash is not None:
-            effective_rg4 = max(effective_rg4, regime_cash)
+            effective_rg4 = regime_cash  # 동적 매핑: STRONG_BULL=0.25, BULL=0.35, NEUTRAL=0.50, ...
 
         if cash_ratio < effective_rg4:
             return False, f"RG4: 현금 비율 {effective_rg4*100:.0f}% 미만"
 
-        # RG5: VIX > 30 공포 구간 → 신규 진입 차단
-        if self._vix_ema20 > 30:
-            return False, f"RG5: VIX 공포구간 ({self._vix_ema20:.1f} > 30)"
+        # C2.1: RG5 VIX 동적 임계 — 강세장은 관대, 약세장은 엄격
+        _vix_threshold_map = {
+            "STRONG_BULL": 35,  # 강세 추세 강함 → VIX 35까지 허용
+            "BULL":        32,
+            "NEUTRAL":     30,  # 기본
+            "RANGE_BOUND": 28,
+            "BEAR":        25,  # 약세 → 일찍 차단
+            "CRISIS":      22,  # 위기 → 매우 엄격
+        }
+        vix_threshold = _vix_threshold_map.get(self._market_regime, 30)
+        if self._vix_ema20 > vix_threshold:
+            return False, f"RG5: VIX 공포구간 ({self._vix_ema20:.1f} > {vix_threshold})"
 
         return True, None
 
@@ -1845,14 +1869,147 @@ class SimulationEngine:
             return self._scan_entries_defensive()
         return self._scan_entries_momentum()
 
+    def _execute_passive_etf_buy(self, regime_overrides: dict):
+        """H8: 패시브 ETF 매수 (강세장 시장 추종).
+
+        STRONG_BULL/BULL 레짐에서 시장 인덱스 ETF (KODEX 200 / SPY / QQQ)를
+        시그널 없이 직매수. 비중은 regime_overrides["passive_etf_weight"]
+        (STRONG_BULL=70%, BULL=50%).
+
+        이미 ETF 보유 중이면 추가 매수 X. 레짐 다운그레이드 시 자동 청산
+        (기존 _reduce_positions_for_regime 활용).
+        """
+        market_key = self.market_id if self.market_id in PASSIVE_INDEX_ETFS else (
+            "nasdaq" if self.market_id == "ndx" else self.market_id
+        )
+        etf_info = PASSIVE_INDEX_ETFS.get(market_key)
+        if not etf_info:
+            return
+
+        etf_code = etf_info["code"]
+        etf_ticker = etf_info["ticker"]
+        etf_name = etf_info["name"]
+
+        # 이미 ETF 보유 중이면 스킵 (Buy & Hold)
+        existing = self.positions.get(etf_code)
+        if existing and existing.status == "ACTIVE":
+            return
+
+        # ETF 데이터 확인
+        df = self._ohlcv_cache.get(etf_code)
+        if df is None or df.empty:
+            return  # 데이터 없음 — 다음 사이클 대기
+
+        # 가격
+        current_price = self._current_prices.get(etf_code)
+        if current_price is None or current_price <= 0:
+            try:
+                current_price = float(df["close"].iloc[-1])
+            except Exception:
+                return
+
+        # 비중 결정 (regime별 passive_etf_weight)
+        target_weight = regime_overrides.get("passive_etf_weight", 0.70)
+        total_equity = self._get_total_equity()
+        target_amount = total_equity * target_weight
+
+        # 현금 제약 + min_cash_override 고려
+        min_cash_pct = regime_overrides.get("min_cash_override", self.min_cash_ratio)
+        min_cash = total_equity * min_cash_pct
+        available = self.cash - min_cash
+        if available <= 0:
+            return
+
+        # 매수 수량
+        actual_amount = min(target_amount, available)
+        quantity = int(actual_amount / current_price)
+        if quantity <= 0:
+            return
+
+        # 슬리피지 + 수수료
+        effective_price = current_price * (1 + self.slippage_pct)
+        commission = quantity * effective_price * self.commission_pct
+        cost = quantity * effective_price + commission
+        if cost > self.cash:
+            return
+        self.cash -= cost
+        self._daily_trade_amount += cost
+        self._total_commission_paid += commission
+
+        # ETF 포지션 생성 (단순 Buy & Hold, R-Multiple 적용 X)
+        pos_id = f"sim-pos-{etf_code}"
+        stop_loss = effective_price * (1 + self.stop_loss_pct)  # -10%
+        now = self._get_current_iso()
+        self.positions[etf_code] = SimPosition(
+            id=pos_id,
+            stock_code=etf_code,
+            stock_name=etf_name,
+            status="ACTIVE",
+            quantity=quantity,
+            entry_price=effective_price,
+            current_price=effective_price,
+            pnl=0,
+            pnl_pct=0,
+            stop_loss=round(stop_loss),
+            take_profit=round(effective_price * 1.5),  # +50% (사실상 비활성)
+            trailing_stop=round(stop_loss),
+            highest_price=effective_price,
+            entry_date=self._get_current_date_str(),
+            days_held=0,
+            weight_pct=round(cost / total_equity * 100, 1),
+            strategy_tag="passive_etf",  # H8: 신규 전략 태그
+            avg_entry_price=effective_price,
+            entry_signal_strength=100,   # 패시브는 강도 무관
+            entry_regime=self._market_regime,
+            entry_trend_strength="STRONG",
+            stock_regime=self._market_regime,
+            r_unit=0.0,        # Phase E 비활성
+            holding_tier="LONG",  # 장기 보유 의도
+        )
+
+        # 주문 기록
+        self._order_counter += 1
+        self.orders.append(
+            SimOrder(
+                id=f"sim-ord-{self._order_counter:04d}",
+                stock_code=etf_code,
+                stock_name=etf_name,
+                side="BUY",
+                order_type="MARKET",
+                status="FILLED",
+                price=current_price,
+                filled_price=effective_price,
+                quantity=quantity,
+                filled_quantity=quantity,
+                created_at=now,
+                filled_at=now,
+                reason=f"PASSIVE_ETF [{self._market_regime}] 시장 추종",
+            )
+        )
+        if len(self.orders) > 200:
+            self.orders = self.orders[-200:]
+
+        self._phase_stats.setdefault("passive_etf_entries", 0)
+        self._phase_stats["passive_etf_entries"] += 1
+        self._add_risk_event("INFO",
+            f"패시브 ETF 매수: {etf_name} {quantity}주 @ {self.currency_symbol}{effective_price:,.0f} (비중 {target_weight*100:.0f}%)")
+
     def _scan_entries_multi(self):
         """
         Phase 4 리팩토링: 시그널 수집 → 종목 중복 제거 → 실행.
+
+        H8: 레짐 STRONG_BULL/BULL에서는 패시브 ETF 매수 우선 (시장 추종).
 
         1. 모든 활성 전략에서 시그널만 수집 (_collect_mode=True)
         2. 같은 종목 → 최고 strength 시그널만 선택
         3. 선택된 시그널을 전략별 예산 한도 내에서 실행
         """
+        # H8: 패시브 ETF 모드 (강세장에서 시장 추종)
+        _regime_ov = REGIME_OVERRIDES.get(self._market_regime, {})
+        if _regime_ov.get("passive_etf_mode"):
+            self._execute_passive_etf_buy(_regime_ov)
+            # ETF 매수 후에도 일반 액티브 시그널은 진행 (혼합 운용)
+
         allocator = self._strategy_allocator
         if allocator is None:
             return
@@ -2087,7 +2244,7 @@ class SimulationEngine:
     def _check_exits_defensive(self):
         """
         Defensive 전략 청산: 레짐이 BULL로 전환되면 청산.
-        또는 일반 ES1 손절(-5%) 적용.
+        또는 일반 ES1 손절(-10%) 적용.
         """
         to_close: List[str] = []
 
@@ -2106,7 +2263,7 @@ class SimulationEngine:
 
             # ES1: 하드 손절 -5%
             if pnl_pct <= -0.05:
-                exit_reason = "ES1: 손절 -5%"
+                exit_reason = "ES1: 손절 -10%"
                 exit_type = "STOP_LOSS"
 
             # 레짐이 BULL로 전환 → 인버스 청산
@@ -3091,9 +3248,9 @@ class SimulationEngine:
             if _rm_exit is not None:
                 exit_reason, exit_type = _rm_exit
 
-            # ES1: 손절 -5% (GAP DOWN 보호: _execute_sell에서 fill price 조정)
+            # ES1: 손절 -10% (GAP DOWN 보호: _execute_sell에서 fill price 조정)
             if not exit_reason and current_price <= entry_price * (1 + self.stop_loss_pct):
-                exit_reason = "ES1 손절 -5%"
+                exit_reason = "ES1 손절 -10%"
                 exit_type = "STOP_LOSS"
 
             # ATR SL: entry - ATR * mult (2일 쿨다운)
@@ -3108,12 +3265,17 @@ class SimulationEngine:
                     exit_reason = "ES_SMC ATR SL"
                     exit_type = "ATR_STOP_LOSS"
 
-                # ATR TP
+                # H5: ATR TP를 Trailing으로 전환 (추세 우선 정책)
+                # 이전: entry + ATR×3 도달 시 즉시 청산 → winner 일찍 잘림 (avg holding 11.8d)
+                # 변경: TP 임계 도달 후 highest_price - ATR×1.5 trailing → 추세 끝까지 보유
                 if not exit_reason:
-                    atr_tp_price = entry_price + atr_val * self._smc_cfg.atr_tp_mult
-                    if current_price >= atr_tp_price:
-                        exit_reason = "ES_SMC ATR TP"
-                        exit_type = "ATR_TAKE_PROFIT"
+                    atr_tp_trigger = entry_price + atr_val * self._smc_cfg.atr_tp_mult
+                    if pos.highest_price >= atr_tp_trigger:
+                        # TP 영역 진입 후 trailing 활성
+                        trail_distance = atr_val * 1.5  # 1.5×ATR trailing
+                        if current_price <= pos.highest_price - trail_distance:
+                            exit_reason = "ES_SMC ATR Trail"
+                            exit_type = "ATR_TAKE_PROFIT"
 
             # CHoCH Exit: 추세 반전 감지 (Phase 5: PnL 게이트 추가)
             # 데이터: CHoCH exits 9/23 trades, -$2,352 → 조기 청산이 수익 기회 파괴
@@ -3560,9 +3722,9 @@ class SimulationEngine:
             if _rm_exit is not None:
                 exit_reason, exit_type = _rm_exit
 
-            # ES1: 손절 -5% (GAP DOWN 보호: _execute_sell에서 fill price 조정)
+            # ES1: 손절 -10% (GAP DOWN 보호: _execute_sell에서 fill price 조정)
             if not exit_reason and current_price <= entry_price * (1 + self.stop_loss_pct):
-                exit_reason = "ES1 손절 -5%"
+                exit_reason = "ES1 손절 -10%"
                 exit_type = "STOP_LOSS"
 
             # ATR SL (2일 쿨다운)
@@ -4273,9 +4435,9 @@ class SimulationEngine:
             if _rm_exit is not None:
                 exit_reason, exit_type = _rm_exit
 
-            # ES1: 손절 -5% (GAP DOWN 보호: _execute_sell에서 fill price 조정)
+            # ES1: 손절 -10% (GAP DOWN 보호: _execute_sell에서 fill price 조정)
             if not exit_reason and current_price <= entry_price * (1 + self.stop_loss_pct):
-                exit_reason = "ES1 손절 -5%"
+                exit_reason = "ES1 손절 -10%"
                 exit_type = "STOP_LOSS"
 
             # ES_BRT_SL: ATR × dynamic mult (ADX-based)
@@ -5463,9 +5625,9 @@ class SimulationEngine:
                     atr_val = float(last_atr)
 
             if atr_val and atr_val > 0:
-                stop_distance = max(atr_val, price * 0.05)  # 최소 ES1 5%
+                stop_distance = max(atr_val, price * 0.10)  # H6: 최소 ES1 10%
             else:
-                stop_distance = price * 0.05
+                stop_distance = price * 0.10
 
             raw_quantity = risk_per_trade / stop_distance
 
@@ -5528,7 +5690,12 @@ class SimulationEngine:
         if self._allocator:
             active_count_cash = sum(1 for p in self.positions.values() if p.status == "ACTIVE")
             if active_count_cash <= 2:
-                effective_cash_ratio = max(0.50, self.min_cash_ratio - 0.20)
+                # H7: 초기 진입 완화 (이전 0.50 → 0.25)
+                effective_cash_ratio = max(0.25, self.min_cash_ratio - 0.20)
+        # H7: regime cash override 직접 적용 (RG4와 동일 패턴)
+        regime_cash_buy = REGIME_OVERRIDES.get(self._market_regime, {}).get("min_cash_override")
+        if regime_cash_buy is not None:
+            effective_cash_ratio = regime_cash_buy
         min_cash = total_equity * effective_cash_ratio
         available = self.cash - min_cash
         if available <= 0 or quantity <= 0:
@@ -5600,8 +5767,8 @@ class SimulationEngine:
                 _atr_val = float(_last_atr)
         if _atr_val > 0:
             atr_stop = effective_price - 2.0 * _atr_val
-            # Use tighter of ATR-based or -5%
-            stop_loss = max(atr_stop, effective_price * 0.95)  # Never wider than -5%
+            # H6: Use tighter of ATR-based or -10%
+            stop_loss = max(atr_stop, effective_price * 0.90)  # Never wider than -10%
         else:
             stop_loss = effective_price * (1 + self.stop_loss_pct)
         take_profit = effective_price * (1 + self.take_profit_pct)
@@ -5755,6 +5922,9 @@ class SimulationEngine:
                 self._check_exits_defensive()
             elif tag == "volatility":
                 self._check_exits_volatility()
+            elif tag == "passive_etf":
+                # H8: 패시브 ETF 청산 — 레짐 다운그레이드 시만 청산 (BR-S01 -10% + 레짐 변경)
+                self._check_exits_passive_etf()
             else:  # momentum (default)
                 self._check_exits_momentum()
 
@@ -5821,11 +5991,12 @@ class SimulationEngine:
         elif market_regime == "NEUTRAL":
             score += 1
 
+        # C1.1: SHORT tier 활용을 위해 임계 상향 (이전 score≥6 MID → ≥7 MID)
         if score >= 9:
             return "LONG"
-        elif score >= 6:
+        elif score >= 7:
             return "MID"
-        return "SHORT"
+        return "SHORT"  # score 4-6 → SHORT tier (이전엔 진입 안 됐던 약한 시그널)
 
     def _check_r_multiple_partial_exit(self, pos: SimPosition, current_price: float) -> Optional[tuple]:
         """Phase E + F: R-Multiple 분할 청산 헬퍼 (전 전략 공통, tier-aware).
@@ -5861,9 +6032,11 @@ class SimulationEngine:
         # ES2_LOCK: TP2 후 +1R로 회귀 → 잔여 청산 (+1R 수익 잠금)
         if pos.tp2_hit and current_price <= entry_price + 1.0 * pos.r_unit:
             return (f"ES2_LOCK_1R 잔여 잠금 [{tier}]", "TAKE_PROFIT")
-        # ES2_BE: TP1 후 본전으로 회귀 → 잔여 청산 (무손실 보장)
-        if pos.tp1_hit and not pos.tp2_hit and current_price <= entry_price:
-            return (f"ES2_BE 본전 가드 [{tier}]", "TAKE_PROFIT")
+        # C3.1: ES2_BE 가드 추가 완화 — TP1 후 +0.3R 회귀 시 잔여 청산
+        # (H5 +0.5R → C3.1 +0.3R, winner 더 길게 추종)
+        # +0.3R 안전대 — 무손실 + 0.3R 수익 보장 + 추세 추종 시간 확보
+        if pos.tp1_hit and not pos.tp2_hit and current_price <= entry_price + 0.3 * pos.r_unit:
+            return (f"ES2_BE_03R 잔여 잠금 [{tier}]", "TAKE_PROFIT")
 
         # ES2A: TP1 @ +tp1_r R
         if not pos.tp1_hit and current_price >= tp1_target:
@@ -5890,6 +6063,54 @@ class SimulationEngine:
                 self._phase_stats[f"es2b_tier_{tier}"] += 1
 
         return None
+
+    def _check_exits_passive_etf(self):
+        """H8: 패시브 ETF 포지션 청산 로직.
+
+        규칙:
+        1. ES1 (-10% 하드 손절): BR-S01 절대 불변
+        2. 레짐 다운그레이드 (BULL → NEUTRAL/RANGE_BOUND/BEAR/CRISIS): 자동 청산
+        3. 그 외에는 Buy & Hold (트레일링/TP 없음)
+        """
+        to_close: list = []
+        regime = self._market_regime
+
+        for code, pos in self.positions.items():
+            if pos.status != "ACTIVE":
+                continue
+            if pos.strategy_tag != "passive_etf":
+                continue
+            if self._exit_tag_filter and pos.strategy_tag != self._exit_tag_filter:
+                continue
+
+            current_price = self._current_prices.get(code, pos.current_price)
+            entry_price = pos.entry_price
+            pnl_pct = (current_price - entry_price) / entry_price if entry_price > 0 else 0
+
+            exit_reason = None
+            exit_type = None
+
+            # ES1: -10% 하드 손절
+            if current_price <= entry_price * (1 + self.stop_loss_pct):
+                exit_reason = "ES1 손절 -10% [PASSIVE_ETF]"
+                exit_type = "STOP_LOSS"
+
+            # ES_REGIME_DOWN: 레짐이 BULL/STRONG_BULL 아닐 때 청산 (강세장만 유지)
+            elif regime not in ("STRONG_BULL", "BULL"):
+                exit_reason = f"ES_REGIME_DOWN [{regime}] 패시브 모드 종료"
+                exit_type = "REGIME_EXIT"
+                self._phase_stats.setdefault("passive_etf_regime_exits", 0)
+                self._phase_stats["passive_etf_regime_exits"] += 1
+
+            if exit_reason:
+                to_close.append(code)
+                # 청산 카운터는 es_passive_etf로 분리
+                self._phase_stats.setdefault("es_passive_etf", 0)
+                self._phase_stats["es_passive_etf"] += 1
+                self._execute_sell(pos, current_price, exit_reason, exit_type or "")
+
+        for code in to_close:
+            del self.positions[code]
 
     def _check_exits_momentum(self):
         """기존 Momentum Swing 청산 로직."""
@@ -5998,10 +6219,10 @@ class SimulationEngine:
             if _rm_exit is not None:
                 exit_reason, exit_type = _rm_exit
 
-            # ES1: 손절 -5% (GAP DOWN 보호: _execute_sell에서 fill price 조정)
+            # ES1: 손절 -10% (GAP DOWN 보호: _execute_sell에서 fill price 조정)
             if not exit_reason:
                 if current_price <= entry_price * (1 + self.stop_loss_pct):
-                    exit_reason = "ES1 손절 -5%"
+                    exit_reason = "ES1 손절 -10%"
                     exit_type = "STOP_LOSS"
 
                 # ES2: 익절 (체제별 동적) — disable_es2 모드에서 비활성화
@@ -6040,11 +6261,12 @@ class SimulationEngine:
                                 tight_trail = max(-1.5 * atr_pct_val, -0.02)
                                 pos.trailing_activated = True
                                 pos.trailing_stop = round(current_price * (1 + tight_trail))
-                            elif pnl_pct < -0.02:
-                                # 손실 -2% 초과만 청산 (경미한 손실은 회복 기회)
+                            elif pnl_pct < -0.05:
+                                # C3.2: 손실 -5% 초과만 dead cross 청산 (이전 -2% → -5%)
+                                # whipsaw 회피 — 약한 손실은 ES1(-10%)나 ES3 trailing이 처리
                                 exit_reason = "ES4 데드크로스"
                                 exit_type = "DEAD_CROSS"
-                            # -2% ~ +2%: 무시 (ES1/ES3/ES5가 처리)
+                            # -5% ~ +2%: 무시 (ES1/ES3/ES5가 처리)
 
             # ES5: 보유기간 초과 (체제별 동적)
             if not exit_reason and pos.days_held > regime_exit["max_holding"]:
