@@ -33,7 +33,7 @@ from .engine_constants import (  # noqa: F401
     REGIME_STRATEGY_WEIGHTS, INDEX_TREND_STRATEGY_WEIGHTS,
     REGIME_DISPLAY_NAMES, STRATEGY_DISPLAY_NAMES,
     REGIME_STRATEGY_COMPOSITION,
-    INVERSE_ETFS, SAFE_HAVEN_ETFS, PASSIVE_INDEX_ETFS,
+    INVERSE_ETFS, SAFE_HAVEN_ETFS, PASSIVE_INDEX_ETFS, DEFENSIVE_ETFS,
     MULTI_STRATEGIES, REGIME_STRATEGY_MODES,
 )
 from .strategy_allocator import StrategyAllocator  # noqa: F401
@@ -630,6 +630,13 @@ class SimulationEngine:
             if not any(w["code"] == passive_etf["code"] for w in self._watchlist):
                 if not any(e["code"] == passive_etf["code"] for e in extra_items):
                     extra_items.append(passive_etf)
+
+        # I2: Defensive ETF (BEAR/CRISIS 매수용 — 인버스 + 안전자산)
+        def_etfs = DEFENSIVE_ETFS.get(market_key) or DEFENSIVE_ETFS.get(self.market_id) or {}
+        for def_etf in def_etfs.values():
+            if not any(w["code"] == def_etf["code"] for w in self._watchlist):
+                if not any(e["code"] == def_etf["code"] for e in extra_items):
+                    extra_items.append(def_etf)
 
         all_items = list(self._watchlist) + extra_items
 
@@ -1994,6 +2001,139 @@ class SimulationEngine:
         self._add_risk_event("INFO",
             f"패시브 ETF 매수: {etf_name} {quantity}주 @ {self.currency_symbol}{effective_price:,.0f} (비중 {target_weight*100:.0f}%)")
 
+    def _execute_defensive_etf_buy(self, regime_overrides: dict):
+        """I2: 약세장 Defensive ETF 매수 — 인버스 + 안전자산.
+
+        BEAR 레짐: 인버스 40% + 안전자산 30% + 현금 30%
+        CRISIS 레짐: 인버스 30% + 안전자산 50% + 현금 20%
+
+        인버스 ETF는 시장 하락 시 +수익 (KOSPI -10% → KODEX 인버스 +10%)
+        안전자산은 위기 헷지 (금, 채권, 달러)
+        """
+        market_key = self.market_id if self.market_id in DEFENSIVE_ETFS else (
+            "nasdaq" if self.market_id == "ndx" else self.market_id
+        )
+        etfs = DEFENSIVE_ETFS.get(market_key)
+        if not etfs:
+            return
+
+        inv_weight = regime_overrides.get("defensive_inverse_weight", 0.40)
+        safe_weight = regime_overrides.get("defensive_safe_weight", 0.30)
+
+        total_equity = self._get_total_equity()
+        min_cash_pct = regime_overrides.get("min_cash_override", self.min_cash_ratio)
+        min_cash = total_equity * min_cash_pct
+
+        # 안전자산 종류 수 — gold + bond/usd
+        safe_etfs = [v for k, v in etfs.items() if k.startswith("safe_")]
+        each_safe_weight = safe_weight / max(1, len(safe_etfs))
+
+        # Inverse 매수
+        inverse_etf = etfs.get("inverse")
+        if inverse_etf:
+            self._buy_defensive_single(inverse_etf, inv_weight, total_equity, min_cash, "INVERSE")
+
+        # 안전자산 매수 (각 균등 분배)
+        for safe_etf in safe_etfs:
+            self._buy_defensive_single(safe_etf, each_safe_weight, total_equity, min_cash, "SAFE")
+
+    def _buy_defensive_single(self, etf_info: dict, target_weight: float, total_equity: float, min_cash: float, kind: str):
+        """단일 defensive ETF 매수 헬퍼."""
+        etf_code = etf_info["code"]
+        etf_name = etf_info["name"]
+
+        # 이미 보유 중이면 스킵
+        existing = self.positions.get(etf_code)
+        if existing and existing.status == "ACTIVE":
+            return
+
+        df = self._ohlcv_cache.get(etf_code)
+        if df is None or df.empty:
+            return
+
+        current_price = self._current_prices.get(etf_code)
+        if current_price is None or current_price <= 0:
+            try:
+                current_price = float(df["close"].iloc[-1])
+            except Exception:
+                return
+
+        target_amount = total_equity * target_weight
+        available = self.cash - min_cash
+        if available <= 0:
+            return
+
+        actual_amount = min(target_amount, available)
+        quantity = int(actual_amount / current_price)
+        if quantity <= 0:
+            return
+
+        effective_price = current_price * (1 + self.slippage_pct)
+        commission = quantity * effective_price * self.commission_pct
+        cost = quantity * effective_price + commission
+        if cost > self.cash:
+            return
+
+        self.cash -= cost
+        self._daily_trade_amount += cost
+        self._total_commission_paid += commission
+
+        pos_id = f"sim-pos-{etf_code}"
+        stop_loss = effective_price * (1 + self.stop_loss_pct)  # -10%
+        now = self._get_current_iso()
+        self.positions[etf_code] = SimPosition(
+            id=pos_id,
+            stock_code=etf_code,
+            stock_name=etf_name,
+            status="ACTIVE",
+            quantity=quantity,
+            entry_price=effective_price,
+            current_price=effective_price,
+            pnl=0,
+            pnl_pct=0,
+            stop_loss=round(stop_loss),
+            take_profit=round(effective_price * 1.5),
+            trailing_stop=round(stop_loss),
+            highest_price=effective_price,
+            entry_date=self._get_current_date_str(),
+            days_held=0,
+            weight_pct=round(cost / total_equity * 100, 1),
+            strategy_tag="defensive_etf",  # I2 신규 태그
+            avg_entry_price=effective_price,
+            entry_signal_strength=100,
+            entry_regime=self._market_regime,
+            entry_trend_strength="STRONG",
+            stock_regime=self._market_regime,
+            r_unit=0.0,
+            holding_tier="LONG",
+        )
+
+        self._order_counter += 1
+        self.orders.append(
+            SimOrder(
+                id=f"sim-ord-{self._order_counter:04d}",
+                stock_code=etf_code,
+                stock_name=etf_name,
+                side="BUY",
+                order_type="MARKET",
+                status="FILLED",
+                price=current_price,
+                filled_price=effective_price,
+                quantity=quantity,
+                filled_quantity=quantity,
+                created_at=now,
+                filled_at=now,
+                reason=f"DEFENSIVE_ETF [{self._market_regime}] {kind}",
+            )
+        )
+        if len(self.orders) > 200:
+            self.orders = self.orders[-200:]
+
+        self._phase_stats.setdefault("defensive_etf_entries", 0)
+        self._phase_stats["defensive_etf_entries"] += 1
+        self._add_risk_event("INFO",
+            f"방어 ETF 매수 [{kind}]: {etf_name} {quantity}주 @ {self.currency_symbol}{effective_price:,.0f} (비중 {target_weight*100:.0f}%)")
+
     def _scan_entries_multi(self):
         """
         Phase 4 리팩토링: 시그널 수집 → 종목 중복 제거 → 실행.
@@ -2009,6 +2149,10 @@ class SimulationEngine:
         if _regime_ov.get("passive_etf_mode"):
             self._execute_passive_etf_buy(_regime_ov)
             # ETF 매수 후에도 일반 액티브 시그널은 진행 (혼합 운용)
+
+        # I2: Defensive ETF 모드 (약세장 — 인버스 + 안전자산)
+        if _regime_ov.get("defensive_etf_mode"):
+            self._execute_defensive_etf_buy(_regime_ov)
 
         allocator = self._strategy_allocator
         if allocator is None:
@@ -2435,8 +2579,19 @@ class SimulationEngine:
                 del self.positions[code]
 
     def _get_adaptive_threshold(self, base_threshold: int, strategy: str = "") -> int:
-        """P5: Raise entry threshold when VIX high or portfolio in drawdown."""
+        """P5 + B-C1.2: Raise/lower entry threshold by VIX, DD, AND regime."""
         adjustment = 0
+
+        # B-C1.2: Regime별 임계 조정 — 강세장 적극, 약세장 엄격
+        _regime_threshold_adj = {
+            "STRONG_BULL": -10,   # 적극 진입 (45 → 35)
+            "BULL":        -5,    # 약간 적극 (45 → 40)
+            "NEUTRAL":      0,    # 표준 (45)
+            "RANGE_BOUND":  5,    # 약간 엄격 (45 → 50)
+            "BEAR":        15,    # 엄격 (45 → 60)
+            "CRISIS":      25,    # 매우 엄격 (45 → 70) — 기존 +15 흡수
+        }
+        adjustment += _regime_threshold_adj.get(self._market_regime, 0)
 
         # VIX adjustment: +0.5 per VIX point above 20
         if self._vix_ema20 > 20:
@@ -2449,17 +2604,14 @@ class SimulationEngine:
             if dd_pct < -0.05:
                 adjustment += int(abs(dd_pct) * 50)  # -10% DD → +5 threshold
 
-        # CRISIS 레짐: 진입 임계값 +15 (거래 수 축소, 226→목표 80건 이하)
-        if self._market_regime == "CRISIS":
-            adjustment += 15
-
         # Cap adjustment at +30 to avoid blocking all entries
-        adjustment = min(adjustment, 30)
+        # (음수도 허용 — STRONG_BULL에서 진입 적극화)
+        adjustment = max(-15, min(adjustment, 30))
 
-        if adjustment > 0:
+        if adjustment != 0:
             self._phase_stats["p5_threshold_adjustments"] += 1
 
-        return min(base_threshold + adjustment, 90)
+        return max(20, min(base_threshold + adjustment, 90))
 
     def _apply_signal_conflict(self, score: int, candle_score: int) -> int:
         """P5: Reduce score when candlestick pattern conflicts with strategy signal direction."""
@@ -5925,6 +6077,9 @@ class SimulationEngine:
             elif tag == "passive_etf":
                 # H8: 패시브 ETF 청산 — 레짐 다운그레이드 시만 청산 (BR-S01 -10% + 레짐 변경)
                 self._check_exits_passive_etf()
+            elif tag == "defensive_etf":
+                # I2: Defensive ETF 청산 — 레짐 업그레이드 (BEAR/CRISIS 탈출) 시 청산
+                self._check_exits_defensive_etf()
             else:  # momentum (default)
                 self._check_exits_momentum()
 
@@ -5933,14 +6088,15 @@ class SimulationEngine:
 
     # ── Phase F: Holding-Tier 분류 + R-Multiple 차등 적용 ──
 
-    # Tier별 R-Multiple 파라미터:
-    # SHORT (약한 시그널): TP1=0.8R/50%, TP2=1.5R/50% → 빠른 회수
-    # MID  (표준 스윙)   : TP1=1.0R/33%, TP2=2.0R/50% → Phase E 기본
-    # LONG (강한 추세)   : TP1=1.5R/25%, TP2=3.0R/33% → runner 추종
+    # Tier별 R-Multiple 파라미터 (B-C3.3 미세조정):
+    # SHORT (약한 시그널): TP1=0.8R/50%, TP2=1.5R/50% → 빠른 회수 (그대로)
+    # MID  (표준 스윙)   : TP1=1.0R/30%, TP2=2.0R/40% → 잔여 30% trailing (이전 33/50)
+    # LONG (강한 추세)   : TP1=1.5R/20%, TP2=3.0R/25% → 잔여 55% trailing (이전 25/33)
+    # Winner를 더 길게 추종하기 위해 LONG/MID 부분 청산 비율 ↓, 잔여 비중 ↑
     _TIER_R_PARAMS = {
         "SHORT": {"tp1_r": 0.8, "tp2_r": 1.5, "tp1_pct": 0.50, "tp2_pct": 0.50},
-        "MID":   {"tp1_r": 1.0, "tp2_r": 2.0, "tp1_pct": 0.33, "tp2_pct": 0.50},
-        "LONG":  {"tp1_r": 1.5, "tp2_r": 3.0, "tp1_pct": 0.25, "tp2_pct": 0.33},
+        "MID":   {"tp1_r": 1.0, "tp2_r": 2.0, "tp1_pct": 0.30, "tp2_pct": 0.40},
+        "LONG":  {"tp1_r": 1.5, "tp2_r": 3.0, "tp1_pct": 0.20, "tp2_pct": 0.25},
     }
 
     def _classify_holding_tier(
@@ -6063,6 +6219,50 @@ class SimulationEngine:
                 self._phase_stats[f"es2b_tier_{tier}"] += 1
 
         return None
+
+    def _check_exits_defensive_etf(self):
+        """I2: Defensive ETF 청산 로직.
+
+        규칙:
+        1. ES1 (-10% 하드 손절)
+        2. 레짐 업그레이드 (BEAR/CRISIS → NEUTRAL+) → 자동 청산 (강세 전환)
+        3. 그 외에는 약세장 동안 Buy & Hold
+        """
+        to_close: list = []
+        regime = self._market_regime
+
+        for code, pos in self.positions.items():
+            if pos.status != "ACTIVE":
+                continue
+            if pos.strategy_tag != "defensive_etf":
+                continue
+            if self._exit_tag_filter and pos.strategy_tag != self._exit_tag_filter:
+                continue
+
+            current_price = self._current_prices.get(code, pos.current_price)
+            entry_price = pos.entry_price
+            exit_reason = None
+            exit_type = None
+
+            # ES1: -10% 하드 손절
+            if current_price <= entry_price * (1 + self.stop_loss_pct):
+                exit_reason = "ES1 손절 -10% [DEFENSIVE_ETF]"
+                exit_type = "STOP_LOSS"
+            # ES_REGIME_UP: 레짐 업그레이드 시 청산 (방어 모드 종료)
+            elif regime not in ("BEAR", "CRISIS"):
+                exit_reason = f"ES_REGIME_UP [{regime}] 방어 모드 종료"
+                exit_type = "REGIME_EXIT"
+                self._phase_stats.setdefault("defensive_etf_regime_exits", 0)
+                self._phase_stats["defensive_etf_regime_exits"] += 1
+
+            if exit_reason:
+                to_close.append(code)
+                self._phase_stats.setdefault("es_defensive_etf", 0)
+                self._phase_stats["es_defensive_etf"] += 1
+                self._execute_sell(pos, current_price, exit_reason, exit_type or "")
+
+        for code in to_close:
+            del self.positions[code]
 
     def _check_exits_passive_etf(self):
         """H8: 패시브 ETF 포지션 청산 로직.

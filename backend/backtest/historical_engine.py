@@ -158,24 +158,36 @@ class HistoricalBacktester:
         download_watchlist = universe_constituents if universe_constituents else self.watchlist
 
         # H8: 패시브 인덱스 ETF (KODEX 200 / SPY / QQQ)를 다운로드 + 캐시 대상에 포함
-        # STRONG_BULL/BULL 레짐 시 _execute_passive_etf_buy()가 사용
+        # I2: Defensive ETF (인버스 + 안전자산)도 같이 다운로드
         self._passive_etf = None
+        self._defensive_etfs: list = []
         try:
-            from simulation.engine_constants import PASSIVE_INDEX_ETFS
-            _passive_market_key = self.market if self.market in PASSIVE_INDEX_ETFS else (
+            from simulation.engine_constants import PASSIVE_INDEX_ETFS, DEFENSIVE_ETFS
+            _market_key = self.market if self.market in PASSIVE_INDEX_ETFS else (
                 "nasdaq" if self.market == "ndx" else self.market
             )
-            self._passive_etf = PASSIVE_INDEX_ETFS.get(_passive_market_key)
-            if self._passive_etf:
-                _existing_codes = {
-                    (item["code"] if isinstance(item, dict) else item)
-                    for item in download_watchlist
-                }
-                if self._passive_etf["code"] not in _existing_codes:
-                    download_watchlist = list(download_watchlist) + [self._passive_etf]
-                    print(f"  + 패시브 ETF 추가: {self._passive_etf['name']} ({self._passive_etf['ticker']})")
+            _existing_codes = {
+                (item["code"] if isinstance(item, dict) else item)
+                for item in download_watchlist
+            }
+            # 패시브 ETF
+            self._passive_etf = PASSIVE_INDEX_ETFS.get(_market_key)
+            if self._passive_etf and self._passive_etf["code"] not in _existing_codes:
+                download_watchlist = list(download_watchlist) + [self._passive_etf]
+                _existing_codes.add(self._passive_etf["code"])
+                print(f"  + 패시브 ETF 추가: {self._passive_etf['name']} ({self._passive_etf['ticker']})")
+            # I2: Defensive ETF (인버스 + 안전자산)
+            _def_etfs_dict = DEFENSIVE_ETFS.get(_market_key, {})
+            for _key, _def_etf in _def_etfs_dict.items():
+                if _def_etf["code"] not in _existing_codes:
+                    download_watchlist = list(download_watchlist) + [_def_etf]
+                    _existing_codes.add(_def_etf["code"])
+                    self._defensive_etfs.append(_def_etf)
+                    print(f"  + 방어 ETF 추가 [{_key}]: {_def_etf['name']} ({_def_etf['ticker']})")
+                else:
+                    self._defensive_etfs.append(_def_etf)  # 추적용
         except Exception as _e:
-            print(f"  ⚠ 패시브 ETF 추가 실패: {_e}")
+            print(f"  ⚠ ETF 추가 실패: {_e}")
 
         print(f"\n{'='*60}")
         print(f"  ATS HISTORICAL BACKTEST")
@@ -524,10 +536,14 @@ class HistoricalBacktester:
             day_prices = self.provider.get_current_prices(self.engine._watchlist or self.watchlist)
 
             # H8: 패시브 ETF 데이터 매일 주입 (리밸런싱에 워치리스트 바뀌어도 ETF 유지)
+            # I2: Defensive ETF 데이터도 함께 주입
+            _etf_list = []
             if getattr(self, '_passive_etf', None):
-                etf_list = [self._passive_etf]
-                etf_ohlcv = self.provider.get_ohlcv_up_to_date(etf_list)
-                etf_prices = self.provider.get_current_prices(etf_list)
+                _etf_list.append(self._passive_etf)
+            _etf_list.extend(getattr(self, '_defensive_etfs', []) or [])
+            if _etf_list:
+                etf_ohlcv = self.provider.get_ohlcv_up_to_date(_etf_list)
+                etf_prices = self.provider.get_current_prices(_etf_list)
                 for code, df in etf_ohlcv.items():
                     if code not in day_ohlcv:
                         day_ohlcv[code] = df

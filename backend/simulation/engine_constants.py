@@ -86,10 +86,10 @@ REGIME_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "STRONG_BULL": {
         # H7: Three-Quarter Kelly = 75% 투자
         "kelly_fraction": 0.75,
-        "min_cash_override": 0.10,     # H8: 현금 10% (90% 투자 — 패시브 ETF + 액티브 혼합)
-        # H8: 패시브 ETF 모드 (시장 추종) — 강세장에서 액티브 매매보다 우월
+        "min_cash_override": 0.05,     # B-C4.2: 현금 5% (95% 투자 — 강세장 풀투자)
+        # B-C4.2: 패시브 ETF 비중 70→80% (강세장 추종력 강화)
         "passive_etf_mode": True,
-        "passive_etf_weight": 0.70,    # ETF에 70% 배분 (액티브 20% + 현금 10%)
+        "passive_etf_weight": 0.80,    # ETF 80% + 액티브 15% + 현금 5%
         # Entry: Donchian 돌파 추가, 피라미딩 허용
         "donchian_entry": True,
         "donchian_period": 20,
@@ -103,10 +103,10 @@ REGIME_OVERRIDES: Dict[str, Dict[str, Any]] = {
     "BULL": {
         # H7: 65% Kelly (= 35% cash floor) — Half-Kelly와 STRONG_BULL 사이 보간
         "kelly_fraction": 0.65,
-        "min_cash_override": 0.20,     # H8: 현금 20% (80% 투자 — 패시브 50% + 액티브 30%)
-        # H8: 패시브 ETF 모드 (시장 추종)
+        "min_cash_override": 0.15,     # B-C4.2: 현금 15% (85% 투자, 이전 20%)
+        # B-C4.2: 패시브 ETF 비중 50→60% (강세장 추종력 강화)
         "passive_etf_mode": True,
-        "passive_etf_weight": 0.50,    # ETF 50% + 액티브 30% + 현금 20%
+        "passive_etf_weight": 0.60,    # ETF 60% + 액티브 25% + 현금 15%
         "donchian_entry": False,
         "pyramiding_enabled": False,
         "disparity_partial_sell": True,
@@ -133,16 +133,25 @@ REGIME_OVERRIDES: Dict[str, Dict[str, Any]] = {
         "box_lookback": 40,
     },
     "BEAR": {
-        # H7: 30% Kelly = 70% cash (이전 50% → 70% 강화)
+        # H7: 30% Kelly = 70% cash → I2: defensive ETF로 알파 추구
         "kelly_fraction": 0.30,
-        "min_cash_override": 0.70,     # 현금 70%
+        "min_cash_override": 0.30,     # I2: 현금 30%로 ↓ (defensive ETF 활용 위해)
+        # I2: BEAR — 인버스 ETF 적극 매수 (시장 하락 = 인버스 상승)
+        "defensive_etf_mode": True,
+        "defensive_inverse_weight": 0.40,  # 인버스 ETF 40%
+        "defensive_safe_weight":    0.30,  # 안전자산 (금/채권) 30%
+        # 잔여 30%는 현금
         "defensive_vix_threshold": 20,
         "bear_exit_tighten": True,
     },
     "CRISIS": {
-        # H7: Quarter Kelly = 75% cash (사용자 의도 "추세하락 0.25" 정확히 매칭)
+        # H7: Quarter Kelly = 75% cash → I2: defensive ETF로 위기 헷지
         "kelly_fraction": 0.25,
-        "min_cash_override": 0.75,     # 현금 75% (위기 시 25%만 위험자산)
+        "min_cash_override": 0.20,     # I2: 현금 20%로 ↓ (안전자산 80% 보유)
+        # I2: CRISIS — 안전자산 위주 (금/채권), 인버스 일부
+        "defensive_etf_mode": True,
+        "defensive_inverse_weight": 0.30,  # 인버스 ETF 30%
+        "defensive_safe_weight":    0.50,  # 안전자산 (금/채권) 50% — 더 많이
         "safe_haven_enabled": True,
         "crisis_vix_threshold": 30,
         "crisis_exit_immediate": True,
@@ -337,6 +346,32 @@ PASSIVE_INDEX_ETFS: Dict[str, Dict[str, str]] = {
     "nasdaq": {"code": "QQQ",        "ticker": "QQQ",        "name": "Nasdaq 100 ETF"},
     "ndx":    {"code": "QQQ",        "ticker": "QQQ",        "name": "Nasdaq 100 ETF"},
     "kospi":  {"code": "069500",     "ticker": "069500.KS",  "name": "KODEX 200"},
+}
+
+# I2: 약세장 방어 ETF (BEAR/CRISIS 레짐에서 적극 활용)
+# BEAR → 인버스 ETF로 알파 추구 (시장 하락 = 인버스 상승)
+# CRISIS → 안전자산 ETF (금/달러/채권) — 위기 시 헷지
+DEFENSIVE_ETFS: Dict[str, Dict[str, Dict[str, str]]] = {
+    "kospi": {
+        "inverse":   {"code": "114800", "ticker": "114800.KS", "name": "KODEX 인버스"},
+        "safe_gold": {"code": "132030", "ticker": "132030.KS", "name": "KODEX 골드선물"},
+        "safe_usd":  {"code": "411060", "ticker": "411060.KS", "name": "KODEX 미국달러선물"},
+    },
+    "sp500": {
+        "inverse":   {"code": "SH",  "ticker": "SH",  "name": "ProShares Short S&P500"},
+        "safe_gold": {"code": "GLD", "ticker": "GLD", "name": "Gold ETF"},
+        "safe_bond": {"code": "TLT", "ticker": "TLT", "name": "US Treasury 20Y+"},
+    },
+    "nasdaq": {
+        "inverse":   {"code": "PSQ", "ticker": "PSQ", "name": "ProShares Short QQQ"},
+        "safe_gold": {"code": "GLD", "ticker": "GLD", "name": "Gold ETF"},
+        "safe_bond": {"code": "TLT", "ticker": "TLT", "name": "US Treasury 20Y+"},
+    },
+    "ndx": {
+        "inverse":   {"code": "PSQ", "ticker": "PSQ", "name": "ProShares Short QQQ"},
+        "safe_gold": {"code": "GLD", "ticker": "GLD", "name": "Gold ETF"},
+        "safe_bond": {"code": "TLT", "ticker": "TLT", "name": "US Treasury 20Y+"},
+    },
 }
 
 # 안전자산 ETF 유니버스 (CRISIS 레짐 방어 전략)

@@ -71,6 +71,10 @@ class PhaseStats:
     passive_etf_entries: int = 0         # STRONG_BULL/BULL 시 ETF 직매수 횟수
     passive_etf_regime_exits: int = 0    # 레짐 다운그레이드로 청산
     es_passive_etf: int = 0              # ETF 포지션 청산 (ES1 -10% 또는 REGIME_DOWN)
+    # ── I2: Defensive ETF 카운터 (BEAR/CRISIS 인버스 + 안전자산) ──
+    defensive_etf_entries: int = 0       # BEAR/CRISIS 시 defensive ETF 매수 횟수
+    defensive_etf_regime_exits: int = 0  # 레짐 업그레이드로 청산
+    es_defensive_etf: int = 0            # Defensive ETF 청산
 
     # SMC 전용
     es_smc_sl: int = 0        # ATR 기반 스탑 로스

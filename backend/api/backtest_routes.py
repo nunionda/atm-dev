@@ -188,6 +188,10 @@ def _serialize_metrics(metrics: Any) -> Dict[str, Any]:
         "passive_etf_entries": ps.passive_etf_entries,
         "passive_etf_regime_exits": ps.passive_etf_regime_exits,
         "es_passive_etf": ps.es_passive_etf,
+        # I2: Defensive ETF 카운터
+        "defensive_etf_entries": ps.defensive_etf_entries,
+        "defensive_etf_regime_exits": ps.defensive_etf_regime_exits,
+        "es_defensive_etf": ps.es_defensive_etf,
         # 종목별 레짐 분류
         "stock_regime_distribution": ps.stock_regime_distribution,
         "stock_regime_strategy_map": ps.stock_regime_strategy_map,
