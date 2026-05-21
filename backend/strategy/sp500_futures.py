@@ -445,6 +445,18 @@ class SP500FuturesStrategy(BaseStrategy):
             return None
 
         direction = self._determine_direction(df)
+        # N (Walk-Forward 진단): bear-trend SHORT override.
+        # _determine_direction이 NEUTRAL 또는 LONG이라도, 강한 약세 추세 setup
+        # (EMA 역배열 + close<EMA_mid + MACD<0 + RSI<50) 모두 충족하면 SHORT 강제.
+        # 4가지 약세 신호가 동시에 들어왔다면 _determine_direction의 ma_trend +2
+        # 가중치 우위(MA200 lag)를 신뢰하지 않는 게 합리적.
+        # baseline Q4/Q1 약세 분기에 _determine_direction이 LONG 다수 반환하던
+        # 것을 SHORT로 override해 약세장 LONG counter-trend 손실 방지.
+        if direction != FuturesDirection.SHORT and self._is_bear_trend_short_setup(df):
+            old = direction.name
+            direction = FuturesDirection.SHORT
+            logger.info("N override | %s → SHORT (bear-trend setup)", old)
+
         if direction == FuturesDirection.NEUTRAL:
             return None
 
@@ -464,14 +476,17 @@ class SP500FuturesStrategy(BaseStrategy):
         # P3-2: 종목별 entry threshold boost
         threshold += self._get_ticker_threshold_boost(code)
 
-        # L (Walk-Forward 진단): Mean-reversion SHORT bypass.
-        # 4-Layer total_score가 threshold 못 넘는 SHORT 시그널이라도, 강한
-        # over-extension 조건(z>=2, RSI>75, BB upper 터치) 모두 만족 시 진입 허용.
-        # 강세장에서도 통계적 SHORT 가능하도록 4-Layer LONG-편향 우회.
+        # L + N (Walk-Forward 진단): SHORT bypass 2-track.
+        # L: mean-reversion (강세장 과매수 후 반락) — z>=2, RSI>75, BB upper
+        # N: bear-trend (약세 추세 진입) — EMA 역배열, close<EMA_mid, MACD<0
+        # 둘 중 하나라도 충족 시 4-Layer threshold 우회.
         if total_score < threshold:
-            if not is_long and self._is_mean_reversion_short_setup(df):
+            if not is_long and (
+                self._is_mean_reversion_short_setup(df)
+                or self._is_bear_trend_short_setup(df)
+            ):
                 logger.info(
-                    "MR-SHORT bypass | total=%.1f<%.1f thr | over-extended setup",
+                    "SHORT bypass | total=%.1f<%.1f thr",
                     total_score, threshold,
                 )
             else:
@@ -548,6 +563,44 @@ class SP500FuturesStrategy(BaseStrategy):
         if rsi < 75:
             return False
         if bb_upper <= 0 or close < bb_upper * 0.998:
+            return False
+        return True
+
+    def _is_bear_trend_short_setup(self, df: pd.DataFrame) -> bool:
+        """N: Bear-trend SHORT bypass 조건. 약세 추세에서 SHORT 진입 허용.
+
+        조건 (모두 만족):
+          1. close < ema_slow (장기 EMA 아래 — 단기 약세 위치)
+          2. MACD < 0 (약세 모멘텀)
+          3. RSI < 45 (약세 RSI, 50에서 5pt 보수적 완화)
+          4. zscore < 0 (가격이 평균 아래)
+
+        EMA 완전 역배열을 요구하지 않음 (강세 후폭풍에 EMA 정렬이 유지되는
+        ES Q4'25/Q1'26 환경 고려). close 위치 + 모멘텀 + Z-Score 음수로
+        약세 진입 시점 감지.
+
+        L의 mean-reversion bypass(과매수 후 반락)와 별개의 추세 추종 SHORT path.
+        """
+        if df.empty or len(df) < 2:
+            return False
+        curr = df.iloc[-1]
+        ema_slow = float(curr.get("ema_slow", 0) or 0)
+        macd_hist = float(curr.get("macd_hist", 0) or 0)
+        rsi = float(curr.get("rsi", 50) or 50)
+        close = float(curr.get("close", 0) or 0)
+        zscore = float(curr.get("zscore", 0) or 0)
+
+        if ema_slow <= 0:
+            return False
+        # 단기 위치 약세
+        if close >= ema_slow:
+            return False
+        # 약세 모멘텀
+        if macd_hist >= 0:
+            return False
+        if rsi >= 45:
+            return False
+        if zscore >= 0:
             return False
         return True
 
