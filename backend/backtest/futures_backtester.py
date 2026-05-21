@@ -123,6 +123,12 @@ class FuturesBacktester:
             "short_score_max": 0,
             "short_blocked_by_threshold": 0,  # SHORT 방향이지만 total_score < threshold
             "short_blocked_by_filter": 0,      # SHORT 방향이지만 ATR/fakeout filter 차단
+            # D (진단): regime 분포 카운트
+            "regime_BULL": 0,
+            "regime_NEUTRAL": 0,
+            "regime_BEAR": 0,
+            "regime_CRISIS": 0,
+            "regime_UNKNOWN": 0,
         }
 
     # ── 롤오버 유틸리티 ──
@@ -476,6 +482,12 @@ class FuturesBacktester:
                     ds["bars_eval"] += 1
                     ls = getattr(self.strategy, "_last_long_score", 0)
                     ss = getattr(self.strategy, "_last_short_score", 0)
+                    # D (진단): regime 분포
+                    rr = getattr(self.strategy, "_last_regime_result", None)
+                    if rr and getattr(rr, "regime", None):
+                        ds[f"regime_{rr.regime}"] = ds.get(f"regime_{rr.regime}", 0) + 1
+                    else:
+                        ds["regime_UNKNOWN"] += 1
                     ds["long_score_max"] = max(ds["long_score_max"], ls)
                     ds["short_score_max"] = max(ds["short_score_max"], ss)
                     # rolling avg (incremental)
@@ -605,6 +617,13 @@ class FuturesBacktester:
             "short_score_avg": round(ds["short_score_avg"], 2),
             "long_score_max": ds["long_score_max"],
             "short_score_max": ds["short_score_max"],
+            "regime_dist": {
+                "BULL": ds["regime_BULL"],
+                "NEUTRAL": ds["regime_NEUTRAL"],
+                "BEAR": ds["regime_BEAR"],
+                "CRISIS": ds["regime_CRISIS"],
+                "UNKNOWN": ds["regime_UNKNOWN"],
+            },
         }
 
         # 레버리지 통계

@@ -206,6 +206,9 @@ def detect_regime(
         components["vix"] = 0  # VIX 없으면 중립
 
     # ── 레짐 매핑 ──
+    # D 시도: NEUTRAL 임계 1→2로 좁혀 약세 초입 BEAR 감지 시도했으나, baseline의
+    # NEUTRAL 봉들이 이미 score 2~4였음 → 어떤 봉도 분류 변경되지 않음. revert.
+    # MA200 lag 본질을 풀려면 score 컴포넌트 가중치 재설계 필요 (다음 세션 후보).
     if score >= 5:
         regime = "BULL"
     elif score >= 1:

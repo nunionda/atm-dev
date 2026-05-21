@@ -1552,6 +1552,8 @@ class ESFIntradayStrategy:
 
         # ── Phase F: 약세장 LONG 모멘텀 게이트 ──
         # BEAR/NEUTRAL 레짐에서 LONG 진입 시 L3+L4 최소 요구
+        # C 시도: NEUTRAL gate 6.0으로 완화 → trade 4.3배 증가했으나 MDD -18%,
+        # return -12%로 quality 손상. revert.
         if is_long and regime in ("BEAR", "NEUTRAL"):
             momentum_volume = l3_score + l4_score
             if momentum_volume < 8.0:
