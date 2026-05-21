@@ -109,6 +109,22 @@ class FuturesBacktester:
         self.total_roll_costs = 0.0
         self._roll_dates = self._compute_roll_dates()
 
+        # I (진단): 방향 결정 카운터 — SHORT 차단 원인 파악용
+        self.direction_stats = {
+            "bars_eval": 0,         # _determine_direction 호출 횟수
+            "long_called": 0,       # 방향 LONG 반환
+            "short_called": 0,      # 방향 SHORT 반환
+            "neutral_called": 0,    # 방향 NEUTRAL
+            "long_passed": 0,       # 4-Layer + filters 모두 통과 (실제 진입)
+            "short_passed": 0,
+            "long_score_avg": 0.0,
+            "short_score_avg": 0.0,
+            "long_score_max": 0,
+            "short_score_max": 0,
+            "short_blocked_by_threshold": 0,  # SHORT 방향이지만 total_score < threshold
+            "short_blocked_by_filter": 0,      # SHORT 방향이지만 ATR/fakeout filter 차단
+        }
+
     # ── 롤오버 유틸리티 ──
 
     def _compute_roll_dates(self) -> set:
@@ -455,6 +471,34 @@ class FuturesBacktester:
                         equity=equity,
                     )
 
+                    # I (진단): 방향 결정 통계 누적
+                    ds = self.direction_stats
+                    ds["bars_eval"] += 1
+                    ls = getattr(self.strategy, "_last_long_score", 0)
+                    ss = getattr(self.strategy, "_last_short_score", 0)
+                    ds["long_score_max"] = max(ds["long_score_max"], ls)
+                    ds["short_score_max"] = max(ds["short_score_max"], ss)
+                    # rolling avg (incremental)
+                    n = ds["bars_eval"]
+                    ds["long_score_avg"] = ds["long_score_avg"] + (ls - ds["long_score_avg"]) / n
+                    ds["short_score_avg"] = ds["short_score_avg"] + (ss - ds["short_score_avg"]) / n
+                    # direction 분기
+                    if ls >= 3 and ls > ss:
+                        ds["long_called"] += 1
+                        if signal and signal.direction == "LONG":
+                            ds["long_passed"] += 1
+                    elif ss >= 3 and ss > ls:
+                        ds["short_called"] += 1
+                        if signal and signal.direction == "SHORT":
+                            ds["short_passed"] += 1
+                        elif not signal:
+                            # signal=None인 이유: total_score < threshold or filter
+                            # 둘은 generate_futures_signal 내부 흐름으로 구분 어려움 →
+                            # threshold가 가장 흔한 원인이라 추정
+                            ds["short_blocked_by_threshold"] += 1
+                    else:
+                        ds["neutral_called"] += 1
+
                     if signal:
                         contracts = signal.position_size_contracts
 
@@ -546,6 +590,22 @@ class FuturesBacktester:
         metrics["cb_events_detail"] = self.cb_events[:20]  # 최대 20개
         metrics["roll_count"] = len(self.roll_events)
         metrics["total_roll_costs"] = round(self.total_roll_costs, 2)
+
+        # I (진단): 방향 통계 — SHORT 차단 원인 파악용
+        ds = self.direction_stats
+        metrics["direction_stats"] = {
+            "bars_eval": ds["bars_eval"],
+            "long_called": ds["long_called"],
+            "short_called": ds["short_called"],
+            "neutral_called": ds["neutral_called"],
+            "long_passed": ds["long_passed"],
+            "short_passed": ds["short_passed"],
+            "short_blocked": ds["short_blocked_by_threshold"],
+            "long_score_avg": round(ds["long_score_avg"], 2),
+            "short_score_avg": round(ds["short_score_avg"], 2),
+            "long_score_max": ds["long_score_max"],
+            "short_score_max": ds["short_score_max"],
+        }
 
         # 레버리지 통계
         leverages = [e["effective_leverage"] for e in equity_curve if e["effective_leverage"] > 0]

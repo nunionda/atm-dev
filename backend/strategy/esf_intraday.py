@@ -739,24 +739,41 @@ class ESFIntradayStrategy:
         # ── IMBALANCE: VA 밖 or Z-Score 강 ──
         if abs(zscore) >= 1.0 or in_va_pct < 0.5:
             last_close = closes[-1]
-            is_bull = zscore < -1.0 or (bull_momentum >= 3 and last_close > vah)
-            is_bear = zscore > 1.0 or (bear_momentum >= 3 and last_close < val)
+            # F (Walk-Forward 진단): IMBALANCE_BEAR/BULL에 추세-추종 분기 추가.
+            #   기존: 평균회귀만 — zscore>1.0 (과매수→BEAR), zscore<-1.0 (과매도→BULL).
+            #   추가: 추세 추종 — bear_momentum>=4 AND last_close<val → BEAR (약세 추세),
+            #         bull_momentum>=4 AND last_close>vah → BULL (강세 추세).
+            #   배경: ES/NQ walk-forward에서 약세 추세장(Q4 2025, Q1 2026)에 SHORT 0건
+            #   원인 — IMBALANCE_BEAR가 평균회귀 가정만 사용해 약세 추세 못 잡음.
+            is_bull_revert = zscore < -1.0
+            is_bear_revert = zscore > 1.0
+            is_bull_trend = bull_momentum >= 4 and last_close > vah
+            is_bear_trend = bear_momentum >= 4 and last_close < val
+            is_bull = is_bull_revert or is_bull_trend or (bull_momentum >= 3 and last_close > vah)
+            is_bear = is_bear_revert or is_bear_trend or (bear_momentum >= 3 and last_close < val)
 
             if is_bull and not is_bear:
+                tag = "추세" if is_bull_trend else ("평균회귀" if is_bull_revert else "")
                 score = min(100.0, abs(zscore) * 25 + bull_momentum * 15 + range_expansion * 10)
                 return "IMBALANCE_BULL", score, (
-                    f"상방 이탈 Z={zscore:.1f}, 연속상승 {bull_momentum}봉, "
+                    f"{tag} Z={zscore:.1f}, 연속상승 {bull_momentum}봉, "
                     f"레인지확장 {range_expansion:.1f}x"
                 )
             if is_bear and not is_bull:
+                tag = "추세" if is_bear_trend else ("평균회귀" if is_bear_revert else "")
                 score = min(100.0, abs(zscore) * 25 + bear_momentum * 15 + range_expansion * 10)
                 return "IMBALANCE_BEAR", score, (
-                    f"하방 이탈 Z={zscore:.1f}, 연속하락 {bear_momentum}봉, "
+                    f"{tag} Z={zscore:.1f}, 연속하락 {bear_momentum}봉, "
                     f"레인지확장 {range_expansion:.1f}x"
                 )
 
-            # 방향성 모호 — Z-Score 방향으로 판단
-            direction = "IMBALANCE_BULL" if zscore <= 0 else "IMBALANCE_BEAR"
+            # 방향성 모호 — momentum 부호로 우선, 그다음 Z-Score
+            if bull_momentum > bear_momentum:
+                direction = "IMBALANCE_BULL"
+            elif bear_momentum > bull_momentum:
+                direction = "IMBALANCE_BEAR"
+            else:
+                direction = "IMBALANCE_BULL" if zscore <= 0 else "IMBALANCE_BEAR"
             score = abs(zscore) * 20 + 20
             return direction, score, (
                 f"VA 밖 {(1 - in_va_pct) * 100:.0f}%, Z={zscore:.1f}, 방향성 미약"
@@ -984,15 +1001,19 @@ class ESFIntradayStrategy:
         elif zscore > 1.5:
             score -= 1  # 과매수 → 숏 기회
 
-        # ── 방향 결정 (P3-1: 임계값 3 → 2 완화, EMA 역배열 veto 유지) ──
+        # ── 방향 결정 ──
+        # P3-1: 임계값 3 → 2 완화 (NEUTRAL regime에서 IMBALANCE 마켓 상태 부족 보완)
+        # E (Walk-Forward A 진단): EMA veto를 score 강도 기반으로 완화.
+        #   abs(score) >= 3이면 강한 신호로 보고 EMA 역추세 진입 허용.
+        #   2 <= abs(score) < 3 이면 기존 EMA veto 유지 (false positive 차단).
+        #   배경: 강세장에서 EMA 정배열 비중이 압도적 → 기존 veto가 SHORT를
+        #   사실상 0으로 만들었음 (ES/NQ walk-forward 8 윈도우 SHORT 0건).
         if score >= 2:
-            # EMA 완전 역배열(bearish)이면 LONG 차단
-            if ema_bearish:
+            if ema_bearish and score < 3:
                 return FuturesDirection.NEUTRAL
             return FuturesDirection.LONG
         elif score <= -2:
-            # EMA 완전 정배열(bullish)이면 SHORT 차단
-            if ema_bullish:
+            if ema_bullish and score > -3:
                 return FuturesDirection.NEUTRAL
             return FuturesDirection.SHORT
 

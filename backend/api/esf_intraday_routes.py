@@ -764,6 +764,7 @@ class WalkForwardRequest(BaseModel):
     ticker: str = "ES=F"
     initial_equity: float = 100_000.0
     is_micro: bool = False
+    trend_adaptive: bool = True
 
 
 @esf_router.post("/esf/backtest/walk-forward")
@@ -807,6 +808,7 @@ async def run_walk_forward(req: WalkForwardRequest):
                 is_micro=req.is_micro,
                 initial_equity=req.initial_equity,
                 progress_callback=_on_progress,
+                trend_adaptive=req.trend_adaptive,
             )
             result = engine.run()
             _wf_cache = to_dict(result)

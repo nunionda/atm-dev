@@ -545,11 +545,25 @@ class SP500FuturesStrategy(BaseStrategy):
         long_score = 0
         short_score = 0
 
-        # MA200 위/아래
+        # MA200 위/아래 + slope 조합 (H 진단: 단순 위치만 ±2는 MA200 lag로
+        # 약세 진입기에도 long_score 유지 → SHORT 차단). 위치 ±1 + 기울기 ±1로 분리.
+        ma_trend_lookback = self.fc.trend_slope_lookback
+        ma_trend_prev = (
+            float(df["ma_trend"].iloc[-ma_trend_lookback])
+            if len(df) >= ma_trend_lookback and pd.notna(df["ma_trend"].iloc[-ma_trend_lookback])
+            else ma_trend
+        )
+        ma200_rising = ma_trend > ma_trend_prev
+        ma200_falling = ma_trend < ma_trend_prev
+
         if close > ma_trend:
-            long_score += 2
+            long_score += 1
         elif close < ma_trend:
-            short_score += 2
+            short_score += 1
+        if ma200_rising:
+            long_score += 1
+        elif ma200_falling:
+            short_score += 1
 
         # EMA 정렬
         if ema_fast > ema_mid > ema_slow:
@@ -579,6 +593,10 @@ class SP500FuturesStrategy(BaseStrategy):
                 long_score += 2  # 과매도 → 롱
             elif zscore >= self.fc.zscore_short_threshold:
                 short_score += 2  # 과매수 → 숏
+
+        # 진단용 카운터: 마지막 호출의 score 노출
+        self._last_long_score = long_score
+        self._last_short_score = short_score
 
         # 최소 3점 이상 차이로 방향 결정
         if long_score >= 3 and long_score > short_score:
@@ -659,14 +677,24 @@ class SP500FuturesStrategy(BaseStrategy):
             else:
                 threshold = self.fc.entry_threshold  # NEUTRAL: 50
 
+            # J (Walk-Forward I 진단): BULL/NEUTRAL regime에서 SHORT 진입은
+            # threshold를 추가 -10 완화. 배경: Q2'26 walk-forward에서
+            # _determine_direction은 SHORT 13건 검출했으나 4-Layer total_score가
+            # threshold(50) 못 넘겨 모두 차단. EMA 정배열 + close>MA200 환경에서
+            # 자연스럽게 trend layer가 SHORT에 0점 → threshold 완화로 강한
+            # SHORT 시그널(L1+L3+L4=40+)이 진입 가능.
+            if not is_long and regime in ("BULL", "NEUTRAL"):
+                threshold = max(30.0, threshold - 10.0)
+
             # 레짐별 차등 counter-bias 페널티
             penalty = get_counter_bias_penalty(regime)
 
             score_adj = 0.0
-            # BULL에서 SHORT → 강한 페널티 (5.0)
+            # H: counter-bias 페널티를 대칭으로 적용 (BEAR/LONG도 BULL/SHORT와 동일).
             if not is_long and regime == "BULL":
                 score_adj -= penalty
-            # BEAR에서 LONG → 페널티 없음 (mean reversion 허용)
+            elif is_long and regime == "BEAR":
+                score_adj -= penalty
 
             return regime, threshold, score_adj
         else:

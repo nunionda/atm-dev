@@ -82,6 +82,7 @@ class WindowMetrics:
     long_trades: int = 0
     short_trades: int = 0
     avg_holding_days: float = 0.0
+    direction_stats: Optional[dict] = None  # I 진단: 방향 결정 통계
     error: Optional[str] = None
 
 
@@ -379,6 +380,7 @@ class WalkForwardEngine:
         is_micro: bool = False,
         initial_equity: float = 100_000.0,
         progress_callback: Optional[Callable[[float], None]] = None,
+        trend_adaptive: bool = True,
     ):
         self.config = config
         self.ticker = ticker
@@ -386,6 +388,7 @@ class WalkForwardEngine:
         self.is_micro = is_micro
         self.initial_equity = initial_equity
         self.progress_callback = progress_callback
+        self.trend_adaptive = trend_adaptive
         self.asset_class = detect_asset_class(ticker)
 
     def run(self) -> WalkForwardResult:
@@ -427,6 +430,7 @@ class WalkForwardEngine:
                     initial_equity=self.initial_equity,
                     is_micro=self.is_micro,
                     progress_callback=None,
+                    trend_adaptive=self.trend_adaptive,
                 )
                 bt_result = bt.run()
                 m = bt_result.get("metrics", {})
@@ -443,6 +447,7 @@ class WalkForwardEngine:
                     long_trades=int(m.get("long_trades", 0)),
                     short_trades=int(m.get("short_trades", 0)),
                     avg_holding_days=float(m.get("avg_holding_days", 0.0)),
+                    direction_stats=m.get("direction_stats"),
                 ))
                 logger.info(
                     "Window %d/%d | %s | %s~%s | return=%.2f%% | trades=%d",
@@ -538,6 +543,7 @@ def to_dict(result: WalkForwardResult) -> dict:
                 "long_trades": wm.long_trades,
                 "short_trades": wm.short_trades,
                 "avg_holding_days": round(wm.avg_holding_days, 1),
+                "direction_stats": wm.direction_stats,
                 "error": wm.error,
             }
             for wm in result.windows
