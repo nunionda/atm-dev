@@ -184,6 +184,38 @@ def detect_regime(
     else:
         components["ema_short_cross"] = 0
 
+    # ── 3c. EMA20 기울기 (+1/-1) — O (N 후속): MA200 lag 보조 단기 추세 신호 ──
+    # 가장 lagless한 추세 신호. EMA20 자체의 10봉 변화로 단기 방향성 판단.
+    # K의 EMA20 vs EMA50보다 더 즉각적 — EMA20이 떨어지기 시작하는 순간 포착.
+    lb_short = min(10, len(ema20) - 1)
+    if lb_short > 0:
+        prev_ema20 = float(ema20.iloc[-lb_short]) if pd.notna(ema20.iloc[-lb_short]) else curr_ema20
+        if curr_ema20 > prev_ema20 * 1.0005:  # 0.05% threshold
+            score += 1
+            components["ema20_slope"] = +1
+        elif curr_ema20 < prev_ema20 * 0.9995:
+            score -= 1
+            components["ema20_slope"] = -1
+        else:
+            components["ema20_slope"] = 0
+    else:
+        components["ema20_slope"] = 0
+
+    # ── 3d. close vs EMA50 (+1/-1) — O: 단기 위치 ──
+    # 장기 MA200 위치와 별개로 단기(50봉 EMA) 기준 위치 평가.
+    # 강세 트렌드 내 단기 약세에서 close<EMA50이 먼저 깨짐.
+    if curr_ema50 > 0:
+        if curr_close > curr_ema50:
+            score += 1
+            components["close_vs_ema50"] = +1
+        elif curr_close < curr_ema50:
+            score -= 1
+            components["close_vs_ema50"] = -1
+        else:
+            components["close_vs_ema50"] = 0
+    else:
+        components["close_vs_ema50"] = 0
+
     # ── 4. MACD 방향 (+1/-1) ──
     if curr_macd > 0:
         score += 1
@@ -233,20 +265,22 @@ def detect_regime(
     else:
         regime = "CRISIS"
 
-    # Confidence: |score| / max_possible (10)
-    max_possible = 10
+    # Confidence: |score| / max_possible (12 = 1+1+2+1+1+1+1+1+2 with O 단기 신호 추가)
+    max_possible = 12
     confidence = min(abs(score) / max_possible, 1.0)
 
     recommended = REGIME_STRATEGY_MAP.get(regime, "mean_reversion")
 
     logger.info(
         "Regime: %s (score=%d, confidence=%.1f%%) → %s | "
-        "MA200pos=%d slope=%d EMA=%d EMA_short=%d MACD=%d RSI=%d VIX=%d",
+        "MA200pos=%d slope=%d EMA=%d EMA_short=%d EMA20_slope=%d close/EMA50=%d MACD=%d RSI=%d VIX=%d",
         regime, score, confidence * 100, recommended,
         components.get("ma200_position", 0),
         components.get("ma200_slope", 0),
         components.get("ema_alignment", 0),
         components.get("ema_short_cross", 0),
+        components.get("ema20_slope", 0),
+        components.get("close_vs_ema50", 0),
         components.get("macd", 0),
         components.get("rsi_breadth", 0),
         components.get("vix", 0),

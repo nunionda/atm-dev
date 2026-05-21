@@ -109,6 +109,9 @@ class FuturesBacktester:
         self.total_roll_costs = 0.0
         self._roll_dates = self._compute_roll_dates()
 
+        # P: MR-SHORT 별도 전략 (지연 초기화)
+        self._mr_short_strategy = None
+
         # I (진단): 방향 결정 카운터 — SHORT 차단 원인 파악용
         self.direction_stats = {
             "bars_eval": 0,         # _determine_direction 호출 횟수
@@ -146,6 +149,13 @@ class FuturesBacktester:
         end_dt = datetime.strptime(self.end_date, "%Y%m%d")
         rolls = _calc(self.ticker, start_dt.year - 1, end_dt.year + 1)
         return {r.isoformat() for r in rolls}
+
+    def _get_mr_short_strategy(self):
+        """P: MeanReversionShortStrategy 지연 초기화."""
+        if self._mr_short_strategy is None:
+            from strategy.mean_reversion_short import MeanReversionShortStrategy
+            self._mr_short_strategy = MeanReversionShortStrategy(self.strategy.config if hasattr(self.strategy, 'config') else None)
+        return self._mr_short_strategy
 
     def _is_in_roll_blackout(self, date_str: str, blackout_business_days: int = 2) -> bool:
         """date_str이 roll date ± N영업일 이내인지 (신규 진입 차단용)."""
@@ -477,6 +487,27 @@ class FuturesBacktester:
                         equity=equity,
                     )
 
+                    # P (Walk-Forward 재설계): MR-SHORT 별도 path.
+                    # SP500FuturesStrategy가 SHORT signal 만들지 못한 경우만
+                    # MeanReversionShortStrategy 별도 호출.
+                    # P-3: BULL regime에서는 MR-SHORT 비활성화 — 강세장 LONG 기회
+                    # 보존 (1 ticker 1 position 룰로 SHORT 진입 시 후속 LONG 차단됨).
+                    if signal is None:
+                        rr = getattr(self.strategy, "_last_regime_result", None)
+                        regime = getattr(rr, "regime", None) if rr else None
+                        if regime != "BULL":
+                            mr_signal = self._get_mr_short_strategy().generate_short_signal(
+                                ticker=self.ticker,
+                                df=df_slice,
+                                current_price=current_price,
+                                equity=equity,
+                            )
+                            if mr_signal is not None:
+                                signal = mr_signal
+                                self.direction_stats["mr_short_passed"] = (
+                                    self.direction_stats.get("mr_short_passed", 0) + 1
+                                )
+
                     # I (진단): 방향 결정 통계 누적
                     ds = self.direction_stats
                     ds["bars_eval"] += 1
@@ -624,6 +655,7 @@ class FuturesBacktester:
                 "CRISIS": ds["regime_CRISIS"],
                 "UNKNOWN": ds["regime_UNKNOWN"],
             },
+            "mr_short_passed": ds.get("mr_short_passed", 0),  # P 진단
         }
 
         # 레버리지 통계
