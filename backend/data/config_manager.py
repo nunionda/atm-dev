@@ -365,8 +365,13 @@ class SP500FuturesConfig:
     max_weight_pct: float = 0.15
 
     # 레이어 가중치 (합계 100)
-    weight_zscore: float = 25.0
-    weight_trend: float = 25.0
+    # M (Walk-Forward 진단): L2 trend 비중 ↓, L1 zscore ↑.
+    # 배경: 강세장 EMA 정배열 + close>MA200 환경에서 trend layer가 SHORT에 자연
+    # 0점. 25pt 가중치라 SHORT total_score가 threshold(50) 못 넘김.
+    # L2 25→20으로 줄이고 L1 25→30으로 늘림 → 강한 zscore SHORT 시그널이
+    # threshold 도달 가능. 합계 100 유지.
+    weight_zscore: float = 30.0
+    weight_trend: float = 20.0
     weight_momentum: float = 25.0
     weight_volume: float = 25.0
 

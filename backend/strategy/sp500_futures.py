@@ -464,8 +464,18 @@ class SP500FuturesStrategy(BaseStrategy):
         # P3-2: 종목별 entry threshold boost
         threshold += self._get_ticker_threshold_boost(code)
 
+        # L (Walk-Forward 진단): Mean-reversion SHORT bypass.
+        # 4-Layer total_score가 threshold 못 넘는 SHORT 시그널이라도, 강한
+        # over-extension 조건(z>=2, RSI>75, BB upper 터치) 모두 만족 시 진입 허용.
+        # 강세장에서도 통계적 SHORT 가능하도록 4-Layer LONG-편향 우회.
         if total_score < threshold:
-            return None
+            if not is_long and self._is_mean_reversion_short_setup(df):
+                logger.info(
+                    "MR-SHORT bypass | total=%.1f<%.1f thr | over-extended setup",
+                    total_score, threshold,
+                )
+            else:
+                return None
 
         if not self._check_atr_breakout(df, is_long):
             return None
@@ -514,6 +524,32 @@ class SP500FuturesStrategy(BaseStrategy):
                 "regime": regime,
             },
         )
+
+    def _is_mean_reversion_short_setup(self, df: pd.DataFrame) -> bool:
+        """L: Mean-reversion SHORT bypass 조건. 모두 만족 시 4-Layer threshold 우회.
+
+        강세장에서도 통계적 SHORT 진입 가능하게 하는 over-extension 게이트:
+          1. zscore >= 2.0    (강한 과매수)
+          2. RSI >= 75        (과매수)
+          3. close >= BB upper * 0.998 (BB upper band 터치 또는 위)
+
+        보수적으로 3 조건 모두 충족해야 인정. False positive 폭증 방지.
+        """
+        if df.empty or len(df) < 2:
+            return False
+        curr = df.iloc[-1]
+        zscore = float(curr.get("zscore", 0) or 0)
+        rsi = float(curr.get("rsi", 50) or 50)
+        close = float(curr.get("close", 0) or 0)
+        bb_upper = float(curr.get("bb_upper", 0) or 0)
+
+        if zscore < 2.0:
+            return False
+        if rsi < 75:
+            return False
+        if bb_upper <= 0 or close < bb_upper * 0.998:
+            return False
+        return True
 
     # ══════════════════════════════════════════
     # 3. 방향 결정 로직

@@ -133,14 +133,17 @@ def detect_regime(
     score = 0
     components = {}
 
-    # ── 1. MA200 위치 (+2/-2) ──
+    # ── 1. MA200 위치 (+1/-1) ──
+    # K (Walk-Forward D 진단): ±2 → ±1로 감소. MA200 lag로 약세 초입에도
+    # close>MA200이 자주 유지되어 +2 우위로 BULL/NEUTRAL 분류 → BEAR 미감지.
+    # 가중치 절반으로 줄여 lag 영향 완화.
     if curr_ma200 > 0:
         if curr_close > curr_ma200:
-            score += 2
-            components["ma200_position"] = +2
+            score += 1
+            components["ma200_position"] = +1
         else:
-            score -= 2
-            components["ma200_position"] = -2
+            score -= 1
+            components["ma200_position"] = -1
     else:
         components["ma200_position"] = 0
 
@@ -168,6 +171,18 @@ def detect_regime(
         components["ema_alignment"] = -2
     else:
         components["ema_alignment"] = 0
+
+    # ── 3b. 단기 EMA cross (+1/-1) — K (D 진단): 약세 초입 단기 신호 감지 ──
+    # EMA20 vs EMA50 비교만으로 단기 추세 전환을 빠르게 잡음.
+    # 전체 정렬(3개 EMA)가 깨지기 전에 단기 신호로 score 떨어뜨려 BEAR 진입 촉진.
+    if curr_ema20 > curr_ema50:
+        score += 1
+        components["ema_short_cross"] = +1
+    elif curr_ema20 < curr_ema50:
+        score -= 1
+        components["ema_short_cross"] = -1
+    else:
+        components["ema_short_cross"] = 0
 
     # ── 4. MACD 방향 (+1/-1) ──
     if curr_macd > 0:
@@ -226,11 +241,12 @@ def detect_regime(
 
     logger.info(
         "Regime: %s (score=%d, confidence=%.1f%%) → %s | "
-        "MA200pos=%d slope=%d EMA=%d MACD=%d RSI=%d VIX=%d",
+        "MA200pos=%d slope=%d EMA=%d EMA_short=%d MACD=%d RSI=%d VIX=%d",
         regime, score, confidence * 100, recommended,
         components.get("ma200_position", 0),
         components.get("ma200_slope", 0),
         components.get("ema_alignment", 0),
+        components.get("ema_short_cross", 0),
         components.get("macd", 0),
         components.get("rsi_breadth", 0),
         components.get("vix", 0),
