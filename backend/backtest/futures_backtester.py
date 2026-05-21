@@ -132,6 +132,13 @@ class FuturesBacktester:
             "regime_BEAR": 0,
             "regime_CRISIS": 0,
             "regime_UNKNOWN": 0,
+            # R (Hedge mode): direction별 PnL 누적 (attribution)
+            "long_pnl_total": 0.0,
+            "short_pnl_total": 0.0,
+            "long_trade_count": 0,
+            "short_trade_count": 0,
+            "long_win_count": 0,
+            "short_win_count": 0,
         }
 
     # ── 롤오버 유틸리티 ──
@@ -156,6 +163,20 @@ class FuturesBacktester:
             from strategy.mean_reversion_short import MeanReversionShortStrategy
             self._mr_short_strategy = MeanReversionShortStrategy(self.strategy.config if hasattr(self.strategy, 'config') else None)
         return self._mr_short_strategy
+
+    def _record_attribution(self, direction: str, pnl_dollar: float) -> None:
+        """R (Hedge mode): direction별 PnL/trade/win 카운터 누적."""
+        ds = self.direction_stats
+        if direction == "LONG":
+            ds["long_pnl_total"] += pnl_dollar
+            ds["long_trade_count"] += 1
+            if pnl_dollar > 0:
+                ds["long_win_count"] += 1
+        elif direction == "SHORT":
+            ds["short_pnl_total"] += pnl_dollar
+            ds["short_trade_count"] += 1
+            if pnl_dollar > 0:
+                ds["short_win_count"] += 1
 
     def _is_in_roll_blackout(self, date_str: str, blackout_business_days: int = 2) -> bool:
         """date_str이 roll date ± N영업일 이내인지 (신규 진입 차단용)."""
@@ -239,9 +260,12 @@ class FuturesBacktester:
             return self._empty_result()
 
         # 2. 바별 시뮬레이션
+        # Q (Walk-Forward 진단): LONG/SHORT 동시 보유 허용 — positions dict.
+        # 기존: 단일 position 변수 → MR-SHORT가 LONG 보유 중 진입 못해 강세장 paradox.
+        # 변경: dict 키 "LONG"/"SHORT"로 분리 보유. 청산 분기 모두 outer loop로 감쌈.
         equity = self.initial_equity
         peak_equity = equity
-        position: Optional[FuturesPosition] = None
+        positions: Dict[str, FuturesPosition] = {}
         trades: List[dict] = []
         equity_curve: List[dict] = []
         total_costs = 0.0
@@ -251,6 +275,13 @@ class FuturesBacktester:
         consec_halt_days = 0  # 연속손절 쿨다운 카운터
         RG2_COOLDOWN = 60  # 60 거래일 후 리셋
         CONSEC_COOLDOWN = 20  # 연속손절 후 20 거래일 쿨다운
+
+        def _unrealized_total(price: float) -> float:
+            """모든 보유 포지션의 unrealized PnL 합산."""
+            return sum(self._unrealized_pnl(p, price) for p in positions.values())
+
+        def _contracts_total() -> int:
+            return sum(p.contracts for p in positions.values())
 
         total_bars = len(df_bt)
         for i, (date, row) in enumerate(df_bt.iterrows()):
@@ -263,9 +294,7 @@ class FuturesBacktester:
 
             # 새로운 거래일 → 일일 시작 에쿼티 갱신
             if date_str != prev_date_str:
-                day_start_equity = equity + (
-                    self._unrealized_pnl(position, current_price) if position else 0.0
-                )
+                day_start_equity = equity + _unrealized_total(current_price)
                 prev_date_str = date_str
 
             prev_close = float(df_bt.iloc[max(0, i - 1)]["close"])
@@ -281,53 +310,54 @@ class FuturesBacktester:
                 })
                 cb_block_entry = True  # 모든 레벨에서 신규 진입 차단
 
-            # ── 롤오버 비용 처리 ──
-            if date_str in self._roll_dates and position is not None:
-                roll_cost = position.contracts * self.fc.roll_cost_per_contract
+            # ── 롤오버 비용 처리 (모든 보유 포지션) ──
+            if date_str in self._roll_dates and positions:
+                total_contracts = _contracts_total()
+                roll_cost = total_contracts * self.fc.roll_cost_per_contract
                 equity -= roll_cost
                 self.total_roll_costs += roll_cost
                 total_costs += roll_cost
                 self.roll_events.append({
                     "date": date_str,
-                    "contracts": position.contracts,
+                    "contracts": total_contracts,
                     "cost": round(roll_cost, 2),
                 })
 
             # P4-4: BR-R02 Panic Stop — MDD 도달 시 모든 보유 포지션 즉시 청산
-            # 기존 mdd_breached 로직(line ~363)은 신규 진입만 차단했는데, 단일 보유 포지션이
-            # unrealized DD를 키워 NQ MDD -52%, ES -19% 까지 진행 → BR-R02 -15% 한도 위반.
-            # 본 가드는 봉 시작 시점 MDD 측정 → 한도 초과 시 즉시 청산 (라이브 STOPPING 의미와 일치).
-            if position is not None and peak_equity > 0:
-                _pre_unrealized = self._unrealized_pnl(position, current_price)
-                _pre_total = equity + _pre_unrealized
+            if positions and peak_equity > 0:
+                _pre_total = equity + _unrealized_total(current_price)
                 _cur_dd = (_pre_total - peak_equity) / peak_equity
                 if _cur_dd <= self.fc.rg2_mdd_limit:
-                    # 강제 청산
-                    if position.direction == "LONG":
-                        _pnl_points = current_price - position.entry_price
-                    else:
-                        _pnl_points = position.entry_price - current_price
-                    _pnl_dollar = _pnl_points * position.contracts * self.multiplier
-                    _exit_cost = position.contracts * (
-                        self.slippage_per_contract + self.commission_per_contract / 2
-                    )
-                    _pnl_dollar -= _exit_cost
-                    total_costs += _exit_cost
-                    _pnl_pct = _pnl_points / position.entry_price if position.entry_price > 0 else 0
-                    equity += _pnl_dollar
-                    trades.append(self._make_trade_record(
-                        position, date_str, current_price, _pnl_dollar, _pnl_pct, "MDD_PANIC_STOP",
-                    ))
-                    self.strategy.record_trade_result(_pnl_pct)
+                    # 강제 청산 — 모든 positions
+                    for _dir_key in list(positions.keys()):
+                        position = positions[_dir_key]
+                        if position.direction == "LONG":
+                            _pnl_points = current_price - position.entry_price
+                        else:
+                            _pnl_points = position.entry_price - current_price
+                        _pnl_dollar = _pnl_points * position.contracts * self.multiplier
+                        _exit_cost = position.contracts * (
+                            self.slippage_per_contract + self.commission_per_contract / 2
+                        )
+                        _pnl_dollar -= _exit_cost
+                        total_costs += _exit_cost
+                        _pnl_pct = _pnl_points / position.entry_price if position.entry_price > 0 else 0
+                        equity += _pnl_dollar
+                        trades.append(self._make_trade_record(
+                            position, date_str, current_price, _pnl_dollar, _pnl_pct, "MDD_PANIC_STOP",
+                        ))
+                        self.strategy.record_trade_result(_pnl_pct)
+                        self._record_attribution(position.direction, _pnl_dollar)
+                        del positions[_dir_key]
                     self.strategy._position_states.pop(self.ticker, None)
-                    position = None
                     logger.warning(
                         "MDD_PANIC_STOP | %s | DD=%.2f%% ≤ limit %.2f%% | equity=$%.0f",
                         self.ticker, _cur_dd * 100, self.fc.rg2_mdd_limit * 100, equity,
                     )
 
-            # 포지션 보유 중 → 청산 체크
-            if position is not None:
+            # 포지션 보유 중 → 청산 체크 (모든 positions outer loop)
+            for dir_key in list(positions.keys()):
+                position = positions[dir_key]
                 position.holding_days += 1
 
                 # ── Margin Call 체크 ──
@@ -353,6 +383,7 @@ class FuturesBacktester:
                         trades.append(self._make_trade_record(
                             position, date_str, current_price, pnl_dollar, pnl_pct, "MARGIN_CALL",
                         ))
+                        self._record_attribution(position.direction, pnl_dollar)
                         self.margin_calls.append({
                             "date": date_str,
                             "equity": round(equity + unrealized, 2),
@@ -360,10 +391,11 @@ class FuturesBacktester:
                         })
                         self.strategy.record_trade_result(pnl_pct)
                         self.strategy._position_states.pop(self.ticker, None)
-                        position = None
+                        del positions[dir_key]
+                        continue  # 다음 dir_key
 
                 # ── 거래소 CB Level 2/3 → 강제 청산 ──
-                if position is not None and cb_level in ("LEVEL2", "LEVEL3"):
+                if cb_level in ("LEVEL2", "LEVEL3"):
                     if position.direction == "LONG":
                         pnl_points = current_price - position.entry_price
                     else:
@@ -382,11 +414,13 @@ class FuturesBacktester:
                         position, date_str, current_price, pnl_dollar, pnl_pct, f"CB_{cb_level}",
                     ))
                     self.strategy.record_trade_result(pnl_pct)
+                    self._record_attribution(position.direction, pnl_dollar)
                     self.strategy._position_states.pop(self.ticker, None)
-                    position = None
+                    del positions[dir_key]
+                    continue
 
                 # ── 전략 퇴출 시그널 ──
-                if position is not None:
+                if True:  # position 보유 중 (이미 위에서 continue로 청산 분기 skip됨)
                     price_data = PriceData(
                         stock_code=self.ticker,
                         stock_name=self.ticker,
@@ -431,11 +465,15 @@ class FuturesBacktester:
                         ))
 
                         self.strategy.record_trade_result(pnl_pct)
+                        self._record_attribution(position.direction, pnl_dollar)
                         self.strategy._position_states.pop(self.ticker, None)
-                        position = None
+                        del positions[dir_key]
+                        continue
 
-            # 포지션 없음 → 진입 체크 (서킷브레이커 검증)
-            if position is None:
+            # 신규 진입 체크 — Q: LONG/SHORT 동시 보유 허용. signal.direction이
+            # positions에 없으면 추가 진입 가능. 즉 LONG 보유 중 SHORT signal 진입 OK.
+            # 단 RG1/RG2/CB/Roll blackout 등 진입 게이트는 그대로 적용.
+            if True:
                 # RG1: 일일 손실 한도
                 total_value = equity
                 daily_pnl_pct = (total_value - day_start_equity) / day_start_equity if day_start_equity > 0 else 0
@@ -487,12 +525,11 @@ class FuturesBacktester:
                         equity=equity,
                     )
 
-                    # P (Walk-Forward 재설계): MR-SHORT 별도 path.
-                    # SP500FuturesStrategy가 SHORT signal 만들지 못한 경우만
-                    # MeanReversionShortStrategy 별도 호출.
-                    # P-3: BULL regime에서는 MR-SHORT 비활성화 — 강세장 LONG 기회
-                    # 보존 (1 ticker 1 position 룰로 SHORT 진입 시 후속 LONG 차단됨).
-                    if signal is None:
+                    # P+Q (Walk-Forward 재설계): MR-SHORT 별도 path.
+                    # Q (dict refactor): 1 ticker 1 position 제약 해제 → LONG 보유 중에도
+                    # SHORT 진입 가능. P-3 BULL 비활성화는 유지 — Q+P-3 해제 실험에서
+                    # BULL regime MR-SHORT가 baseline ES에서 net negative 확인.
+                    if signal is None and "SHORT" not in positions:
                         rr = getattr(self.strategy, "_last_regime_result", None)
                         regime = getattr(rr, "regime", None) if rr else None
                         if regime != "BULL":
@@ -507,6 +544,10 @@ class FuturesBacktester:
                                 self.direction_stats["mr_short_passed"] = (
                                     self.direction_stats.get("mr_short_passed", 0) + 1
                                 )
+
+                    # Q: 이미 같은 방향 보유 중이면 signal 무효 (dict 키 중복 차단)
+                    if signal is not None and signal.direction in positions:
+                        signal = None
 
                     # I (진단): 방향 결정 통계 누적
                     ds = self.direction_stats
@@ -559,7 +600,7 @@ class FuturesBacktester:
                             equity -= entry_cost
                             total_costs += entry_cost
 
-                            position = FuturesPosition(
+                            new_position = FuturesPosition(
                                 stock_code=self.ticker,
                                 entry_price=current_price,
                                 direction=signal.direction,
@@ -570,24 +611,28 @@ class FuturesBacktester:
                             )
                             # 레짐 정보 저장 (trend_adaptive 모드)
                             if self.trend_adaptive and self.strategy._last_regime_result:
-                                position._regime_at_entry = self.strategy._last_regime_result.regime
-                                position._trend_score = self.strategy._last_regime_result.trend_score
+                                new_position._regime_at_entry = self.strategy._last_regime_result.regime
+                                new_position._trend_score = self.strategy._last_regime_result.trend_score
                             else:
-                                position._regime_at_entry = "UNKNOWN"
-                                position._trend_score = 0
+                                new_position._regime_at_entry = "UNKNOWN"
+                                new_position._trend_score = 0
+
+                            # Q: positions dict에 저장 (LONG/SHORT 각각)
+                            positions[signal.direction] = new_position
 
                             state = self.strategy._get_position_state(self.ticker)
                             state.reset_for_entry(signal.direction, current_price)
 
-            # Equity curve 기록
-            unrealized = self._unrealized_pnl(position, current_price) if position else 0.0
+            # Equity curve 기록 (Q: 모든 positions 합산)
+            unrealized = _unrealized_total(current_price)
             total_value = equity + unrealized
             peak_equity = max(peak_equity, total_value)
             drawdown = (total_value - peak_equity) / peak_equity if peak_equity > 0 else 0
 
-            margin_used = position.contracts * self.initial_margin if position else 0.0
-            notional = current_price * position.contracts * self.multiplier if position else 0.0
-            eff_leverage = notional / max(total_value, 1) if position else 0.0
+            total_contracts = _contracts_total()
+            margin_used = total_contracts * self.initial_margin
+            notional = current_price * total_contracts * self.multiplier
+            eff_leverage = notional / max(total_value, 1) if total_contracts > 0 else 0.0
 
             equity_curve.append({
                 "date": date_str,
@@ -598,31 +643,35 @@ class FuturesBacktester:
                 "effective_leverage": round(eff_leverage, 2),
             })
 
-        # 미청산 포지션 강제 청산
-        if position is not None and len(df_bt) > 0:
+        # 미청산 포지션 강제 청산 (Q: 모든 positions)
+        if positions and len(df_bt) > 0:
             last_row = df_bt.iloc[-1]
             last_price = float(last_row["close"])
             last_date = df_bt.index[-1].strftime("%Y-%m-%d")
 
-            if position.direction == "LONG":
-                pnl_points = last_price - position.entry_price
-            else:
-                pnl_points = position.entry_price - last_price
+            for dir_key in list(positions.keys()):
+                position = positions[dir_key]
+                if position.direction == "LONG":
+                    pnl_points = last_price - position.entry_price
+                else:
+                    pnl_points = position.entry_price - last_price
 
-            pnl_dollar = pnl_points * position.contracts * self.multiplier
-            exit_cost = position.contracts * (
-                self.slippage_per_contract + self.commission_per_contract / 2
-            )
-            pnl_dollar -= exit_cost
-            total_costs += exit_cost
+                pnl_dollar = pnl_points * position.contracts * self.multiplier
+                exit_cost = position.contracts * (
+                    self.slippage_per_contract + self.commission_per_contract / 2
+                )
+                pnl_dollar -= exit_cost
+                total_costs += exit_cost
 
-            pnl_pct = pnl_points / position.entry_price if position.entry_price > 0 else 0
-            equity += pnl_dollar
+                pnl_pct = pnl_points / position.entry_price if position.entry_price > 0 else 0
+                equity += pnl_dollar
 
-            trades.append(self._make_trade_record(
-                position, last_date, last_price, pnl_dollar, pnl_pct, "FORCED_CLOSE",
-            ))
-            self.strategy.record_trade_result(pnl_pct)
+                trades.append(self._make_trade_record(
+                    position, last_date, last_price, pnl_dollar, pnl_pct, "FORCED_CLOSE",
+                ))
+                self.strategy.record_trade_result(pnl_pct)
+                self._record_attribution(position.direction, pnl_dollar)
+                del positions[dir_key]
 
         # 3. Metrics 계산
         metrics = self._calculate_metrics(trades, equity_curve, total_costs)
@@ -656,6 +705,17 @@ class FuturesBacktester:
                 "UNKNOWN": ds["regime_UNKNOWN"],
             },
             "mr_short_passed": ds.get("mr_short_passed", 0),  # P 진단
+            # R (Hedge mode): direction별 attribution
+            "long_pnl_total": round(ds.get("long_pnl_total", 0.0), 2),
+            "short_pnl_total": round(ds.get("short_pnl_total", 0.0), 2),
+            "long_trade_count": ds.get("long_trade_count", 0),
+            "short_trade_count": ds.get("short_trade_count", 0),
+            "long_win_rate": round(
+                ds.get("long_win_count", 0) / max(ds.get("long_trade_count", 0), 1) * 100, 1
+            ),
+            "short_win_rate": round(
+                ds.get("short_win_count", 0) / max(ds.get("short_trade_count", 0), 1) * 100, 1
+            ),
         }
 
         # 레버리지 통계
