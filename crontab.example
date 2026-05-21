@@ -1,0 +1,35 @@
+# ATS Auto-Iterate Crontab — 주간 자동 최적화 + 일일 health check
+#
+# 설치 방법:
+#   crontab -e
+#   # 이 파일 내용 복사/붙여넣기 (경로 수정)
+#
+# 또는:
+#   crontab crontab.example
+#
+# 비활성화 방법:
+#   touch data_store/auto_iterate.disabled   # kill switch 활성
+#   rm data_store/auto_iterate.disabled       # 다시 활성화
+
+# Shell + PATH (cron 환경 안정성)
+SHELL=/bin/zsh
+PATH=/usr/local/bin:/usr/bin:/bin
+
+# 작업 디렉토리 (사용자 환경에 맞게 수정 필수)
+# 이 경로는 git checkout된 atm-dev 디렉토리여야 함
+# WORKDIR=/Users/daniel/dev/claude-dev/claudeCode/atm-dev
+
+# ─────────────────────────────────────────────────────────────
+# 주간 사이클: 일요일 02:00 — 전체 3마켓 quick 옵티마이저
+# ─────────────────────────────────────────────────────────────
+0 2 * * 0 cd /Users/daniel/dev/claude-dev/claudeCode/atm-dev && /usr/bin/env python3 backend/scripts/auto_iterate.py --market all --mode quick >> data_store/auto_iterate.log 2>&1
+
+# ─────────────────────────────────────────────────────────────
+# 격주 토요일 03:00 — full grid (선택)
+# ─────────────────────────────────────────────────────────────
+# 0 3 1,15 * 6 cd /Users/daniel/dev/claude-dev/claudeCode/atm-dev && /usr/bin/env python3 backend/scripts/auto_iterate.py --market all --mode full >> data_store/auto_iterate.log 2>&1
+
+# ─────────────────────────────────────────────────────────────
+# 일일 09:30 — 헬스체크 (백엔드 API + 시뮬 상태)
+# ─────────────────────────────────────────────────────────────
+30 9 * * * cd /Users/daniel/dev/claude-dev/claudeCode/atm-dev && /usr/bin/env python3 backend/scripts/health_check.py >> data_store/health.log 2>&1

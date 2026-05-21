@@ -25,12 +25,12 @@ Domain         strategy/, risk/, order/, position/
 Infrastructure infra/broker/, infra/db/, infra/notifier/, infra/logger.py
 ```
 
-### Backend Module Map (`ats/`)
+### Backend Module Map (`backend/`)
 
 | Layer | Module | Purpose |
 |-------|--------|---------|
 | API | `api/app.py` | FastAPI + CORS + SSE lifespan |
-| API | `api/routes.py` | `/analyze/{ticker}` 기술적 분석 |
+| API | `api/routes.py` | `/api/v1/analyze/{ticker}` 기술적 분석 |
 | API | `api/sim_routes.py` | 실시간 시뮬레이션 |
 | API | `api/rebalance_routes.py` | 포트폴리오 리밸런싱 |
 | API | `api/backtest_routes.py` | 백테스트 실행/결과 |
@@ -60,7 +60,7 @@ Infrastructure infra/broker/, infra/db/, infra/notifier/, infra/logger.py
 | Infra | `infra/db/repository.py` | 데이터 접근 계층 |
 | Infra | `infra/notifier/telegram_notifier.py` | 텔레그램 알림 |
 
-### Frontend Component Map (`web/src/`)
+### Frontend Component Map (`frontend/src/`)
 
 | Directory | Components | Purpose |
 |-----------|-----------|---------|
@@ -170,7 +170,7 @@ Cash floor 20% 및 레짐별 max_weight로 최종 cap.
 
 ## Strategy 2: SMC 4-Layer Scoring
 
-> 참조: `stock_theory/smcTheory.md`, `ats/strategy/smc_strategy.py`
+> 참조: `stock_theory/smcTheory.md`, `backend/strategy/smc_strategy.py`
 
 ### Market Structure
 
@@ -230,7 +230,7 @@ smc_strategy:
 
 ## Strategy 3: Breakout-Retest (돌파 후 리테스트 진입)
 
-> 참조: `ats/strategy/breakout_retest.py`
+> 참조: `backend/strategy/breakout_retest.py`
 
 ### 2-Phase 구조
 
@@ -534,13 +534,100 @@ DB_PATH=data_store/ats.db
 
 ## API Endpoints
 
+모든 라우트는 `/api/v1` 프리픽스를 가짐. 헬스체크만 예외 (`/health`).
+전체 스키마: `http://localhost:8000/docs` (Swagger UI) / `/openapi.json`.
+
+### Core
+
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/analyze/{ticker}` | 기술적 분석 (period, interval) |
-| POST | `/rebalance/backtest` | 백테스트 실행 (market, start_date, end_date, strategy) |
-| GET | `/rebalance/backtest/status` | 백테스트 진행 상태 |
-| GET | `/rebalance/backtest/result` | 캐시된 백테스트 결과 |
-| GET | `/stream/{market_id}` | SSE 실시간 시뮬레이션 스트림 |
+| GET    | `/health` | 서버 헬스체크 |
+| GET    | `/api/v1/system/state` | 시스템 상태 (market query) |
+| GET    | `/api/v1/market-overview` | 글로벌 마켓 오버뷰 |
+| GET    | `/api/v1/market-intelligence` | 트렌드/레짐 인텔리전스 |
+
+### Analyze / Quote / Search
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET    | `/api/v1/analyze/{ticker}` | 기술적 분석 (period, interval) |
+| GET    | `/api/v1/quote/{ticker}` | 경량 시세 (count) |
+| GET    | `/api/v1/search` | 티커 검색 (q) |
+
+### Operations / Performance / Risk
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET    | `/api/v1/positions` | 포지션 (market) |
+| GET    | `/api/v1/orders` | 주문 이력 |
+| GET    | `/api/v1/signals/today` | 오늘 시그널 |
+| GET    | `/api/v1/trades` | 매매 이력 |
+| GET    | `/api/v1/risk/metrics` | 리스크 메트릭 |
+| GET    | `/api/v1/risk/events` | 리스크 이벤트 |
+| GET    | `/api/v1/performance/summary` | 성과 요약 |
+| GET    | `/api/v1/performance/equity` | 자산 곡선 |
+| GET    | `/api/v1/performance/vs-backtest` | 라이브 vs 백테스트 비교 |
+
+### Simulation Control
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET    | `/api/v1/sim/status` | 시뮬레이터 상태 |
+| POST   | `/api/v1/sim/start` | 시뮬레이션 시작 (market, strategy_mode) |
+| POST   | `/api/v1/sim/stop` | 정지 |
+| POST   | `/api/v1/sim/reset` | 초기화 |
+| POST   | `/api/v1/sim/force-liquidate` | 강제 청산 |
+| POST   | `/api/v1/sim/replay/{pause,resume,speed}` | 리플레이 제어 |
+| GET    | `/api/v1/stream` | SSE 실시간 시뮬 스트림 (market query) |
+
+### Rebalance / Backtest
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST   | `/api/v1/rebalance/scan` | 리밸런싱 스캔 |
+| GET    | `/api/v1/rebalance/status` | 리밸런싱 상태 |
+| GET    | `/api/v1/rebalance/recommendations` | 추천 종목 |
+| POST   | `/api/v1/rebalance/backtest` | 백테스트 실행 (market, start_date, end_date, strategy) |
+| GET    | `/api/v1/rebalance/backtest/status` | 백테스트 진행 상태 |
+| GET    | `/api/v1/rebalance/backtest/result` | 캐시된 백테스트 결과 |
+| GET    | `/api/v1/replay/results` | 리플레이 결과 목록 |
+| POST   | `/api/v1/replay/results/save` | 리플레이 결과 저장 |
+| DELETE | `/api/v1/replay/results/{result_id}` | 결과 삭제 |
+
+### Futures (KOSPI200 / E-mini)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET    | `/api/v1/futures/tickers` | 선물 티커 목록 |
+| GET    | `/api/v1/futures/contract-specs` | 계약 스펙 |
+| GET    | `/api/v1/futures/roll-schedule` | 롤오버 스케줄 |
+| GET    | `/api/v1/futures/quote/{ticker}` | 선물 시세 |
+| GET    | `/api/v1/futures/analyze/{ticker}` | 선물 분석 |
+| GET    | `/api/v1/futures/signal/{ticker}` | 선물 시그널 |
+| POST   | `/api/v1/futures/backtest` | 선물 백테스트 |
+| GET    | `/api/v1/futures/backtest/{status,result}` | 백테스트 상태/결과 |
+
+### ESF — E-mini Scalping Framework
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET    | `/api/v1/esf/tickers` | ESF 대상 티커 |
+| GET    | `/api/v1/esf/session-status` | 세션 상태 |
+| GET    | `/api/v1/esf/candles/{ticker}` | 인트라데이 캔들 |
+| GET    | `/api/v1/esf/volume-profile/{ticker}` | 볼륨 프로파일 |
+| GET    | `/api/v1/esf/regime/{ticker}` | 레짐 정보 |
+| GET    | `/api/v1/esf/analyze/{ticker}` | 4-Layer 분석 |
+| GET    | `/api/v1/esf/signal/{ticker}` | 스캘프 시그널 |
+| POST   | `/api/v1/esf/backtest` | ESF 백테스트 |
+| GET    | `/api/v1/esf/backtest/{status,result}` | 백테스트 상태/결과 |
+| —      | `/api/v1/esf/journal/*` | 가설/실험/변형 저널 (CRUD) |
+
+### Live (실전 매매)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET    | `/api/v1/live/status` | 실전 라이브 상태 |
+| POST   | `/api/v1/live/{subscribe,unsubscribe}` | 라이브 구독 |
 
 ---
 
@@ -565,16 +652,16 @@ python3 main.py init-db              # DB 초기화
 
 # Tests
 python3 run_tests.py                 # 독립 단위 테스트 43건
-pytest ats/tests/ -v                 # pytest 전체 (SQLAlchemy 필요)
+pytest backend/tests/ -v                 # pytest 전체 (SQLAlchemy 필요)
 
 # Frontend
-cd web && npm run dev                # 개발 서버 (port 5173)
-cd web && npx tsc --noEmit           # TypeScript 타입 체크
-cd web && npm run build              # 프로덕션 빌드
+cd frontend && npm run dev                # 개발 서버 (port 5173)
+cd frontend && npx tsc --noEmit           # TypeScript 타입 체크
+cd frontend && npm run build              # 프로덕션 빌드
 
 # Scripts
-python3 ats/scripts/health_check.py      # 헬스체크
-python3 ats/scripts/paper_trade_test.py  # 모의투자 연동 테스트
+python3 backend/scripts/health_check.py      # 헬스체크
+python3 backend/scripts/paper_trade_test.py  # 모의투자 연동 테스트
 ```
 
 ---
@@ -592,8 +679,8 @@ For chart/visualization work: always verify that displayed data uses real API da
 ### Pre-Commit Checklist
 
 After making multi-file changes, run the build/dev server and confirm no runtime errors before committing.
-- TypeScript: `cd web && npx tsc --noEmit`
-- Python: `python3 run_tests.py` or `pytest ats/tests/ -v`
+- TypeScript: `cd frontend && npx tsc --noEmit`
+- Python: `python3 run_tests.py` or `pytest backend/tests/ -v`
 
 ### yfinance API Constraints
 
@@ -612,10 +699,10 @@ Before attempting `git push` or `gh pr create`, verify a git remote is configure
 ## Key File Paths
 
 ```
-main.py                           # 엔트리포인트 (sys.path → ats/)
+main.py                           # 엔트리포인트 (sys.path → backend/)
 run_tests.py                      # 독립 테스트 러너 (43건)
 config.yaml                       # 전략 설정
-ats/
+backend/
 ├── api/app.py                    # FastAPI 엔트리포인트
 ├── api/backtest_routes.py        # 백테스트 라우트
 ├── strategy/momentum_swing.py    # 모멘텀 전략
@@ -630,7 +717,7 @@ ats/
 ├── infra/db/models.py            # DB 모델
 ├── scripts/                      # 유틸리티 스크립트 (7개)
 ├── tests/                        # pytest 테스트
-web/
+frontend/
 ├── src/lib/api.ts                # API 클라이언트
 ├── src/pages/Rebalance.tsx       # 리밸런싱 페이지
 ├── src/components/rebalance/BacktestSection.tsx  # 백테스트 UI

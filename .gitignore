@@ -7,6 +7,9 @@
 data_store/
 *.db
 
+# 백업/아카이브
+_archive/
+
 # Python
 __pycache__/
 *.pyc
@@ -14,6 +17,7 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+.pytest_cache/
 
 # IDE
 .vscode/
@@ -25,9 +29,6 @@ venv/
 .claude/settings.local.json
 .claude/launch.json
 
-# 서버 PID 파일
-.pids/
-
 # Node
 node_modules/
 dist/
@@ -37,7 +38,8 @@ dist/
 Thumbs.db
 temp.json
 
-# 런타임 PID 파일
+# 런타임 PID/Output
 .pids/
-ats/output/
+backend/output/
 plan.md
+

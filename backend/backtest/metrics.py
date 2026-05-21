@@ -263,6 +263,10 @@ class ExtendedMetrics:
     up_capture_ratio: float = 0.0      # Performance in up-benchmark markets
     down_capture_ratio: float = 0.0    # Performance in down-benchmark markets
 
+    # J3: Alpha decay over time (rolling alpha 시계열)
+    # key=YYYYMMDD, value=annualized rolling alpha at that day
+    alpha_decay_series: Dict[str, float] = field(default_factory=dict)
+
     # 원본 데이터 (차트용)
     equity_curve: List[DailyEquity] = field(default_factory=list)
     trades: List[TradeRecord] = field(default_factory=list)
@@ -334,8 +338,15 @@ class MetricsCollector:
             if self._underwater_start is None:
                 self._underwater_start = date
 
-        # Regime 추적
-        regime = engine._market_regime
+        # K2: Regime 추적 — 3레짐 키 (BULL_AGG/NEUTRAL/BEAR_AGG)도 BULL/NEUTRAL/BEAR로 정규화
+        raw_regime = engine._market_regime
+        # 3레짐 키를 기존 카운터에 매핑
+        regime_map = {
+            "BULL_AGG": "BULL", "STRONG_BULL": "BULL", "BULL": "BULL",
+            "NEUTRAL":  "NEUTRAL",
+            "BEAR_AGG": "BEAR", "RANGE_BOUND": "BEAR", "BEAR": "BEAR", "CRISIS": "BEAR",
+        }
+        regime = regime_map.get(raw_regime, raw_regime)
         self._regime_days[regime] = self._regime_days.get(regime, 0) + 1
 
         if regime != self._prev_regime:
@@ -621,6 +632,30 @@ class MetricsCollector:
             result.information_ratio = (port_annual - bench_annual) / result.tracking_error
         else:
             result.information_ratio = 0.0
+
+        # --- J3: Rolling Alpha Decay Series (30-day window) ---
+        # 각 날짜의 30일 롤링 알파 시계열 — alpha이 시간에 따라 어떻게 변하는지 추적
+        try:
+            window = min(30, n // 4) if n > 60 else 0
+            if window >= 10:
+                alpha_decay: Dict[str, float] = {}
+                for i in range(window, n):
+                    w_p = port_rets[i - window:i]
+                    w_b = bench_rets[i - window:i]
+                    w_mean_p = sum(w_p) / window
+                    w_mean_b = sum(w_b) / window
+                    w_cov = sum((p - w_mean_p) * (b - w_mean_b) for p, b in zip(w_p, w_b)) / window
+                    w_var_b = sum((b - w_mean_b) ** 2 for b in w_b) / window
+                    w_beta = w_cov / w_var_b if w_var_b > 1e-12 else 0.0
+                    w_p_ann = w_mean_p * 252
+                    w_b_ann = w_mean_b * 252
+                    alpha_decay[common_dates[i]] = round(
+                        w_p_ann - (rf + w_beta * (w_b_ann - rf)), 6
+                    )
+                result.alpha_decay_series = alpha_decay
+        except Exception:
+            # 회귀 위험 차단 — alpha_decay_series는 부수적 메트릭
+            result.alpha_decay_series = {}
 
         # --- Up/Down Capture ---
         up_port = [p for p, b in zip(port_rets, bench_rets) if b > 0]

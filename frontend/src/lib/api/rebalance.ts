@@ -75,6 +75,83 @@ export async function fetchRebalanceStatus(market: MarketId): Promise<RebalanceS
     }));
 }
 
+// ──────────────────────────────────────────────
+// Rebalance → Universe Sync (Phase A/B)
+// ──────────────────────────────────────────────
+
+export interface RebalanceSyncResult {
+    market: string;
+    scan_date: string;
+    trigger: 'AUTO' | 'MANUAL';
+    synced: number;        // 최종 active 종목 수
+    buy: number;
+    hold: number;
+    kept: number;
+    protected: number;
+    target_codes: string[];
+    duration_ms: number;
+    committed: boolean;
+    rejected: boolean;
+    reject_reason?: string | null;
+    error?: string | null;
+}
+
+export interface RebalanceSyncLogEntry {
+    sync_id: number;
+    market: string;
+    scan_date: string;
+    trigger: string;
+    buy_count: number;
+    hold_count: number;
+    kept_count: number;
+    total_active: number;
+    protected_count: number;
+    duration_ms: number;
+    error?: string | null;
+    created_at: string;
+}
+
+export interface RebalanceSyncStatus {
+    market: string;
+    latest_sync: RebalanceSyncLogEntry | null;
+    active_count: number;
+    protected_count: number;
+}
+
+export async function triggerRebalanceSync(
+    market: MarketId,
+    options: { commit?: boolean; trigger?: 'AUTO' | 'MANUAL' } = {},
+): Promise<RebalanceSyncResult> {
+    const params = new URLSearchParams({
+        market,
+        commit: String(options.commit ?? true),
+        trigger: options.trigger ?? 'MANUAL',
+    });
+    const res = await fetch(`${API_BASE_URL}/rebalance/sync?${params}`, { method: 'POST' });
+    if (!res.ok) throw new Error(`sync failed: ${res.status}`);
+    return res.json();
+}
+
+export async function fetchRebalanceSyncStatus(market: MarketId): Promise<RebalanceSyncStatus> {
+    return fetchOrMock(`/rebalance/sync/status?market=${market}`, () => ({
+        market,
+        latest_sync: null,
+        active_count: 0,
+        protected_count: 0,
+    }));
+}
+
+export async function fetchRebalanceSyncLog(
+    market: MarketId,
+    limit: number = 7,
+): Promise<RebalanceSyncLogEntry[]> {
+    const data = await fetchOrMock<{ items: RebalanceSyncLogEntry[] }>(
+        `/rebalance/sync/log?market=${market}&limit=${limit}`,
+        () => ({ items: [] }),
+    );
+    return data.items ?? [];
+}
+
 // --- Universe Backtest Types ---
 
 export interface BacktestMetrics {

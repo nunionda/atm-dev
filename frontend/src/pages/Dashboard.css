@@ -1,0 +1,363 @@
+.dashboard-page {
+    padding-top: var(--space-8);
+    padding-bottom: var(--space-10);
+    min-height: calc(100vh - var(--navbar-height));
+}
+
+.dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-6);
+    gap: var(--space-4);
+    flex-wrap: wrap;
+}
+
+.search-box {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem;
+    gap: 0.5rem;
+    border-radius: 12px;
+}
+
+.search-box input {
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    padding: 0.5rem 1rem;
+    font-size: 1rem;
+    outline: none;
+    width: 250px;
+}
+
+.search-box input::placeholder {
+    color: var(--text-muted);
+}
+
+.error-banner {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+    padding: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    color: #fca5a5;
+    margin-bottom: 2rem;
+}
+
+.text-error {
+    color: var(--color-danger);
+}
+
+.text-success {
+    color: var(--color-success);
+}
+
+.loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 5rem 0;
+    gap: 1.5rem;
+    color: var(--text-secondary);
+}
+
+.pulse-large {
+    width: 16px;
+    height: 16px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+}
+
+.animate-spin {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.chart-section {
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 1.5rem;
+}
+
+/* Index quick-select bar — above chart for index tickers */
+.index-quick-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 1rem;
+}
+
+/* Signal Analysis panels — responsive grid below the chart */
+.signal-panels-below {
+    margin-bottom: 1.5rem;
+}
+
+.signal-panels-below .signal-analysis {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-auto-flow: row dense;
+    gap: 1rem;
+    align-items: stretch;
+}
+
+.signal-panels-below .signal-analysis > * {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* 버튼/퀵셀렉트: 전체 행 차지, 패널 슬롯 방해 안 함 */
+.signal-panels-below .sa-view-ops-btn,
+.signal-panels-below .index-quick-btns {
+    grid-column: 1 / -1;
+}
+
+/* Key Levels + Exit Reference: 2열 span으로 빈 열 채움 */
+.signal-panels-below .sa-exit-section {
+    grid-column: span 2;
+}
+
+.stock-info {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding-bottom: 8px;
+}
+
+.stock-ticker {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.stock-name-kr {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.stock-name-en {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.section-head {
+    margin-bottom: 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.section-head h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.text-muted {
+    color: var(--text-muted);
+    font-weight: 400;
+    font-size: 1rem;
+}
+
+.chart-container {
+    flex: 1;
+    min-height: 450px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.metrics-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+    .signal-panels-below .signal-analysis {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 640px) {
+    .signal-panels-below .signal-analysis {
+        grid-template-columns: 1fr;
+        grid-auto-flow: row;
+    }
+
+    .signal-panels-below .sa-exit-section {
+        grid-column: span 1;
+    }
+
+    .signal-panels-below .sa-view-ops-btn,
+    .signal-panels-below .index-quick-btns {
+        grid-column: 1;
+    }
+}
+
+.metric-card {
+    padding: 1.5rem;
+}
+
+.metric-header {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.metric-primary {
+    font-size: 2.25rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+}
+
+.metric-change {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1rem;
+    font-weight: 500;
+}
+
+/* Widget Tooltip Styles */
+.tooltip-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    cursor: help;
+}
+
+.tooltip-wrapper .tooltip-text {
+    visibility: hidden;
+    width: 320px;
+    background: rgba(15, 23, 42, 0.95);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: var(--text-primary);
+    text-align: left;
+    border-radius: 12px;
+    padding: 14px 18px;
+    position: absolute;
+    z-index: 999;
+
+    /* Position below the item and shift right to avoid left edge clipping */
+    top: 130%;
+    left: 0;
+
+    opacity: 0;
+    transform: translateY(5px);
+    transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.3s;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+    pointer-events: none;
+}
+
+/* Upward pointing arrow */
+.tooltip-wrapper .tooltip-text::after {
+    content: "";
+    position: absolute;
+    bottom: 100%;
+    left: 20px;
+    margin-bottom: -1px;
+    border-width: 8px;
+    border-style: solid;
+    border-color: transparent transparent rgba(15, 23, 42, 0.95) transparent;
+}
+
+/* Slightly larger hit area for stability */
+.tooltip-wrapper::before {
+    content: "";
+    position: absolute;
+    top: -10px;
+    bottom: -10px;
+    left: -10px;
+    right: -10px;
+    z-index: 1;
+}
+
+.tooltip-wrapper:hover .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.indicator-list {
+    padding: 1.5rem;
+    flex: 1;
+}
+
+.list-title {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.1rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.indicator-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 0;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+.indicator-item:last-child {
+    border-bottom: none;
+}
+
+.ind-label {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+.ind-value {
+    font-weight: 600;
+    font-size: var(--text-lg);
+    font-family: var(--font-mono);
+}
+
+@media (max-width: 1024px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1.5rem;
+    }
+
+    /* Phase D4: 3-col signal panels grid가 tablet에서 압축되어 깨지는 문제 방지 */
+    .signal-panels-below .signal-analysis {
+        grid-template-columns: 1fr;
+    }
+    .signal-panels-below .sa-exit-section {
+        grid-column: auto;
+    }
+}
+
+@media (min-width: 1025px) and (max-width: 1440px) {
+    /* Phase D4: 중간 너비에서 2-col fallback */
+    .signal-panels-below .signal-analysis {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}

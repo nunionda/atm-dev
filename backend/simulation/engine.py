@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 import uuid
 from datetime import datetime
 from typing import Any, Callable, Coroutine, Dict, List, Optional
@@ -33,6 +34,8 @@ from .engine_constants import (  # noqa: F401
     REGIME_STRATEGY_WEIGHTS, INDEX_TREND_STRATEGY_WEIGHTS,
     REGIME_DISPLAY_NAMES, STRATEGY_DISPLAY_NAMES,
     REGIME_STRATEGY_COMPOSITION,
+    # K1-K2: 6→3 레짐 통합
+    collapse_regime, REGIME_6_TO_3,
     INVERSE_ETFS, SAFE_HAVEN_ETFS, PASSIVE_INDEX_ETFS, DEFENSIVE_ETFS,
     MULTI_STRATEGIES, REGIME_STRATEGY_MODES,
 )
@@ -156,6 +159,25 @@ class SimulationEngine:
         self._index_trend_candidate: str = "NEUTRAL"  # 전환 후보
         self._index_trend_candidate_days: int = 0     # 후보 연속 일수
         self._index_trend_confirm_days: int = 3       # 전환 확인 필요 일수 (최적)
+
+        # J1/J2: 선물 인덱스 소스 + basis 신호
+        # source가 "futures" 이면 _index_ohlcv가 선물(ES=F/NQ=F/^KS200) 시계열,
+        # "spot" 이면 ^GSPC/^IXIC/^KS200. basis는 (futures-spot)/spot 5SMA.
+        self._index_source: str = "futures"   # "futures" | "spot"
+        self._basis_history: List[float] = []  # [latest, ...] (max 60일)
+        self._latest_basis: float = 0.0        # 최신 베이시스 (smoothed)
+        self._basis_signal_score: float = 0.0  # -10..+10 신호 점수
+
+        # K1-K2: 6→3 레짐 통합 feature flag (default ON, 회귀 시 False로 즉시 롤백)
+        # True 시 _judge_market_regime / _analyze_index_trend 가 BULL_AGG/NEUTRAL/BEAR_AGG 3키만 반환.
+        # REGIME_*_dicts는 union (6키 + 3키) 이므로 기존 lookup 코드 무변경.
+        # K6: 환경변수 ATS_FORCE_3REGIME=0/1로 매트릭스 검증에서 토글 가능.
+        _env_3regime = os.environ.get("ATS_FORCE_3REGIME")
+        self._use_3regime: bool = True if _env_3regime is None else _env_3regime == "1"
+        # K3: VIX percentile 보강 feature flag (default ON).
+        # K6: 환경변수 ATS_FORCE_VIX_PCT=0/1로 토글 — A/B config에서 OFF로 비교.
+        _env_vix_pct = os.environ.get("ATS_FORCE_VIX_PCT")
+        self._use_vix_percentile: bool = True if _env_vix_pct is None else _env_vix_pct == "1"
 
         # P4: SPY MA200 gate — SPY(^GSPC) 200일 이평선 하회 시 공격적 전략 차단
         self._spy_below_ma200: bool = False
@@ -1004,6 +1026,11 @@ class SimulationEngine:
         else:
             raw_regime = "CRISIS"  # 매우 낮은 점수 = 위기
 
+        # K2: 6→3 레짐 통합 (feature flag)
+        # 스무딩 전에 collapse — 동일 3-key 후보 연속 발생 시 즉시 전환 (BULL_AGG/NEUTRAL/BEAR_AGG)
+        if self._use_3regime:
+            raw_regime = collapse_regime(raw_regime)
+
         return self._smooth_regime(raw_regime)
 
     def _smooth_regime(self, raw_regime: str) -> str:
@@ -1060,11 +1087,17 @@ class SimulationEngine:
             self._market_regime = detected
 
     def update_vix(self, vix_value: float):
-        """VIX 값 업데이트 (외부에서 주입: 백테스트 or 실시간)."""
+        """VIX 값 업데이트 (외부에서 주입: 백테스트 or 실시간).
+
+        K3: history를 60일 보관 (rolling percentile 계산용).
+        """
         if vix_value <= 0:
             return
         self._vix_level = vix_value
         self._vix_history.append(vix_value)
+        # K3: 60일 rolling window 유지 (percentile 계산용)
+        if len(self._vix_history) > 60:
+            self._vix_history = self._vix_history[-60:]
         # 20일 EMA 계산
         if len(self._vix_history) >= 20:
             alpha = 2.0 / (20 + 1)
@@ -1073,21 +1106,76 @@ class SimulationEngine:
             # 워밍업 중 — 단순 평균
             self._vix_ema20 = sum(self._vix_history) / len(self._vix_history)
 
+    def _vix_percentile(self, window: int = 20) -> float:
+        """현재 VIX의 N일 rolling percentile (0-100).
+
+        K3: 절대값(VIX_SIZING_SCALE)만으로 판단하기 어려운 상대적 수준을 측정.
+        - 100 → 최근 N일 중 최고 (극단 공포)
+        - 50  → 중간값 (보통)
+        - 0   → 최저 (극단 안정)
+
+        Args:
+            window: 비교 기간 (default 20일)
+
+        Returns:
+            0.0-100.0 (데이터 부족 시 50.0 fallback)
+        """
+        if not self._vix_history or len(self._vix_history) < 5:
+            return 50.0
+        # window 보다 history가 짧으면 가용 데이터 모두 사용
+        sample = self._vix_history[-window:] if len(self._vix_history) >= window else list(self._vix_history)
+        current = self._vix_level
+        if not sample:
+            return 50.0
+        below = sum(1 for v in sample if v < current)
+        return round(below / len(sample) * 100.0, 1)
+
     # ══════════════════════════════════════════
     # 지수 데이터 기반 자동 전략 선택
     # ══════════════════════════════════════════
 
-    def update_index_data(self, date: str, ohlcv: Dict):
+    def update_index_data(self, date: str, ohlcv: Dict, source: Optional[str] = None):
         """지수 OHLCV 데이터 주입 (백테스트/실시간 공용).
 
         Args:
             date: YYYYMMDD
             ohlcv: {"open": float, "high": float, "low": float, "close": float, "volume": float}
+            source: "futures" | "spot" (None=설정 변경 없음). J2: 처음 호출 시 한 번만 지정.
         """
+        if source is not None and source in ("futures", "spot"):
+            self._index_source = source
         self._index_ohlcv.append(ohlcv)
         # 최대 260일 보관 (MA200 + buffer)
         if len(self._index_ohlcv) > 260:
             self._index_ohlcv = self._index_ohlcv[-260:]
+
+    def update_basis_data(self, date: str, basis: float):
+        """선물-현물 basis(스무딩 된) 1일 데이터 주입.
+
+        Args:
+            date: YYYYMMDD (현재는 메타 — 시계열 키는 사용하지 않음)
+            basis: (futures - spot) / spot — 보통 -0.02 ~ +0.02 범위
+        """
+        try:
+            self._latest_basis = float(basis)
+        except (ValueError, TypeError):
+            return
+        self._basis_history.append(self._latest_basis)
+        if len(self._basis_history) > 60:
+            self._basis_history = self._basis_history[-60:]
+        # 신호 점수 산출 — basis_signal_score()와 동일 로직 (소량이므로 인라인)
+        threshold = 0.003  # 0.3%
+        b = self._latest_basis
+        if b > threshold * 2:
+            self._basis_signal_score = 10.0
+        elif b > threshold:
+            self._basis_signal_score = 5.0
+        elif b < -threshold * 2:
+            self._basis_signal_score = -10.0
+        elif b < -threshold:
+            self._basis_signal_score = -5.0
+        else:
+            self._basis_signal_score = 0.0
 
     def _get_index_return(self, days: int) -> float:
         """최근 N일 지수 수익률 계산. 데이터 부족 시 0.0 반환."""
@@ -1184,6 +1272,31 @@ class SimulationEngine:
         momentum_score = rsi_norm + adx_norm + macd_bonus
         momentum_score = min(max(momentum_score, 0), 100)
 
+        # ── J2: Basis 신호 (선물 - 현물 프리미엄) — momentum_score에 ±10 가산 ──
+        # 콘탱고(F>S, basis>0): bull confirm — score 상향
+        # 백워데이션(F<S, basis<0): bear hint — score 하향
+        basis_score = float(self._basis_signal_score)
+        if basis_score != 0.0:
+            momentum_score = min(max(momentum_score + basis_score, 0), 100)
+            basis_pct = self._latest_basis * 100
+            tag = "콘탱고" if basis_score > 0 else "백워데이션"
+            signals.append(
+                f"베이시스 {tag}: {basis_pct:+.3f}% → momentum {basis_score:+.0f}"
+            )
+
+        # ── K3: VIX percentile 보정 — 절대값 → 상대값 정규화 ──
+        # 상위 20% (공포 진입) → momentum_score -5
+        # 하위 20% (안정 구간) → momentum_score +5
+        vix_p20 = self._vix_percentile(window=20)
+        vix_p50 = self._vix_percentile(window=50)
+        if self._use_vix_percentile:
+            if vix_p20 >= 80:
+                momentum_score = max(0, momentum_score - 5)
+                signals.append(f"VIX percentile 상위 20% ({vix_p20:.0f}) — 공포 진입 → momentum -5")
+            elif vix_p20 <= 20:
+                momentum_score = min(100, momentum_score + 5)
+                signals.append(f"VIX percentile 하위 20% ({vix_p20:.0f}) — 안정 구간 → momentum +5")
+
         # ── Volatility State (VIX 기반) ──
         vix = self._vix_ema20
         if vix < 16:
@@ -1219,6 +1332,11 @@ class SimulationEngine:
             trend = "RANGE_BOUND"  # 저추세 + 저변동성 = 박스권
         else:
             trend = "NEUTRAL"
+
+        # K2: 6→3 레짐 통합 (feature flag)
+        if self._use_3regime:
+            trend = collapse_regime(trend)
+
         signals.append(f"최종 지수 추세: {trend}")
 
         return {
@@ -1231,6 +1349,13 @@ class SimulationEngine:
             "adx": round(adx, 1),
             "macd_value": round(float(macd_line.iloc[-1]), 2),
             "macd_signal": round(float(signal_line.iloc[-1]), 2),
+            # J2: 선물 기반 신호 메타데이터
+            "index_source": self._index_source,
+            "basis_pct": round(float(self._latest_basis) * 100, 4),
+            "basis_signal": round(float(self._basis_signal_score), 1),
+            # K3: VIX percentile (절대값 → 상대값 정규화)
+            "vix_percentile_20d": round(float(vix_p20), 1),
+            "vix_percentile_50d": round(float(vix_p50), 1),
         }
 
     def _update_strategy_weights_from_index(self):
@@ -1242,8 +1367,10 @@ class SimulationEngine:
         """
         # 레짐 전략 모드: 고정 레짐 가중치 강제 적용
         if self._regime_locked:
+            # K2: locked_regime이 6키여도 collapse 후 조회 — union dict 안전
+            locked_key = collapse_regime(self._locked_regime) if self._use_3regime else self._locked_regime
             weights = INDEX_TREND_STRATEGY_WEIGHTS.get(
-                self._locked_regime,
+                locked_key,
                 INDEX_TREND_STRATEGY_WEIGHTS.get("NEUTRAL", {})
             )
             if self._strategy_allocator:
@@ -1272,6 +1399,20 @@ class SimulationEngine:
         weights = INDEX_TREND_STRATEGY_WEIGHTS.get(
             trend, INDEX_TREND_STRATEGY_WEIGHTS["NEUTRAL"]
         )
+
+        # ── J2: Basis 기반 미세 조정 ──
+        # 강한 콘탱고 (basis_signal ≥ +5): momentum +0.05, defensive -0.05 (상승확신 강화)
+        # 강한 백워데이션 (basis_signal ≤ -5): defensive +0.05, momentum -0.05 (방어 강화)
+        # 합산을 1.0으로 재정규화.
+        bs = float(self._basis_signal_score)
+        if abs(bs) >= 5.0 and weights:
+            tilt = 0.05 if bs > 0 else -0.05
+            adjusted = dict(weights)
+            adjusted["momentum"] = max(adjusted.get("momentum", 0.0) + tilt, 0.0)
+            adjusted["defensive"] = max(adjusted.get("defensive", 0.0) - tilt, 0.0)
+            total = sum(adjusted.values())
+            if total > 0:
+                weights = {k: v / total for k, v in adjusted.items()}
 
         if self._strategy_allocator:
             self._strategy_allocator.override_weights(weights)
@@ -1324,28 +1465,46 @@ class SimulationEngine:
         MR은 변동성 높을 때 기회 → VIX 높으면 사이즈 증가.
         Defensive는 VIX 높을 때 활성화 → 할인 없음.
         나머지(momentum/smc/brt)는 기존 로직 유지.
+
+        K3: VIX percentile이 상위 50%면 추가 -10% (장기적으로 높은 VIX 구간).
         """
         vix = self._vix_ema20
         if strategy == "mean_reversion":
             if vix > 25:
-                return 1.2
+                base = 1.2
             elif vix > 20:
-                return 1.0
-            return 0.8
-        if strategy == "defensive":
-            return 1.0  # defensive는 VIX 할인 없음
-        if strategy == "volatility":
+                base = 1.0
+            else:
+                base = 0.8
+        elif strategy == "defensive":
+            base = 1.0  # defensive는 VIX 할인 없음
+        elif strategy == "volatility":
             # volatility premium: VIX 높을수록 기회 크므로 사이즈 증가
             if vix > 30:
-                return 1.3
+                base = 1.3
             elif vix > 25:
-                return 1.1
-            return 0.9
-        # 기존 로직 (momentum/smc/brt)
-        for (lo, hi), mult in VIX_SIZING_SCALE.items():
-            if lo <= vix < hi:
-                return mult
-        return 0.3  # VIX 100+ fallback
+                base = 1.1
+            else:
+                base = 0.9
+        else:
+            # 기존 로직 (momentum/smc/brt)
+            base = 0.3  # VIX 100+ fallback
+            for (lo, hi), mult in VIX_SIZING_SCALE.items():
+                if lo <= vix < hi:
+                    base = mult
+                    break
+
+        # K3: 절대값 외에 상대값(50일 percentile)으로도 보정
+        # percentile > 70: -10% (장기 평균 대비 비정상적으로 높은 VIX 구간)
+        # mean_reversion / volatility는 보정 제외 — VIX 높을 때가 오히려 기회
+        if strategy not in ("mean_reversion", "volatility"):
+            try:
+                vix_p50 = self._vix_percentile(window=50)
+                if vix_p50 >= 70:
+                    base *= 0.9
+            except Exception:
+                pass
+        return base
 
     def _reduce_positions_for_regime(self):
         """레짐 다운그레이드 시 초과 포지션을 PnL 하위부터 ES7 청산."""
@@ -2337,10 +2496,11 @@ class SimulationEngine:
         _def_ro = REGIME_OVERRIDES.get(self._market_regime, {})
         vix_threshold = _def_ro.get("defensive_vix_threshold", 25)
 
-        # STRONG_BULL/BULL에서는 진입하지 않음
-        if self._market_regime in ("STRONG_BULL", "BULL"):
+        # K2: 강세장(STRONG_BULL/BULL/BULL_AGG) 에서는 진입하지 않음 — collapse로 호환
+        _regime3 = collapse_regime(self._market_regime)
+        if _regime3 == "BULL_AGG":
             return
-        if self._market_regime == "NEUTRAL" and self._vix_ema20 < vix_threshold:
+        if _regime3 == "NEUTRAL" and self._vix_ema20 < vix_threshold:
             return
 
         # 마켓에 맞는 인버스 ETF 목록
@@ -2375,10 +2535,12 @@ class SimulationEngine:
                 continue
 
             # 시그널 생성 (고정 strength — defensive는 레짐 기반)
-            strength = 70 if self._market_regime in ("BEAR", "CRISIS") else 50
+            # K2: BEAR/CRISIS/BEAR_AGG 모두 약세 — collapse로 호환
+            _regime3 = collapse_regime(self._market_regime)
+            strength = 70 if _regime3 == "BEAR_AGG" else 50
             if self._vix_ema20 > 30:
                 strength += 10
-            # CRISIS 안전자산은 추가 강도
+            # CRISIS 안전자산은 추가 강도 (6레짐 모드에서만 활성 — 3레짐에서는 BEAR_AGG에 흡수)
             is_safe_haven = any(
                 item["ticker"] == ticker
                 for item in SAFE_HAVEN_ETFS.get(market_key, [])
@@ -2410,8 +2572,12 @@ class SimulationEngine:
         """
         Defensive 전략 청산: 레짐이 BULL로 전환되면 청산.
         또는 일반 ES1 손절(-10%) 적용.
+
+        K2: 6레짐("BULL") + 3레짐("BULL_AGG") 양쪽 모두 매칭되도록 collapse 사용.
         """
         to_close: List[str] = []
+        # K2: 현재 레짐을 3-key로 collapse하여 매칭 (6/3 양쪽 호환)
+        regime_3 = collapse_regime(self._market_regime)
 
         for code, pos in self.positions.items():
             if pos.status != "ACTIVE":
@@ -2431,9 +2597,9 @@ class SimulationEngine:
                 exit_reason = "ES1: 손절 -10%"
                 exit_type = "STOP_LOSS"
 
-            # 레짐이 BULL로 전환 → 인버스 청산
-            elif self._market_regime == "BULL":
-                exit_reason = "DEF_REGIME: BULL 전환 청산"
+            # 레짐이 강세(BULL/STRONG_BULL/BULL_AGG)로 전환 → 인버스 청산
+            elif regime_3 == "BULL_AGG":
+                exit_reason = "DEF_REGIME: 강세 전환 청산"
                 exit_type = "REGIME_EXIT"
 
             # 익절: +10% (인버스는 보수적 TP)
@@ -2454,7 +2620,8 @@ class SimulationEngine:
 
             if exit_reason:
                 to_close.append(code)
-                self._close_position(code, current_price, exit_reason, exit_type)
+                # K2 bug fix: _close_position → _execute_sell (latent bug exposed by 3-regime)
+                self._execute_sell(pos, current_price, exit_reason, exit_type)
 
         for code in to_close:
             if code in self.positions:

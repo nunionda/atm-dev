@@ -11,6 +11,8 @@ import os
 import sys
 from typing import Any, Coroutine, Dict, Optional
 
+import pandas as pd
+
 from backtest.data_downloader import (
     analyze_survivorship_bias,
     download_and_cache,
@@ -53,6 +55,7 @@ class HistoricalBacktester:
         strategy_mode: str = "momentum",
         fixed_amount_per_stock: float = 0,
         disable_es2: bool = False,
+        index_source: str = "futures",  # J2: "futures" | "spot"
     ):
         self.market = market
         self.scenario_id = scenario
@@ -65,6 +68,8 @@ class HistoricalBacktester:
         self.strategy_mode = strategy_mode
         self.fixed_amount_per_stock = fixed_amount_per_stock
         self.disable_es2 = disable_es2
+        # J2: 선물(ES=F/NQ=F/^KS200) vs spot(^GSPC/^IXIC/^KS200) 지수 소스
+        self.index_source = index_source if index_source in ("futures", "spot") else "futures"
 
         # 마켓 설정 로드
         if market not in MARKET_CONFIG:
@@ -251,38 +256,59 @@ class HistoricalBacktester:
             print(f"   ⚠ VIX 다운로드 실패: {e} — VIX 연동 비활성")
         self._vix_by_date = vix_by_date
 
-        # ── 1-idx. 지수 OHLCV 다운로드 (지수 추세 기반 자동 전략 선택용) ──
+        # ── 1-idx. 지수 OHLCV + 베이시스 다운로드 (J2: futures+basis 하이브리드) ──
+        # source="futures" → ES=F/NQ=F/^KS200 사용 + (futures-spot)/spot basis 신호
+        # source="spot"    → 기존 spot 지수 (^GSPC/^IXIC/^KS200) 사용
         index_by_date: dict[str, dict] = {}
+        basis_by_date: dict[str, float] = {}
         try:
-            from simulation.watchlists import MARKET_CONFIG
-            market_cfg = MARKET_CONFIG.get(self.market, {})
-            index_symbol = market_cfg.get("index_symbol", "")
-            if index_symbol:
-                idx_wl = [{"code": index_symbol, "ticker": index_symbol, "name": f"INDEX_{self.market}"}]
-                idx_cache = os.path.join(self.cache_dir, "_macro")
-                idx_map = download_and_cache(
-                    watchlist=idx_wl,
-                    start_date=self.scenario.warmup_start,
-                    end_date=self.scenario.end_date,
-                    cache_dir=idx_cache,
-                )
-                if index_symbol in idx_map and not idx_map[index_symbol].empty:
-                    idf = idx_map[index_symbol]
-                    for _, row in idf.iterrows():
-                        d = str(row["date"])
-                        index_by_date[d] = {
-                            "open": float(row.get("open", row["close"])),
-                            "high": float(row.get("high", row["close"])),
-                            "low": float(row.get("low", row["close"])),
-                            "close": float(row["close"]),
-                            "volume": float(row.get("volume", 0)),
-                        }
-                    print(f"   → 지수({index_symbol}) 데이터 로드: {len(index_by_date)}일")
-                else:
-                    print(f"   ⚠ 지수({index_symbol}) 데이터 없음 — 지수 추세 비활성")
+            from data.futures_data import fetch_index_payload
+            payload, basis_series = fetch_index_payload(
+                market=self.market,
+                start_date=self.scenario.warmup_start,
+                end_date=self.scenario.end_date,
+                source=self.index_source,
+                cache_dir=self.cache_dir,
+            )
+            index_by_date = payload
+            if not basis_series.empty:
+                basis_by_date = {str(d): float(v) for d, v in basis_series.items() if not pd.isna(v)}
+            print(
+                f"   → 지수(source={self.index_source}) 데이터 로드: "
+                f"{len(index_by_date)}일, 베이시스 {len(basis_by_date)}일"
+            )
         except Exception as e:
-            print(f"   ⚠ 지수 다운로드 실패: {e} — 지수 추세 비활성")
+            print(f"   ⚠ 지수 다운로드 실패: {e} — fallback to spot index_symbol")
+            # Fallback: 기존 spot 지수 다운로드
+            try:
+                from simulation.watchlists import MARKET_CONFIG
+                market_cfg = MARKET_CONFIG.get(self.market, {})
+                index_symbol = market_cfg.get("index_symbol", "")
+                if index_symbol:
+                    idx_wl = [{"code": index_symbol, "ticker": index_symbol, "name": f"INDEX_{self.market}"}]
+                    idx_cache = os.path.join(self.cache_dir, "_macro")
+                    idx_map = download_and_cache(
+                        watchlist=idx_wl,
+                        start_date=self.scenario.warmup_start,
+                        end_date=self.scenario.end_date,
+                        cache_dir=idx_cache,
+                    )
+                    if index_symbol in idx_map and not idx_map[index_symbol].empty:
+                        idf = idx_map[index_symbol]
+                        for _, row in idf.iterrows():
+                            d = str(row["date"])
+                            index_by_date[d] = {
+                                "open": float(row.get("open", row["close"])),
+                                "high": float(row.get("high", row["close"])),
+                                "low": float(row.get("low", row["close"])),
+                                "close": float(row["close"]),
+                                "volume": float(row.get("volume", 0)),
+                            }
+                        print(f"   → fallback 지수({index_symbol}) 로드: {len(index_by_date)}일")
+            except Exception as e2:
+                print(f"   ⚠ fallback도 실패: {e2} — 지수 추세 비활성")
         self._index_by_date = index_by_date
+        self._basis_by_date = basis_by_date
 
         # ── 1a. v5: Arbitrage 전용 — Basis signal + Fixed ETF 데이터 추가 다운로드 ──
         if self.strategy_mode == "arbitrage":
@@ -488,7 +514,11 @@ class HistoricalBacktester:
                 for wdate in warmup_dates:
                     index_data = self._index_by_date.get(wdate)
                     if index_data is not None:
-                        self.engine.update_index_data(wdate, index_data)
+                        self.engine.update_index_data(wdate, index_data, source=self.index_source)
+                    # J2: 베이시스도 함께 주입 (basis_signal_score 계산)
+                    basis_v = (self._basis_by_date or {}).get(wdate) if hasattr(self, "_basis_by_date") else None
+                    if basis_v is not None:
+                        self.engine.update_basis_data(wdate, basis_v)
 
             # 초기 에쿼티/체제 설정
             self.engine._market_regime = self.engine._judge_market_regime()
@@ -572,7 +602,11 @@ class HistoricalBacktester:
             if self._index_by_date:
                 index_data = self._index_by_date.get(date)
                 if index_data is not None:
-                    self.engine.update_index_data(date, index_data)
+                    self.engine.update_index_data(date, index_data, source=self.index_source)
+                # J2: 일별 베이시스 신호 주입
+                basis_v = (self._basis_by_date or {}).get(date) if hasattr(self, "_basis_by_date") else None
+                if basis_v is not None:
+                    self.engine.update_basis_data(date, basis_v)
 
             self.engine.run_backtest_day(
                 date=date,

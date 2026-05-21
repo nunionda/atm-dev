@@ -338,6 +338,23 @@ INVERSE_ETFS = {
     "kospi":  ["114800.KS", "252670.KS"],  # KODEX 인버스, KODEX 200선물인버스2X
 }
 
+# ── J1: 선물 지수 매핑 (Phase J1 — Futures tracking) ──
+# 시뮬레이션 엔진이 spot 지수 대신 선물 지수를 트래킹하도록 한다.
+# basis = (futures - spot) / spot 도 동시에 신호로 활용.
+FUTURES_INDEX_MAP: Dict[str, str] = {
+    "sp500":  "ES=F",
+    "nasdaq": "NQ=F",
+    "ndx":    "NQ=F",
+    "kospi":  "^KS200",  # spot==futures (현물지수가 곧 선물 기초)
+}
+
+SPOT_INDEX_MAP_FOR_BASIS: Dict[str, str] = {
+    "sp500":  "^GSPC",
+    "nasdaq": "^IXIC",
+    "ndx":    "^IXIC",
+    "kospi":  "^KS200",
+}
+
 # H8: 패시브 모드 ETF (STRONG_BULL/BULL 레짐에서 시장 추종)
 # 강세장에서는 액티브 매매보다 인덱스 ETF Buy & Hold가 우월하므로,
 # REGIME=STRONG_BULL/BULL 시 워치리스트 종목 매수 대신 ETF 직매수.
@@ -404,5 +421,227 @@ REGIME_STRATEGY_MODES: Dict[str, str] = {
     "regime_bear":        "BEAR",
     "regime_crisis":      "CRISIS",
 }
+
+
+# ══════════════════════════════════════════════════════════
+# K1-K4: 6→3 레짐 통합 (Phase K — 단순화 + 안전 운영)
+# ══════════════════════════════════════════════════════════
+#
+# 정책:
+#   STRONG_BULL + BULL                      → BULL_AGG  (강세)
+#   NEUTRAL                                  → NEUTRAL   (중립)
+#   RANGE_BOUND + BEAR + CRISIS              → BEAR_AGG  (약세)
+#
+# 가중치는 평균 병합 — 회귀 위험 최소화.
+# 6키 사용 사이트는 collapse_regime() 로 3키로 변환 후 REGIME3_* 조회.
+
+# ── 6→3 매핑 ──
+REGIME_6_TO_3: Dict[str, str] = {
+    "STRONG_BULL": "BULL_AGG",
+    "BULL":        "BULL_AGG",
+    "NEUTRAL":     "NEUTRAL",
+    "RANGE_BOUND": "BEAR_AGG",
+    "BEAR":        "BEAR_AGG",
+    "CRISIS":      "BEAR_AGG",
+    # 3키 자체 입력도 통과
+    "BULL_AGG":    "BULL_AGG",
+    "BEAR_AGG":    "BEAR_AGG",
+}
+
+
+def collapse_regime(regime: str) -> str:
+    """6레짐 키를 3레짐 키로 변환. 알 수 없는 키는 NEUTRAL로 안전 fallback."""
+    if not regime:
+        return "NEUTRAL"
+    return REGIME_6_TO_3.get(regime, "NEUTRAL")
+
+
+# ── 3레짐 파라미터 (max_positions / max_weight) ──
+REGIME3_PARAMS: Dict[str, Dict[str, Any]] = {
+    "BULL_AGG":  {"max_positions": 10, "max_weight": 0.15},
+    "NEUTRAL":   {"max_positions": 6,  "max_weight": 0.12},
+    "BEAR_AGG":  {"max_positions": 2,  "max_weight": 0.05},
+}
+
+# ── 3레짐 청산 파라미터 ──
+REGIME3_EXIT_PARAMS: Dict[str, Dict[str, Any]] = {
+    # avg(STRONG_BULL, BULL): max_holding 60, take_profit 0.45, trail 0.03
+    "BULL_AGG": {"max_holding": 60, "take_profit": 0.45, "trail_activation": 0.03},
+    "NEUTRAL":  {"max_holding": 25, "take_profit": 0.12, "trail_activation": 0.04},
+    # avg(RANGE_BOUND, BEAR, CRISIS): max_holding 13, take_profit 0.07, trail 0.027
+    "BEAR_AGG": {"max_holding": 13, "take_profit": 0.07, "trail_activation": 0.027},
+}
+
+# ── 3레짐 오버라이드 (Kelly + cash + ETF + entry/exit 정책) ──
+REGIME3_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "BULL_AGG": {
+        # avg(STRONG_BULL 0.75, BULL 0.65) = 0.70
+        "kelly_fraction": 0.70,
+        # K6 tuning: BULL_AGG는 STRONG_BULL이 아닌 BULL의 보수적 cash level 사용
+        # (BULL 0.15 그대로 유지 — 매트릭스 검증에서 0.10이 너무 공격적)
+        "min_cash_override": 0.15,
+        # K6 tuning: 패시브 ETF mode는 BULL 기준 weight 사용 (avg 0.70 → 0.50)
+        # 평균값은 STRONG_BULL의 강한 신호와 BULL의 약한 신호를 혼합해
+        # ETF 매수를 너무 자주 트리거함 (matrix B 결과: 123 vs A 1).
+        # BULL_AGG는 STRONG_BULL 시그널과 같지 않으므로 더 보수적인 BULL 값 사용.
+        "passive_etf_mode": True,
+        "passive_etf_weight": 0.50,
+        # Donchian/Pyramiding은 강한 추세에서만 — BULL_AGG 일괄 적용
+        "donchian_entry": True,
+        "donchian_period": 20,
+        "pyramiding_enabled": True,
+        "pyramiding_max": 1,
+        "pyramiding_pnl_min": 0.05,
+        # Disparity partial sell (BULL 원본)
+        "disparity_partial_sell": True,
+        "disparity_threshold": 1.15,
+        "partial_sell_ratio": 0.5,
+        # Trailing (STRONG_BULL 공격적)
+        "trail_atr_mult": 2.0,
+        "trail_floor_pct": -0.04,
+    },
+    "NEUTRAL": {
+        "kelly_fraction": 0.60,
+        "min_cash_override": 0.40,
+        "mr_adx_limit": 22,
+        "time_decay_enabled": True,
+        "time_decay_days": 10,
+        "time_decay_pnl_min": 0.02,
+    },
+    "BEAR_AGG": {
+        # avg(0.40, 0.30, 0.25) = 0.317 → 0.30
+        "kelly_fraction": 0.30,
+        # avg(0.60, 0.30, 0.20) = 0.367 → 0.35
+        "min_cash_override": 0.35,
+        # Defensive ETF mode 일괄 ON
+        "defensive_etf_mode": True,
+        # avg(0.40 inverse, 0.30 inverse) — CRISIS는 0.30 ↓
+        "defensive_inverse_weight": 0.33,
+        # avg(0.30 safe, 0.50 safe) — CRISIS 더 많이
+        "defensive_safe_weight": 0.40,
+        "defensive_vix_threshold": 22,
+        "bear_exit_tighten": True,
+        # RANGE_BOUND sr_zone_entry — BEAR_AGG로 흡수
+        "sr_zone_entry": True,
+        "sr_atr_buffer": 1.5,
+        "box_breakout_exit": True,
+        "box_lookback": 40,
+        # CRISIS exit-immediate
+        "crisis_exit_immediate": True,
+        "safe_haven_enabled": True,
+    },
+}
+
+# ── 3레짐 가중치 (지수 추세 기반) ──
+# 평균 병합 — 합계 = 1.0 ± 0.001 (반올림 보정 포함)
+REGIME3_INDEX_TREND_STRATEGY_WEIGHTS: Dict[str, Dict[str, float]] = {
+    # avg(STRONG_BULL, BULL): momentum 35 / breakout 12.5 / smc 12.5 / MR 27.5 / defensive 12.5
+    "BULL_AGG": {
+        "momentum":        0.35,
+        "breakout_retest": 0.125,
+        "smc":             0.125,
+        "mean_reversion":  0.275,
+        "defensive":       0.125,
+    },
+    # NEUTRAL 그대로
+    "NEUTRAL": {
+        "mean_reversion":  0.60,
+        "defensive":       0.25,
+        "arbitrage":       0.10,
+        "smc":             0.05,
+    },
+    # avg(RANGE_BOUND, BEAR, CRISIS):
+    # defensive (20+55+85)/3 ≈ 53.3 → 0.533
+    # mean_reversion (55+25+15)/3 ≈ 31.7 → 0.317
+    # volatility (0+15+0)/3 ≈ 5.0 → 0.050
+    # arbitrage (20+0+0)/3 ≈ 6.7 → 0.067
+    # smc (5+5+0)/3 ≈ 3.3 → 0.033
+    "BEAR_AGG": {
+        "defensive":       0.533,
+        "mean_reversion":  0.317,
+        "volatility":      0.050,
+        "arbitrage":       0.067,
+        "smc":             0.033,
+    },
+}
+
+# ── 3레짐 fallback 가중치 (breadth 기반, 지수 데이터 부족 시) ──
+REGIME3_STRATEGY_WEIGHTS: Dict[str, Dict[str, float]] = {
+    "BULL_AGG": {
+        "momentum":        0.30,
+        "smc":             0.15,
+        "mean_reversion":  0.35,
+        "defensive":       0.15,
+        "breakout_retest": 0.05,
+    },
+    "NEUTRAL": {
+        "mean_reversion":  0.60,
+        "defensive":       0.25,
+        "arbitrage":       0.10,
+        "smc":             0.05,
+    },
+    "BEAR_AGG": {
+        "defensive":       0.55,
+        "volatility":      0.15,
+        "mean_reversion":  0.25,
+        "smc":             0.05,
+    },
+}
+
+# ── 3레짐 표시 이름 ──
+REGIME3_DISPLAY_NAMES: Dict[str, Dict[str, str]] = {
+    "BULL_AGG": {"ko": "강세",   "en": "Bullish"},
+    "NEUTRAL":  {"ko": "중립",   "en": "Neutral"},
+    "BEAR_AGG": {"ko": "약세",   "en": "Bearish"},
+}
+
+# ── 3레짐 전략 메타데이터 (UI 표시용) ──
+REGIME3_STRATEGY_COMPOSITION: Dict[str, Dict] = {
+    "BULL_AGG": {
+        "primary": "momentum",
+        "secondary": ["mean_reversion", "breakout_retest"],
+        "filter": ["smc"],
+        "hedge": ["defensive"],
+        "rationale": {
+            "ko": "강세 통합 — 모멘텀 주력 + MR 눌림목 + BRT 돌파",
+            "en": "Bullish unified — momentum primary, MR dip-buy, BRT breakout",
+        },
+    },
+    "NEUTRAL": {
+        "primary": "mean_reversion",
+        "secondary": ["arbitrage"],
+        "filter": ["smc"],
+        "hedge": ["defensive"],
+        "rationale": {
+            "ko": "중립 — 평균회귀 주력, 페어 차익거래",
+            "en": "Neutral — MR primary, pairs arbitrage",
+        },
+    },
+    "BEAR_AGG": {
+        "primary": "defensive",
+        "secondary": ["mean_reversion", "volatility"],
+        "filter": ["smc"],
+        "hedge": [],
+        "rationale": {
+            "ko": "약세 통합 — 인버스 헤지 주력, 극단 과매도 MR, VIX 프리미엄",
+            "en": "Bearish unified — defensive primary, extreme MR, VIX premium",
+        },
+    },
+}
+
+
+# ══════════════════════════════════════════════════════════
+# K2: 기존 REGIME_* dicts에 3-key entries 병합 (Union dicts)
+# ══════════════════════════════════════════════════════════
+# 이렇게 하면 기존 코드가 self._market_regime = "BULL_AGG"여도
+# REGIME_PARAMS["BULL_AGG"] 조회가 즉시 동작 → call site 수정 불필요.
+
+REGIME_PARAMS.update(REGIME3_PARAMS)                      # type: ignore[arg-type]
+REGIME_EXIT_PARAMS.update(REGIME3_EXIT_PARAMS)
+REGIME_OVERRIDES.update(REGIME3_OVERRIDES)
+INDEX_TREND_STRATEGY_WEIGHTS.update(REGIME3_INDEX_TREND_STRATEGY_WEIGHTS)
+REGIME_STRATEGY_WEIGHTS.update(REGIME3_STRATEGY_WEIGHTS)  # type: ignore[arg-type]
+REGIME_DISPLAY_NAMES.update(REGIME3_DISPLAY_NAMES)
+REGIME_STRATEGY_COMPOSITION.update(REGIME3_STRATEGY_COMPOSITION)  # type: ignore[arg-type]
 
 

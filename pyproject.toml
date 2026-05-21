@@ -5,16 +5,69 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ats"
 version = "1.0.0"
-description = "Automated Trading System"
-requires-python = ">=3.9"
+description = "Automated Trading System — KOSPI200 / S&P500 / NASDAQ100 멀티마켓 자동매매"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
 
+# ─── Runtime dependencies ────────────────────────────────────────────────
+# Phase 3.D 일원화: requirements.txt → pyproject.toml [project.dependencies]
+# requirements.txt 는 호환성 위해 유지하되 이 섹션이 source of truth.
+dependencies = [
+    # Web framework (API server)
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.0.0",
+
+    # HTTP client
+    "requests>=2.31.0",
+    "httpx>=0.25.0",
+
+    # Data processing
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+
+    # Market data
+    "yfinance>=0.2.40",
+    "ta>=0.11.0",
+
+    # Time / timezone
+    "pytz>=2024.1",
+
+    # Database
+    "SQLAlchemy>=2.0.0",
+
+    # Configuration
+    "PyYAML>=6.0",
+    "python-dotenv>=1.0.0",
+
+    # Telegram notifications
+    "python-telegram-bot>=20.0",
+
+    # Scheduling
+    "APScheduler>=3.10.0",
+
+    # Logging
+    "loguru>=0.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-mock>=3.12.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.5.0",
+]
+
+# ─── Packaging ────────────────────────────────────────────────────────────
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["ats*"]
+include = ["backend*"]
 
 [tool.setuptools.package-dir]
-"" = "ats"
+"" = "backend"
 
+# ─── Pytest ───────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
-testpaths = ["ats/tests"]
-pythonpath = ["ats"]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]

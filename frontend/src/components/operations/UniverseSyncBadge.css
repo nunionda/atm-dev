@@ -1,0 +1,170 @@
+.universe-sync-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--color-text-secondary, #cbd5e1);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all .15s ease;
+}
+
+.universe-sync-badge:hover {
+    border-color: rgba(255, 255, 255, 0.25);
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.usb-label {
+    white-space: nowrap;
+}
+
+.usb-protected {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.universe-sync-badge .spin {
+    animation: usb-spin 1s linear infinite;
+}
+
+@keyframes usb-spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+}
+
+/* ── Drawer ── */
+.usb-drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.usb-drawer {
+    width: min(90vw, 900px);
+    max-height: 80vh;
+    background: #0f172a;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.usb-drawer-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.usb-drawer-head h3 {
+    margin: 0 0 4px;
+    font-size: 16px;
+    color: #f1f5f9;
+}
+
+.usb-drawer-sub {
+    margin: 0;
+    color: var(--color-text-secondary, #94a3b8);
+    font-size: 12px;
+}
+
+.usb-drawer-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.usb-btn {
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04);
+    color: #cbd5e1;
+    cursor: pointer;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.usb-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.usb-btn:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+.usb-btn-primary {
+    background: rgba(59, 130, 246, 0.18);
+    border-color: rgba(59, 130, 246, 0.4);
+    color: #93c5fd;
+}
+
+.usb-btn-primary:hover:not(:disabled) {
+    background: rgba(59, 130, 246, 0.3);
+}
+
+.usb-drawer-body {
+    padding: 16px 20px;
+    overflow: auto;
+}
+
+.usb-empty {
+    color: var(--color-text-secondary, #94a3b8);
+    text-align: center;
+    padding: 24px;
+    margin: 0;
+}
+
+.usb-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.usb-table th,
+.usb-table td {
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    white-space: nowrap;
+}
+
+.usb-table th {
+    color: var(--color-text-secondary, #94a3b8);
+    font-weight: 500;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.usb-table tr:hover td {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.usb-ok {
+    color: #22c55e;
+    font-weight: 600;
+}
+
+.usb-bad {
+    color: #ef4444;
+}

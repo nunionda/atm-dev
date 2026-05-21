@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 
 PORT=8000
 PID_FILE=".pids/backend.pid"
-LOG_FILE="/tmp/ats_api.log"
+LOG_FILE="/tmp/backend_api.log"
 mkdir -p .pids
 
 RED='\033[0;31m'

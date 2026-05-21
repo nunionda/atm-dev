@@ -79,8 +79,23 @@ def _serialize_metrics(metrics: Any) -> Dict[str, Any]:
             "time_in_bull_pct": _safe_float(metrics.time_in_bull_pct, 1),
             "time_in_bear_pct": _safe_float(metrics.time_in_bear_pct, 1),
             "time_in_neutral_pct": _safe_float(metrics.time_in_neutral_pct, 1),
+            # J3: Benchmark / Alpha metrics
+            "benchmark_return":   _safe_float(metrics.benchmark_return * 100, 2),
+            "alpha":              _safe_float(metrics.alpha * 100, 2),
+            "beta":               _safe_float(metrics.beta, 3),
+            "information_ratio":  _safe_float(metrics.information_ratio, 3),
+            "tracking_error":     _safe_float(metrics.tracking_error * 100, 2),
+            "excess_return":      _safe_float(metrics.excess_return * 100, 2),
+            "up_capture_ratio":   _safe_float(metrics.up_capture_ratio, 1),
+            "down_capture_ratio": _safe_float(metrics.down_capture_ratio, 1),
         },
     }
+
+    # J3: Alpha decay series (rolling alpha 시계열) — UI 차트용
+    m["alpha_decay_series"] = [
+        {"date": _fmt_date(d), "value": _safe_float(v * 100, 3)}
+        for d, v in sorted((metrics.alpha_decay_series or {}).items())
+    ]
 
     # --- 에쿼티 커브 ---
     m["equity_curve"] = [

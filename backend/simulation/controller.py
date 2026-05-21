@@ -111,6 +111,7 @@ class SimulationController:
         self,
         market_id: str,
         strategy_mode: str = "multi",
+        index_source: str = "futures",
     ) -> Dict[str, str]:
         """특정 마켓의 시뮬레이션을 시작한다.
 
@@ -120,6 +121,9 @@ class SimulationController:
             market_id: "kospi" | "sp500" | "ndx"
             strategy_mode: "multi" (default) | "momentum" | "smc" | "breakout_retest" | "mean_reversion"
               I1: 기본값 multi (이전 momentum). 사용자가 매번 변경 안 해도 됨.
+            index_source: "futures" (default) | "spot" — J2 선물 트래킹.
+              "futures" 면 ES=F / NQ=F / ^KS200 + basis 신호.
+              "spot" 면 기존 ^GSPC / ^IXIC / ^KS200.
 
         Returns:
             {"status": "started", "market": market_id, ...}
@@ -140,6 +144,7 @@ class SimulationController:
 
         # 전략 모드: 명시적 파라미터 우선, 없으면 MARKET_CONFIG 기본값 사용
         actual_strategy = strategy_mode or config.get("strategy_mode", "multi")
+        actual_index_source = index_source if index_source in ("futures", "spot") else "futures"
 
         engine = SimulationEngine(
             on_event=self._event_bus.publish,
@@ -151,17 +156,20 @@ class SimulationController:
             market_label=config["label"],
             strategy_mode=actual_strategy,
         )
+        # J2: 선물/현물 소스를 엔진에 미리 설정 (live 데이터 주입 시 source 결정에 사용)
+        engine._index_source = actual_index_source
         self._engines[market_id] = engine
         self._tasks[market_id] = asyncio.create_task(engine.start())
 
         logger.info(
-            "마켓 시작 | market=%s | strategy=%s | capital=%s",
-            market_id, actual_strategy, config["initial_capital"],
+            "마켓 시작 | market=%s | strategy=%s | capital=%s | index_source=%s",
+            market_id, actual_strategy, config["initial_capital"], actual_index_source,
         )
         return {
             "status": "started",
             "market": market_id,
             "strategy": actual_strategy,
+            "index_source": actual_index_source,
             "initial_capital": config["initial_capital"],
         }
 

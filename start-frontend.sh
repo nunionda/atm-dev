@@ -14,8 +14,8 @@ cd "$(dirname "$0")"
 
 PORT=5173
 PID_FILE=".pids/frontend.pid"
-LOG_FILE="/tmp/ats_vite.log"
-WEB_DIR="web"
+LOG_FILE="/tmp/frontend_vite.log"
+WEB_DIR="frontend"
 mkdir -p .pids
 
 RED='\033[0;31m'

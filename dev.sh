@@ -4,7 +4,7 @@
 # 사용법:
 #   ./dev.sh          백엔드 + 프론트엔드 동시 시작
 #   ./dev.sh api      백엔드만 시작
-#   ./dev.sh web      프론트엔드만 시작
+#   ./dev.sh frontend      프론트엔드만 시작
 #   ./dev.sh stop     모든 서버 종료
 #   ./dev.sh status   서버 상태 확인
 # ═══════════════════════════════════════════════════
@@ -85,7 +85,7 @@ start_backend() {
     fi
 
     # 서버 시작
-    python3 main.py api > /tmp/ats_api.log 2>&1 &
+    python3 main.py api > /tmp/backend_api.log 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_DIR/backend.pid"
 
@@ -101,10 +101,10 @@ start_backend() {
     # 10초 후에도 안 되면 로그 확인
     if kill -0 "$pid" 2>/dev/null; then
         echo -e "${GREEN}[Backend]${NC} ✓ 시작됨 (PID: $pid) — 데이터 로드 진행 중..."
-        echo -e "  로그: tail -f /tmp/ats_api.log"
+        echo -e "  로그: tail -f /tmp/backend_api.log"
     else
         echo -e "${RED}[Backend]${NC} ✗ 시작 실패"
-        tail -5 /tmp/ats_api.log 2>/dev/null
+        tail -5 /tmp/backend_api.log 2>/dev/null
         return 1
     fi
 }
@@ -128,13 +128,13 @@ start_frontend() {
     fi
 
     # node_modules 확인
-    if [ ! -d "web/node_modules" ]; then
+    if [ ! -d "frontend/node_modules" ]; then
         echo -e "${CYAN}[Frontend]${NC} npm install 실행 중..."
-        (cd web && npm install)
+        (cd frontend && npm install)
     fi
 
     # Vite 개발 서버 시작
-    (cd web && npm run dev) > /tmp/ats_vite.log 2>&1 &
+    (cd frontend && npm run dev) > /tmp/frontend_vite.log 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_DIR/frontend.pid"
 
@@ -151,7 +151,7 @@ start_frontend() {
         echo -e "${GREEN}[Frontend]${NC} ✓ 시작됨 (PID: $pid)"
     else
         echo -e "${RED}[Frontend]${NC} ✗ 시작 실패"
-        tail -5 /tmp/ats_vite.log 2>/dev/null
+        tail -5 /tmp/frontend_vite.log 2>/dev/null
         return 1
     fi
 }
@@ -221,8 +221,8 @@ case "${1:-all}" in
         echo -e "${GREEN}═══ 준비 완료 ═══${NC}"
         echo -e "  Backend:  http://localhost:$BACKEND_PORT"
         echo -e "  Frontend: http://localhost:$FRONTEND_PORT"
-        echo -e "  백엔드 로그: tail -f /tmp/ats_api.log"
-        echo -e "  프론트 로그: tail -f /tmp/ats_vite.log"
+        echo -e "  백엔드 로그: tail -f /tmp/backend_api.log"
+        echo -e "  프론트 로그: tail -f /tmp/frontend_vite.log"
         ;;
     api|backend)
         start_backend

@@ -22,8 +22,8 @@ from __future__ import annotations
 import sys
 import os
 
-# ats/ 디렉토리를 Python path에 추가 (모든 모듈은 ats/ 하위에 위치)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "ats"))
+# backend/ 디렉토리를 Python path에 추가 (모든 모듈은 backend/ 하위에 위치)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "backend"))
 
 from core.main_loop import MainLoop
 from core.scheduler import Scheduler
