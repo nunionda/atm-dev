@@ -372,13 +372,19 @@ async def run_futures_backtest(
     end_date: str = Query(..., description="YYYYMMDD"),
     equity: float = Query(100000),
     is_micro: bool = Query(False),
-    # 전략 파라미터 오버라이드 (선택)
+    strategy_type: str = Query("sp500", description="'sp500' (default) | 'turtle' (Donchian breakout swing)"),
+    # 전략 파라미터 오버라이드 (선택, sp500 전용)
     entry_threshold: Optional[float] = Query(None, description="진입 임계값 (0-100)"),
     sl_hard_pct: Optional[float] = Query(None, description="하드 손절 % (예: 0.05)"),
     atr_breakout_mult: Optional[float] = Query(None, description="ATR 돌파 배수"),
     max_holding_days: Optional[int] = Query(None, description="최대 보유일"),
 ):
-    """선물 백테스트 실행. 전략 파라미터 오버라이드 지원."""
+    """선물 백테스트 실행. 전략 파라미터 오버라이드 지원.
+
+    strategy_type:
+      - 'sp500' (default): 4-Layer scoring + T/U/V (per-ticker overrides + regime switching)
+      - 'turtle': Donchian Channel breakout (20/55-day) + 2N ATR stop + 1% volatility sizing
+    """
     global _backtest_in_progress, _backtest_cache
 
     _validate_ticker(ticker)
@@ -402,6 +408,8 @@ async def run_futures_backtest(
         raise HTTPException(status_code=400, detail="atr_breakout_mult must be 0.1-5.0")
     if max_holding_days is not None and not (1 <= max_holding_days <= 252):
         raise HTTPException(status_code=400, detail="max_holding_days must be 1-252")
+    if strategy_type not in ("sp500", "turtle"):
+        raise HTTPException(status_code=400, detail="strategy_type must be 'sp500' or 'turtle'")
 
     _backtest_in_progress = True
     global _backtest_progress
@@ -435,6 +443,7 @@ async def run_futures_backtest(
                 initial_equity=equity,
                 is_micro=is_micro,
                 progress_callback=_on_progress,
+                strategy_type=strategy_type,
             )
             result = bt.run()
             _backtest_cache = result

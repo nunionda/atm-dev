@@ -28,11 +28,17 @@ logger = get_logger("esf_intraday_api")
 esf_router = APIRouter(tags=["esf-intraday"])
 
 # ── 지원 티커 (인트라데이 전용) ──
+# Phase 3: 4종목 + 마이크로 8종 지원 (CL/GC 신규 추가).
+# 자세한 per-ticker spec(multiplier/tick/RTH/margin)은 strategy/intraday_ticker_specs.py
 ESF_TICKERS = [
-    {"ticker": "ES=F", "name": "E-mini S&P 500", "multiplier": 50},
-    {"ticker": "MES=F", "name": "Micro E-mini S&P 500", "multiplier": 5},
-    {"ticker": "NQ=F", "name": "E-mini NASDAQ 100", "multiplier": 20},
+    {"ticker": "ES=F",  "name": "E-mini S&P 500",          "multiplier": 50},
+    {"ticker": "MES=F", "name": "Micro E-mini S&P 500",    "multiplier": 5},
+    {"ticker": "NQ=F",  "name": "E-mini NASDAQ 100",       "multiplier": 20},
     {"ticker": "MNQ=F", "name": "Micro E-mini NASDAQ 100", "multiplier": 2},
+    {"ticker": "CL=F",  "name": "WTI Crude Oil",           "multiplier": 1000},
+    {"ticker": "MCL=F", "name": "Micro WTI Crude Oil",     "multiplier": 100},
+    {"ticker": "GC=F",  "name": "Gold",                    "multiplier": 100},
+    {"ticker": "MGC=F", "name": "Micro Gold",              "multiplier": 10},
 ]
 
 VALID_ESF_TICKERS = {t["ticker"] for t in ESF_TICKERS}
@@ -291,7 +297,8 @@ async def analyze_esf_intraday(
             raise HTTPException(status_code=404, detail=f"No intraday data for {ticker}")
 
         strategy = _get_strategy()
-        df = strategy.calculate_indicators(df)
+        # F3: ticker별 EMA period override 전달
+        df = strategy.calculate_indicators(df, ticker=ticker)
         if df.empty or len(df) < 2:
             raise HTTPException(status_code=404, detail=f"Insufficient data for {ticker}")
 
@@ -324,7 +331,7 @@ async def analyze_esf_intraday(
             grade = "D"
 
         # 레짐 정보
-        regime_info = strategy.get_regime_info(df)
+        regime_info = strategy.get_regime_info(df, ticker=ticker)
 
         # VP 데이터 (간략)
         vp_data = strategy.get_volume_profile_summary(df)
@@ -433,10 +440,12 @@ async def get_esf_signal(
         strategy = _get_strategy()
         current_price = float(df.iloc[-1]["close"])
 
-        df = strategy.calculate_indicators(df)
+        # F3: ticker별 EMA period override 전달
+        df = strategy.calculate_indicators(df, ticker=ticker)
         signal = strategy.generate_intraday_signal(
             df=df,
             equity=equity,
+            ticker=ticker,
         )
 
         if signal is None:
@@ -468,7 +477,7 @@ async def get_esf_regime(
             raise HTTPException(status_code=404, detail=f"No data for {ticker}")
 
         strategy = _get_strategy()
-        regime_info = strategy.get_regime_info(df)
+        regime_info = strategy.get_regime_info(df, ticker=ticker)
         return JSONResponse(content=_sanitize_for_json(regime_info))
 
     except HTTPException:
@@ -514,7 +523,8 @@ async def get_esf_candles(
             raise HTTPException(status_code=404, detail=f"No intraday data for {ticker}")
 
         strategy = _get_strategy()
-        df = strategy.calculate_indicators(df)
+        # F3: ticker별 EMA period override 전달
+        df = strategy.calculate_indicators(df, ticker=ticker)
         if df.empty or len(df) < 2:
             raise HTTPException(status_code=404, detail=f"Insufficient data for {ticker}")
 
@@ -608,7 +618,8 @@ async def get_volume_profile(
             raise HTTPException(status_code=404, detail=f"No data for {ticker}")
 
         strategy = _get_strategy()
-        strategy.calculate_indicators(df)
+        # F3: ticker별 EMA period override 전달 (VP 계산에 EMA 영향 없지만 일관성)
+        strategy.calculate_indicators(df, ticker=ticker)
         vp = strategy.build_volume_profile(df)
 
         if vp is None or (vp.poc == 0 and vp.vah == 0):
@@ -757,7 +768,10 @@ async def esf_backtest_result():
 # ══════════════════════════════════════════
 
 
-WALK_FORWARD_TICKERS = {"ES=F", "MES=F", "NQ=F", "MNQ=F", "CL=F", "GC=F"}
+WALK_FORWARD_TICKERS = {
+    "ES=F", "MES=F", "NQ=F", "MNQ=F",
+    "CL=F", "MCL=F", "GC=F", "MGC=F",
+}
 
 
 class WalkForwardRequest(BaseModel):

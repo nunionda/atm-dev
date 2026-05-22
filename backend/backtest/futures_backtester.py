@@ -67,6 +67,7 @@ class FuturesBacktester:
         is_micro: bool = False,
         progress_callback: Optional[Callable[[float], None]] = None,
         trend_adaptive: bool = False,
+        strategy_type: str = "sp500",
     ):
         # is_micro 설정 반영
         if is_micro:
@@ -74,7 +75,13 @@ class FuturesBacktester:
             config.sp500_futures.contract_multiplier = 5.0
 
         self.trend_adaptive = trend_adaptive
-        self.strategy = SP500FuturesStrategy(config, trend_adaptive=trend_adaptive)
+        self.strategy_type = strategy_type
+        # Strategy 주입 — 'sp500'(default) | 'turtle'
+        if strategy_type == "turtle":
+            from strategy.turtle_swing import TurtleSwingStrategy
+            self.strategy = TurtleSwingStrategy(config, trend_adaptive=trend_adaptive)
+        else:
+            self.strategy = SP500FuturesStrategy(config, trend_adaptive=trend_adaptive)
         self.fc = config.sp500_futures
         self.ticker = ticker
         self.start_date = start_date

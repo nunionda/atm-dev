@@ -114,8 +114,13 @@ export function useFuturesScalp(apiAnalysis: FuturesAnalysis | null): ScalpState
     setInputs(p => ({ ...p, asset }));
   }, []);
 
-  // Core calculation
-  const calc = useMemo(() => computeScalpAnalysis(inputs), [inputs]);
+  // Core calculation — backend direction을 SSOT로 사용 (NEUTRAL/undefined일 땐 Z-Score fallback).
+  const calc = useMemo(
+    () => computeScalpAnalysis(inputs, {
+      directionOverride: apiAnalysis?.direction as 'LONG' | 'SHORT' | 'NEUTRAL' | undefined,
+    }),
+    [inputs, apiAnalysis?.direction],
+  );
 
   const dataValid = dataMode === 'manual' || (dataMode === 'close' ? closes.length >= 3 : candles.length >= 3);
 

@@ -16,7 +16,9 @@ import ESFEquityCurve from '@components/esf/ESFEquityCurve';
 export function BacktestTabContent({ state }: { state: ReturnType<typeof useESFuturesScalp> }) {
   const {
     btMode, setBtMode, btPeriod, setBtPeriod, btEquity, setBtEquity,
-    btRunning, btProgress, btResult, btError, runBacktest, isMicro, setIsMicro,
+    btRunning, btProgress, btResult, btError, runBacktest,
+    intradayBtTicker, setIntradayBtTicker,
+    dailyBtTicker, setDailyBtTicker,
     dailyBtStartDate, setDailyBtStartDate, dailyBtEndDate, setDailyBtEndDate,
     dailyBtResult, dailyBtRunning, dailyBtError, dailyBtElapsed,
     runDailyBacktest, setDailyPreset,
@@ -69,10 +71,20 @@ export function BacktestTabContent({ state }: { state: ReturnType<typeof useESFu
               </select>
             </div>
             <div className="esfu-bt-field">
-              <label>Contract</label>
-              <select value={isMicro ? 'MES' : 'ES'} onChange={e => setIsMicro(e.target.value === 'MES')}>
-                <option value="MES">MES (Micro)</option>
-                <option value="ES">ES (E-mini)</option>
+              <label>Ticker</label>
+              <select value={intradayBtTicker} onChange={e => setIntradayBtTicker(e.target.value)}>
+                <optgroup label="Equity Index">
+                  <option value="ES=F">ES=F (E-mini S&P)</option>
+                  <option value="MES=F">MES=F (Micro)</option>
+                  <option value="NQ=F">NQ=F (E-mini Nasdaq)</option>
+                  <option value="MNQ=F">MNQ=F (Micro)</option>
+                </optgroup>
+                <optgroup label="Commodity">
+                  <option value="CL=F">CL=F (WTI Crude)</option>
+                  <option value="MCL=F">MCL=F (Micro)</option>
+                  <option value="GC=F">GC=F (Gold)</option>
+                  <option value="MGC=F">MGC=F (Micro)</option>
+                </optgroup>
               </select>
             </div>
             <div className="esfu-bt-field">
@@ -178,6 +190,23 @@ export function BacktestTabContent({ state }: { state: ReturnType<typeof useESFu
 
           <div className="esfu-bt-controls">
             <div className="esfu-bt-field">
+              <label>Ticker</label>
+              <select value={dailyBtTicker} onChange={e => setDailyBtTicker(e.target.value)}>
+                <optgroup label="Equity Index">
+                  <option value="ES=F">ES=F (E-mini S&P)</option>
+                  <option value="MES=F">MES=F (Micro)</option>
+                  <option value="NQ=F">NQ=F (E-mini Nasdaq)</option>
+                  <option value="MNQ=F">MNQ=F (Micro)</option>
+                </optgroup>
+                <optgroup label="Commodity">
+                  <option value="CL=F">CL=F (WTI Crude)</option>
+                  <option value="MCL=F">MCL=F (Micro)</option>
+                  <option value="GC=F">GC=F (Gold)</option>
+                  <option value="MGC=F">MGC=F (Micro)</option>
+                </optgroup>
+              </select>
+            </div>
+            <div className="esfu-bt-field">
               <label>Start Date</label>
               <input value={dailyBtStartDate} onChange={e => setDailyBtStartDate(e.target.value)} placeholder="YYYYMMDD" />
             </div>
@@ -188,12 +217,6 @@ export function BacktestTabContent({ state }: { state: ReturnType<typeof useESFu
             <div className="esfu-bt-field">
               <label>Equity ($)</label>
               <input type="number" value={btEquity} onChange={e => setBtEquity(Number(e.target.value))} />
-            </div>
-            <div className="esfu-bt-field">
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                <input type="checkbox" checked={isMicro} onChange={e => setIsMicro(e.target.checked)} />
-                Micro
-              </label>
             </div>
             <button className="esfu-bt-run" onClick={runDailyBacktest} disabled={dailyBtRunning}>
               {dailyBtRunning ? `Running... (${dailyBtElapsed}s)` : 'Run Daily Backtest'}

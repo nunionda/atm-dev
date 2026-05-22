@@ -259,7 +259,17 @@ const C_GRN_LIGHT = '#69f0ae';
 const C_RED_LIGHT = '#ff8a80';
 const C_NEUTRAL = '#78909c';
 
-export function computeScalpAnalysis(inputs: ScalpInputs): ScalpAnalysis {
+export interface ScalpComputeOptions {
+  /**
+   * Backend SSOT direction override.
+   * - 'LONG' / 'SHORT': isLong이 backend 결정에 따름 (SSOT 부합).
+   * - 'NEUTRAL' / undefined: 기존 Z-Score 기반 isLong fallback (mean-reversion).
+   * 사용 의도: ATR Stop & R:R Map이 backend ESF analyze 결정과 일관되게 표시되도록.
+   */
+  directionOverride?: 'LONG' | 'SHORT' | 'NEUTRAL';
+}
+
+export function computeScalpAnalysis(inputs: ScalpInputs, opts: ScalpComputeOptions = {}): ScalpAnalysis {
   const { asset, currentPrice, ma, stdDev, atr, atrMult, winRate, avgWin, avgLoss, slippage, commission, accountBalance, riskPct, spotPrice, futuresPrice } = inputs;
   const cfg = ASSETS[asset];
 
@@ -285,7 +295,11 @@ export function computeScalpAnalysis(inputs: ScalpInputs): ScalpAnalysis {
 
   // ATR Stop
   const atrStop = atr * atrMult;
-  const isLong = z <= 0;
+  // Backend SSOT 우선 — backend가 LONG/SHORT 명확하면 그 방향. NEUTRAL/undefined면 Z-Score fallback.
+  const isLong =
+    opts.directionOverride === 'LONG' ? true
+    : opts.directionOverride === 'SHORT' ? false
+    : z <= 0;
   const sl = isLong ? currentPrice - atrStop : currentPrice + atrStop;
   const riskPerContract = atrStop * cfg.ptVal;
 

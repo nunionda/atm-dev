@@ -30,7 +30,7 @@ import type { FuturesAnalysis } from '@lib/api';
 // Types
 // ══════════════════════════════════════════
 
-export type TabKey = 'strategy' | 'analysis' | 'decision' | 'backtest' | 'evolution';
+export type TabKey = 'strategy' | 'analysis' | 'decision' | 'backtest' | 'evolution' | 'proposals';
 export type BacktestMode = 'intraday' | 'daily' | 'walk-forward';
 
 export interface ESFuturesState {
@@ -82,6 +82,8 @@ export interface ESFuturesState {
   setBtOpen: (v: boolean) => void;
 
   // Daily backtest
+  dailyBtTicker: string;
+  setDailyBtTicker: (t: string) => void;
   dailyBtStartDate: string;
   setDailyBtStartDate: (v: string) => void;
   dailyBtEndDate: string;
@@ -93,10 +95,19 @@ export interface ESFuturesState {
   runDailyBacktest: () => void;
   setDailyPreset: (years: number) => void;
 
+  // Intraday backtest ticker selector
+  intradayBtTicker: string;
+  setIntradayBtTicker: (t: string) => void;
+
+  // Chart strategy mode (overlay 가시성 그룹)
+  strategyMode: 'turtle' | 'scalping' | 'all';
+  setStrategyMode: (m: 'turtle' | 'scalping' | 'all') => void;
+
   // Paper trading flow (Decision Engine GO → SimPosition)
   backendDirection: 'LONG' | 'SHORT' | 'NEUTRAL' | undefined;
   frontendDirection: 'LONG' | 'SHORT';
   directionAgrees: boolean;
+  disagreementReason: 'ok' | 'loading' | 'no_signal' | 'mismatch';
   canTrade: boolean;
   openPaperPositions: FuturesPaperPosition[];
   activePosition: FuturesPaperPosition | null;  // 현재 ticker의 OPEN 포지션
@@ -150,8 +161,15 @@ export function useESFuturesScalp(): ESFuturesState {
   const [btResult, setBtResult] = useState<ESFBacktestResult | null>(null);
   const [btError, setBtError] = useState<string | null>(null);
   const [btOpen, setBtOpen] = useState(false);
+  // Phase 4: Intraday backtest ticker selector (8종 지원)
+  const [intradayBtTicker, setIntradayBtTicker] = useState('ES=F');
+
+  // Chart strategy mode (overlay 가시성 — Turtle/Scalping/All)
+  const [strategyMode, setStrategyMode] = useState<'turtle' | 'scalping' | 'all'>('scalping');
 
   // Daily backtest
+  // Phase 2: Daily backtest ticker selector (8종 지원, effectiveTicker와 독립)
+  const [dailyBtTicker, setDailyBtTicker] = useState('ES=F');
   const [dailyBtStartDate, setDailyBtStartDate] = useState(() => {
     const d = new Date();
     d.setFullYear(d.getFullYear() - 2);
@@ -280,10 +298,19 @@ export function useESFuturesScalp(): ESFuturesState {
   const paperPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 방향 SSOT 게이트
+  // disagreementReason: 진입 차단 사유 차별화
+  //   - 'ok':         backend == frontend && backend != NEUTRAL → 진입 가능
+  //   - 'loading':    backend 응답 미수신 (analysis === null) → 데이터 대기
+  //   - 'no_signal':  backend == NEUTRAL → backend가 진입 권유 안 함 (Grade NO_TRADE 등)
+  //   - 'mismatch':   backend와 frontend가 LONG/SHORT 양방향 충돌 → 실제 분석기 이견
   const backendDirection = analysis?.direction as 'LONG' | 'SHORT' | 'NEUTRAL' | undefined;
   const frontendDirection: 'LONG' | 'SHORT' = scalp.calc.isLong ? 'LONG' : 'SHORT';
-  const directionAgrees =
-    backendDirection === frontendDirection && backendDirection !== 'NEUTRAL';
+  const disagreementReason: 'ok' | 'loading' | 'no_signal' | 'mismatch' =
+    backendDirection === undefined ? 'loading'
+      : backendDirection === 'NEUTRAL' ? 'no_signal'
+      : backendDirection === frontendDirection ? 'ok'
+      : 'mismatch';
+  const directionAgrees = disagreementReason === 'ok';
   const canTrade =
     scalp.calc.verdict === 'GO' && directionAgrees && !!analysis?.signal_active;
 
@@ -394,19 +421,22 @@ export function useESFuturesScalp(): ESFuturesState {
     }
   }, [wfTicker, wfIsMicro]);
 
-  // Intraday backtest
+  // Phase 4: Intraday backtest — intradayBtTicker 사용 (effectiveTicker와 독립).
+  // is_micro는 ticker prefix(M*=F)에서 자동 도출 — ES=F=full, MES=F=micro 등.
   const runBacktest = useCallback(async () => {
     setBtRunning(true);
     setBtResult(null);
     setBtError(null);
     setBtProgress(0);
 
+    const btIsMicro = ['MES=F', 'MNQ=F', 'MCL=F', 'MGC=F'].includes(intradayBtTicker);
+
     try {
       await triggerESFBacktest({
-        ticker: effectiveTicker,
+        ticker: intradayBtTicker,
         period: btPeriod,
         initial_equity: btEquity,
-        is_micro: isMicro,
+        is_micro: btIsMicro,
       });
 
       pollRef.current = setInterval(async () => {
@@ -429,7 +459,7 @@ export function useESFuturesScalp(): ESFuturesState {
       setBtError(e instanceof Error ? e.message : 'Failed to start backtest');
       setBtRunning(false);
     }
-  }, [effectiveTicker, btPeriod, btEquity, isMicro]);
+  }, [intradayBtTicker, btPeriod, btEquity]);
 
   // Daily backtest
   const setDailyPreset = useCallback((years: number) => {
@@ -442,14 +472,16 @@ export function useESFuturesScalp(): ESFuturesState {
     setDailyBtEndDate(end);
   }, []);
 
+  // Phase 2: Daily backtest — dailyBtTicker 사용 (effectiveTicker와 독립).
   const runDailyBacktest = useCallback(async () => {
     setDailyBtRunning(true);
     setDailyBtResult(null);
     setDailyBtError(null);
     setDailyBtElapsed(0);
     dailyTimerRef.current = setInterval(() => setDailyBtElapsed(s => s + 1), 1000);
+    const dailyIsMicro = ['MES=F', 'MNQ=F', 'MCL=F', 'MGC=F'].includes(dailyBtTicker);
     try {
-      const result = await triggerFuturesBacktest(effectiveTicker, dailyBtStartDate, dailyBtEndDate, btEquity, isMicro);
+      const result = await triggerFuturesBacktest(dailyBtTicker, dailyBtStartDate, dailyBtEndDate, btEquity, dailyIsMicro);
       if (result) {
         setDailyBtResult(result);
       } else {
@@ -461,7 +493,7 @@ export function useESFuturesScalp(): ESFuturesState {
       setDailyBtRunning(false);
       if (dailyTimerRef.current) { clearInterval(dailyTimerRef.current); dailyTimerRef.current = null; }
     }
-  }, [effectiveTicker, dailyBtStartDate, dailyBtEndDate, btEquity, isMicro]);
+  }, [dailyBtTicker, dailyBtStartDate, dailyBtEndDate, btEquity]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -490,14 +522,18 @@ export function useESFuturesScalp(): ESFuturesState {
     btResult, btError,
     runBacktest,
     btOpen, setBtOpen,
+    dailyBtTicker, setDailyBtTicker,
     dailyBtStartDate, setDailyBtStartDate,
     dailyBtEndDate, setDailyBtEndDate,
     dailyBtResult, dailyBtRunning, dailyBtError, dailyBtElapsed,
     runDailyBacktest, setDailyPreset,
+    intradayBtTicker, setIntradayBtTicker,
+    strategyMode, setStrategyMode,
     // Paper trading
     backendDirection,
     frontendDirection,
     directionAgrees,
+    disagreementReason,
     canTrade,
     openPaperPositions,
     activePosition,

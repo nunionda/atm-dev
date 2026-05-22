@@ -748,6 +748,7 @@ stock_theory/                     # 트레이딩 이론 문서 (17개 파일)
 | `kospi200_sim_report.md` | 옵션 전략 백테스트 리포트 (Black-Scholes 시뮬레이션) |
 | `optionCalculator.md` | 옵션 계산기 아키텍처 (BS forward/inverse/Greeks) |
 | `BlackScholesEquation.md` | Black-Scholes 방정식 레퍼런스 |
+| `futuresOverlays.md` | /futures 차트 overlay 11개 × 4-Layer scoring 매핑 + 자산별 EMA period override |
 
 ---
 

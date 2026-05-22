@@ -18,6 +18,7 @@ export interface ScalpDecisionEngineProps {
   // Paper trading flow
   backendDirection?: 'LONG' | 'SHORT' | 'NEUTRAL';
   directionAgrees?: boolean;
+  disagreementReason?: 'ok' | 'loading' | 'no_signal' | 'mismatch';
   canTrade?: boolean;
   activePosition?: FuturesPaperPosition | null;
   placingPaperOrder?: boolean;
@@ -27,7 +28,7 @@ export interface ScalpDecisionEngineProps {
 
 export function ScalpDecisionEngine({
   scalp, magneticMA, vwatrZone,
-  backendDirection, directionAgrees, canTrade,
+  backendDirection, directionAgrees, disagreementReason, canTrade,
   activePosition, placingPaperOrder, paperOrderError, onPlacePaperTrade,
 }: ScalpDecisionEngineProps) {
   const { dataMode, setDataMode, closeText, setCloseText, ohlcText, setOhlcText,
@@ -35,18 +36,39 @@ export function ScalpDecisionEngine({
     setInput, setAsset, calc } = scalp;
 
   const frontendDir: 'LONG' | 'SHORT' = calc.isLong ? 'LONG' : 'SHORT';
-  // 방향 disagreement면 effective verdict는 NO ENTRY로 강제
-  const effectiveVerdict =
-    backendDirection !== undefined && directionAgrees === false
-      ? 'NO ENTRY (방향 불일치)'
-      : calc.verdict === 'GO' ? 'GO' : calc.verdict === 'CAUTION' ? 'CAUTION' : 'NO ENTRY';
 
-  const vc = effectiveVerdict === 'GO' ? 'go' : effectiveVerdict === 'CAUTION' ? 'caution' : 'no-entry';
+  // 사유별 verdict 메시지 (no_signal / mismatch / loading 분리)
+  // - no_signal: backend NEUTRAL (Grade NO_TRADE 등) — 백엔드가 진입 권유 안 함. 프론트의 SHORT/LONG은 강제 추정값.
+  // - mismatch:  backend LONG/SHORT vs frontend 반대 — 두 분석기 진짜 충돌.
+  // - loading:   backend 응답 미수신.
+  // - ok / undefined: 정상 흐름 (calc.verdict 그대로 적용).
+  let effectiveVerdict: string;
+  if (disagreementReason === 'no_signal') {
+    effectiveVerdict = 'NO ENTRY (backend NEUTRAL)';
+  } else if (disagreementReason === 'mismatch') {
+    effectiveVerdict = `NO ENTRY (방향 충돌: BACK ${backendDirection} ≠ FRONT ${frontendDir})`;
+  } else if (disagreementReason === 'loading') {
+    effectiveVerdict = 'NO ENTRY (backend 응답 대기)';
+  } else {
+    effectiveVerdict = calc.verdict === 'GO' ? 'GO' : calc.verdict === 'CAUTION' ? 'CAUTION' : 'NO ENTRY';
+  }
 
+  // 색상 — no_signal/loading은 회색(노란계열), mismatch만 빨강 강조
+  const vc =
+    effectiveVerdict === 'GO' ? 'go'
+    : effectiveVerdict === 'CAUTION' ? 'caution'
+    : disagreementReason === 'mismatch' ? 'no-entry'
+    : 'caution';  // no_signal/loading은 caution 톤 — 진짜 충돌 아님
+
+  // Agreement 배지 — 사유별 표시
   const agreementBadge = backendDirection !== undefined
-    ? (directionAgrees
+    ? (disagreementReason === 'ok'
         ? <span style={{ color: '#00e676', fontWeight: 700 }}> AGREE ✓</span>
-        : <span style={{ color: '#ff1744', fontWeight: 700 }}> CONFLICT ✗</span>)
+        : disagreementReason === 'no_signal'
+          ? <span style={{ color: '#fdd835', fontWeight: 700 }}> NO SIGNAL ⓘ</span>
+          : disagreementReason === 'mismatch'
+            ? <span style={{ color: '#ff1744', fontWeight: 700 }}> CONFLICT ✗</span>
+            : <span style={{ color: '#888', fontWeight: 700 }}> LOADING…</span>)
     : null;
 
   const [contracts, setContracts] = useState(1);
@@ -96,7 +118,14 @@ export function ScalpDecisionEngine({
               <div style={{ flex: 1, fontSize: 12, color: '#aaa' }}>
                 {canTrade
                   ? <span style={{ color: '#00e676' }}>✓ Ready to place {frontendDir} paper trade</span>
-                  : <span>Cannot place: {!directionAgrees ? 'direction conflict' : !calc.verdict || calc.verdict !== 'GO' ? `verdict=${calc.verdict}` : 'signal not active'}</span>
+                  : <span>Cannot place: {
+                      disagreementReason === 'no_signal' ? 'backend NEUTRAL (Grade NO_TRADE) — 진입 신호 없음'
+                      : disagreementReason === 'mismatch' ? `direction conflict (BACK ${backendDirection} ≠ FRONT ${frontendDir})`
+                      : disagreementReason === 'loading' ? 'backend 응답 대기 중'
+                      : !directionAgrees ? 'direction not aligned'
+                      : !calc.verdict || calc.verdict !== 'GO' ? `verdict=${calc.verdict}`
+                      : 'signal not active'
+                    }</span>
                 }
               </div>
               <label style={{ fontSize: 12, color: '#888' }}>

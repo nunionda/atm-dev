@@ -168,12 +168,16 @@ class ESFIntradayStrategy:
     # 1. 기술적 지표 계산
     # ══════════════════════════════════════════
 
-    def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
+    def calculate_indicators(self, df: pd.DataFrame, ticker: Optional[str] = None) -> pd.DataFrame:
         """
         OHLCV DataFrame에 인트라데이 매매용 기술적 지표를 추가한다.
 
+        F3: ticker 인자 제공 시 intraday_ticker_specs.INTRADAY_SPECS에서 EMA period
+        override 조회 (ema_fast/mid/slow). 미지정 또는 spec 없으면 self.fc.ema_* fallback.
+        commodity (CL/GC)는 짧은 pit 세션 보정으로 5/13/34 Fibonacci 사용.
+
         추가 컬럼:
-          이동평균: ema_fast(8), ema_mid(21), ema_slow(55)
+          이동평균: ema_fast, ema_mid, ema_slow (ticker별 period)
           MACD: macd_line, macd_signal, macd_hist
           RSI: rsi
           볼린저밴드: bb_upper, bb_lower, bb_middle, bb_width, bb_squeeze_ratio
@@ -183,7 +187,19 @@ class ESFIntradayStrategy:
           거래량: volume_ma, volume_ratio
           OBV: obv, obv_ema_fast, obv_ema_slow
         """
-        min_len = max(self.fc.ema_slow, self.fc.macd_slow + self.fc.macd_signal, self.fc.zscore_window)
+        # F3: ticker별 EMA period override 조회
+        ema_fast_p = self.fc.ema_fast
+        ema_mid_p = self.fc.ema_mid
+        ema_slow_p = self.fc.ema_slow
+        if ticker:
+            from strategy.intraday_ticker_specs import get_intraday_spec
+            spec = get_intraday_spec(ticker)
+            if spec is not None:
+                ema_fast_p = spec.get("ema_fast", ema_fast_p)
+                ema_mid_p = spec.get("ema_mid", ema_mid_p)
+                ema_slow_p = spec.get("ema_slow", ema_slow_p)
+
+        min_len = max(ema_slow_p, self.fc.macd_slow + self.fc.macd_signal, self.fc.zscore_window)
         if df.empty or len(df) < min_len:
             return df
 
@@ -192,10 +208,10 @@ class ESFIntradayStrategy:
         lo = df["low"].astype(float)
         v = df["volume"].astype(float)
 
-        # ── EMA (8, 21, 55) ──
-        df["ema_fast"] = c.ewm(span=self.fc.ema_fast, adjust=False).mean()
-        df["ema_mid"] = c.ewm(span=self.fc.ema_mid, adjust=False).mean()
-        df["ema_slow"] = c.ewm(span=self.fc.ema_slow, adjust=False).mean()
+        # ── EMA (ticker별 period) ──
+        df["ema_fast"] = c.ewm(span=ema_fast_p, adjust=False).mean()
+        df["ema_mid"] = c.ewm(span=ema_mid_p, adjust=False).mean()
+        df["ema_slow"] = c.ewm(span=ema_slow_p, adjust=False).mean()
 
         # ── MACD (12, 26, 9) ──
         ema_fast_macd = c.ewm(span=self.fc.macd_fast, adjust=False).mean()
@@ -1326,6 +1342,15 @@ class ESFIntradayStrategy:
             score += 4.0
             signals.append("VOL_ABOVE_AVG")
 
+        # ── F2: BB squeeze breakout 보너스 (max +3) ──
+        # BB squeeze ratio < 0.75 (매우 압축) AND vol_ratio >= 1.5 (서지) 동시 발생 →
+        # 변동성 수축 후 폭발 가능성. 이전 ESF에서는 bb_squeeze_ratio가 계산되지만 미사용.
+        # max_score(25) cap이 line ~1379에서 보장되어 다른 신호 합산 시 잘림.
+        bb_sq = float(curr.get("bb_squeeze_ratio", 1.0))
+        if bb_sq < 0.75 and vol_ratio >= 1.5:
+            score += 3.0
+            signals.append("BB_SQUEEZE_BREAKOUT")
+
         # ── OBV 추세 (max 7) ──
         obv_fast = float(curr.get("obv_ema_fast", 0))
         obv_slow = float(curr.get("obv_ema_slow", 0))
@@ -1383,10 +1408,12 @@ class ESFIntradayStrategy:
     # ══════════════════════════════════════════
 
     def generate_intraday_signal(
-        self, df: pd.DataFrame, equity: float = 50000.0,
+        self, df: pd.DataFrame, equity: float = 50000.0, ticker: Optional[str] = None,
     ) -> Optional[FuturesSignal]:
         """
         인트라데이 시그널을 생성한다.
+
+        F3: ticker 인자 제공 시 ticker별 EMA period override 적용 (calculate_indicators 경유).
 
         파이프라인:
           1. 지표 계산
@@ -1415,7 +1442,7 @@ class ESFIntradayStrategy:
         if df.empty or len(df) < min_len:
             return None
 
-        df = self.calculate_indicators(df.copy())
+        df = self.calculate_indicators(df.copy(), ticker=ticker)
         if df.empty:
             return None
 
@@ -2011,7 +2038,7 @@ class ESFIntradayStrategy:
             "regime": regime,
         }
 
-    def get_regime_info(self, df: pd.DataFrame) -> Dict:
+    def get_regime_info(self, df: pd.DataFrame, ticker: Optional[str] = None) -> Dict:
         """
         현재 레짐 정보 반환 (API 노출용).
 
@@ -2027,7 +2054,7 @@ class ESFIntradayStrategy:
                 "components": {},
             }
 
-        df_calc = self.calculate_indicators(df.copy())
+        df_calc = self.calculate_indicators(df.copy(), ticker=ticker)
         result = detect_regime(df_calc)
         return {
             "regime": result.regime,

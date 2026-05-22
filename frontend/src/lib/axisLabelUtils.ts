@@ -25,16 +25,31 @@ export function updateAxisLabels(
   overlay: HTMLDivElement,
   chartHeight: number,
 ): void {
-  const MIN_GAP = 16;
+  const MIN_GAP = 18;
   const LABEL_H = 14;
+  const MERGE_GAP_PX = 6;  // 6px 이내 라벨은 단일 라벨로 합침
 
-  const mapped = items
+  // Step 1: 좌표 변환 + 가시 범위 필터
+  const rawMapped = items
     .map((item) => {
       const y = series.priceToCoordinate(item.price);
-      return { ...item, origY: (y ?? -1) as number, labelY: (y ?? -1) as number };
+      return { ...item, origY: (y ?? -1) as number };
     })
     .filter((r) => r.origY >= 0 && r.origY <= chartHeight)
     .sort((a, b) => a.origY - b.origY);
+
+  // Step 2: 가까운 라벨 merge — 같은 가격대 (예: Mag MA + R1) 결합
+  const merged: { price: number; text: string; color: string; origY: number; labelY: number }[] = [];
+  for (const r of rawMapped) {
+    const last = merged[merged.length - 1];
+    if (last && Math.abs(r.origY - last.origY) < MERGE_GAP_PX) {
+      // 합치기 — 텍스트 결합 (slash 구분), 우선 라벨 색 유지
+      last.text = `${last.text}/${r.text}`;
+      continue;
+    }
+    merged.push({ ...r, labelY: r.origY });
+  }
+  const mapped = merged;
 
   // Downward pass — push overlapping labels down
   for (let i = 1; i < mapped.length; i++) {

@@ -114,7 +114,13 @@ class IntradayMetrics:
 # ──────────────────────────────────────────────
 
 class IntradayBacktester:
-    """ES-F 인트라데이 백테스터 — 세션 기반 15m 바 시뮬레이션."""
+    """인트라데이 백테스터 — 세션 기반 15m 바 시뮬레이션.
+
+    Phase 3 (4-ticker 확장): ES/MES/NQ/MNQ/CL/MCL/GC/MGC 8종 지원.
+    multiplier/tick_size/RTH/margin은 backend/strategy/intraday_ticker_specs.py
+    의 INTRADAY_SPECS에서 ticker별로 조회. spec 미정의 ticker는 ESFIntradayConfig
+    값으로 fallback.
+    """
 
     def __init__(
         self,
@@ -133,20 +139,35 @@ class IntradayBacktester:
         self.is_micro = is_micro
         self.progress_callback = progress_callback
 
-        # 계약 승수
-        if is_micro:
-            self.multiplier = 5.0   # MES = $5/pt
+        # Phase 3: per-ticker spec 조회 (없으면 ic.* fallback)
+        from strategy.intraday_ticker_specs import get_intraday_spec
+        spec = get_intraday_spec(ticker)
+        if spec is not None:
+            self.multiplier = spec["multiplier"]
+            self.tick_size = spec["tick_size"]
+            self.rth_start = spec["rth_start"]
+            self.rth_end = spec["rth_end"]
+            self.slippage_per_contract = spec["slippage_ticks"] * self.tick_size * self.multiplier
+            self.commission_per_contract = spec["commission_per_contract"]
+            self.initial_margin = spec["initial_margin"]
+            self.maintenance_margin = spec["maintenance_margin"]
+            # F3: ticker별 EMA period override (commodity Fibonacci 단축 등)
+            self.ema_fast = spec.get("ema_fast", self.ic.ema_fast)
+            self.ema_mid = spec.get("ema_mid", self.ic.ema_mid)
+            self.ema_slow = spec.get("ema_slow", self.ic.ema_slow)
         else:
-            self.multiplier = self.ic.contract_multiplier  # ES = $50/pt
-
-        # 거래비용 (편도)
-        self.tick_size = 0.25
-        self.slippage_per_contract = self.ic.slippage_ticks * self.tick_size * self.multiplier
-        self.commission_per_contract = self.ic.commission_per_contract
-
-        # 증거금
-        self.initial_margin = self.ic.initial_margin
-        self.maintenance_margin = self.ic.maintenance_margin
+            # Backward-compat fallback for tickers not in spec table.
+            self.multiplier = 5.0 if is_micro else self.ic.contract_multiplier
+            self.tick_size = 0.25  # ES tick (legacy default)
+            self.rth_start = self.ic.rth_start
+            self.rth_end = self.ic.rth_end
+            self.slippage_per_contract = self.ic.slippage_ticks * self.tick_size * self.multiplier
+            self.commission_per_contract = self.ic.commission_per_contract
+            self.initial_margin = self.ic.initial_margin
+            self.maintenance_margin = self.ic.maintenance_margin
+            self.ema_fast = self.ic.ema_fast
+            self.ema_mid = self.ic.ema_mid
+            self.ema_slow = self.ic.ema_slow
 
         # 전략 (lazy import — 파일이 아직 없을 수 있음)
         self._strategy = None
@@ -208,9 +229,12 @@ class IntradayBacktester:
         return df
 
     def _filter_rth(self, df: pd.DataFrame) -> pd.DataFrame:
-        """RTH(Regular Trading Hours) 봉만 필터링 (09:30-16:00 ET)."""
-        rth_start_h, rth_start_m = map(int, self.ic.rth_start.split(":"))
-        rth_end_h, rth_end_m = map(int, self.ic.rth_end.split(":"))
+        """RTH(Regular Trading Hours) 봉만 필터링. Ticker별 세션 시간은 spec 기반.
+
+        ES/NQ: 09:30-16:00 ET / CL: 09:00-14:30 ET / GC: 08:20-13:30 ET.
+        """
+        rth_start_h, rth_start_m = map(int, self.rth_start.split(":"))
+        rth_end_h, rth_end_m = map(int, self.rth_end.split(":"))
 
         start_minutes = rth_start_h * 60 + rth_start_m
         end_minutes = rth_end_h * 60 + rth_end_m
@@ -245,14 +269,18 @@ class IntradayBacktester:
     # ══════════════════════════════════════════
 
     def _calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """인트라데이 지표 계산 (전체 데이터에 대해 한 번만)."""
-        if len(df) < max(self.ic.ema_slow, self.ic.atr_period, self.ic.bb_period) + 5:
+        """인트라데이 지표 계산 (전체 데이터에 대해 한 번만).
+
+        F3: EMA period는 인스턴스 attr (self.ema_fast/mid/slow) 사용 — ticker spec 기반.
+        ATR/BB 등 다른 period는 self.ic.* 유지 (calibration 미실시).
+        """
+        if len(df) < max(self.ema_slow, self.ic.atr_period, self.ic.bb_period) + 5:
             return df
 
-        # EMA
-        df["ema_fast"] = df["close"].ewm(span=self.ic.ema_fast, adjust=False).mean()
-        df["ema_mid"] = df["close"].ewm(span=self.ic.ema_mid, adjust=False).mean()
-        df["ema_slow"] = df["close"].ewm(span=self.ic.ema_slow, adjust=False).mean()
+        # EMA (ticker별 period)
+        df["ema_fast"] = df["close"].ewm(span=self.ema_fast, adjust=False).mean()
+        df["ema_mid"] = df["close"].ewm(span=self.ema_mid, adjust=False).mean()
+        df["ema_slow"] = df["close"].ewm(span=self.ema_slow, adjust=False).mean()
 
         # ATR
         high_low = df["high"] - df["low"]
@@ -323,6 +351,7 @@ class IntradayBacktester:
             return strategy.generate_intraday_signal(
                 df=df_slice,
                 equity=equity,
+                ticker=self.ticker,  # F3: ticker별 EMA period override 전달
             )
 
         # ── Fallback: 내장 간이 시그널 로직 ──

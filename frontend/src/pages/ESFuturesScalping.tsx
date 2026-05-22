@@ -38,6 +38,7 @@ import { RRVis } from '@components/esf/scalping/RRVis';
 import { ScalpDecisionEngine } from '@components/esf/scalping/ScalpDecisionEngine';
 import { PaperPositionsPanel } from '@components/esf/scalping/PaperPositionsPanel';
 import { BacktestTabContent } from '@components/esf/scalping/BacktestTabContent';
+import { StrategyProposalsPanel } from '@components/esf/scalping/StrategyProposalsPanel';
 
 import './ESFuturesScalping.css';
 // Reuse scalp section CSS from FuturesTrading
@@ -57,10 +58,11 @@ export function ESFuturesScalping() {
     chartInterval, setChartInterval, chartPeriod, setChartPeriod,
     activeSubcharts, setActiveSubcharts,
     refresh, scalp,
-    backendDirection, directionAgrees, canTrade,
+    backendDirection, directionAgrees, disagreementReason, canTrade,
     openPaperPositions, activePosition, paperRisk,
     placingPaperOrder, paperOrderError,
     placePaperTrade, closePaperTrade,
+    strategyMode, setStrategyMode,
   } = state;
 
   const journal = useESFJournal(effectiveTicker);
@@ -69,6 +71,7 @@ export function ESFuturesScalping() {
     { key: 'strategy', label: "Today's Strategy" },
     { key: 'analysis', label: 'Live Analysis' },
     { key: 'decision', label: 'Decision Engine' },
+    { key: 'proposals', label: '📋 4-Ticker Proposals' },
     { key: 'backtest', label: 'Backtest' },
     { key: 'evolution', label: 'Evolution' },
   ];
@@ -349,6 +352,40 @@ export function ESFuturesScalping() {
                   ))}
                 </div>
               </div>
+              {/* Strategy 프리셋 토글 — 차트 overlay 가시성 그룹 */}
+              <div style={{
+                display: 'flex', gap: 8, padding: '8px 12px',
+                background: 'rgba(255,255,255,0.02)',
+                borderTop: '1px solid rgba(255,255,255,0.04)',
+                alignItems: 'center', flexWrap: 'wrap',
+              }}>
+                <span style={{ fontSize: 11, color: '#888', fontFamily: "'IBM Plex Mono', monospace", marginRight: 4 }}>
+                  STRATEGY:
+                </span>
+                {([
+                  { key: 'scalping', label: 'Scalping', desc: 'EMA8/21 + Mag MA + VWATR + VP + BB' },
+                  { key: 'turtle',   label: 'Turtle',   desc: 'EMA55 + POC + VAH/VAL (스윙)' },
+                  { key: 'all',      label: 'All',      desc: '모든 overlay (11개)' },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setStrategyMode(opt.key)}
+                    title={opt.desc}
+                    style={{
+                      padding: '4px 12px', fontSize: 11, fontWeight: 600,
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      cursor: 'pointer',
+                      borderRadius: 4,
+                      border: '1px solid ' + (strategyMode === opt.key ? '#3b82f6' : 'rgba(255,255,255,0.1)'),
+                      background: strategyMode === opt.key ? 'rgba(59,130,246,0.15)' : 'transparent',
+                      color: strategyMode === opt.key ? '#60a5fa' : '#888',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
               <ESFIntradayChart
                 candles={candles}
                 volumeProfile={volumeProfile ? {
@@ -367,6 +404,7 @@ export function ESFuturesScalping() {
                 subcharts={activeSubcharts}
                 height={380}
                 ticker={effectiveTicker}
+                strategyMode={strategyMode}
               />
             </div>
           ) : (
@@ -383,6 +421,7 @@ export function ESFuturesScalping() {
             vwatrZone={analysis?.vwatr_zones?.[0] ?? null}
             backendDirection={backendDirection}
             directionAgrees={directionAgrees}
+            disagreementReason={disagreementReason}
             canTrade={canTrade}
             activePosition={activePosition}
             placingPaperOrder={placingPaperOrder}
@@ -398,6 +437,11 @@ export function ESFuturesScalping() {
             disabled={placingPaperOrder}
           />
         </div>
+      )}
+
+      {/* ── Tab: 4-Ticker Proposals ── */}
+      {activeTab === 'proposals' && (
+        <StrategyProposalsPanel />
       )}
 
       {/* ── Tab 4: Backtest ── */}

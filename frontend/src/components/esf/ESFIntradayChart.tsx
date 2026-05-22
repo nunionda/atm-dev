@@ -41,6 +41,14 @@ interface SubchartState {
   adx: boolean;
 }
 
+/**
+ * 전략 모드 — 차트 overlay 가시성 그룹.
+ * - turtle: 스윙·추세 추종 (EMA55 + POC + VAH/VAL 만)
+ * - scalping: 단타·AMT (EMA8/21 + Mag MA + VWATR + POC/VAH/VAL/LVN + BB)
+ * - all: 모든 overlay 표시 (이전 default)
+ */
+export type StrategyMode = 'turtle' | 'scalping' | 'all';
+
 interface ESFIntradayChartProps {
   candles: ESFCandle[];
   volumeProfile?: {
@@ -54,6 +62,31 @@ interface ESFIntradayChartProps {
   subcharts?: SubchartState;
   height?: number;
   ticker?: string;
+  strategyMode?: StrategyMode;
+}
+
+// Strategy → overlay 가시성 매핑 (docs/stock_theory/futuresOverlays.md 기준)
+function getOverlayVisibility(mode: StrategyMode) {
+  if (mode === 'turtle') {
+    return {
+      ema8: false, ema21: false, ema55: true,
+      bb: false, magMA: false, vwatr: false,
+      poc: true, vah: true, val: true, lvn: false,
+    };
+  }
+  if (mode === 'scalping') {
+    return {
+      ema8: true, ema21: true, ema55: false,
+      bb: true, magMA: true, vwatr: true,
+      poc: true, vah: true, val: true, lvn: true,
+    };
+  }
+  // 'all'
+  return {
+    ema8: true, ema21: true, ema55: true,
+    bb: true, magMA: true, vwatr: true,
+    poc: true, vah: true, val: true, lvn: true,
+  };
 }
 
 // Rolling average helper
@@ -146,7 +179,9 @@ export default function ESFIntradayChart({
   subcharts = { rsi: true, macd: true, zscore: false, atr: true, adx: true },
   height = 420,
   ticker = 'ES=F',
+  strategyMode = 'scalping',
 }: ESFIntradayChartProps) {
+  const overlayVis = getOverlayVisibility(strategyMode);
   const mainRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const rsiRef = useRef<HTMLDivElement>(null);
@@ -195,8 +230,8 @@ export default function ESFIntradayChart({
       height: chartHeight,
       rightPriceScale: {
         borderColor: 'rgba(255, 255, 255, 0.06)',
-        scaleMargins: { top: 0.08, bottom: 0.22 },
-        minimumWidth: 100,
+        scaleMargins: { top: 0.10, bottom: 0.20 },  // 위/아래 약간 여백 추가
+        minimumWidth: 120,                          // 우측 가격 라벨 공간 확대
       },
       watermark: {
         visible: true,
@@ -229,14 +264,14 @@ export default function ESFIntradayChart({
     });
     mainSeries.setData(chartData);
 
-    // ── EMA Overlays ──
+    // ── EMA Overlays (가독성: EMA8 강조, EMA21 보조) ──
     const emaColors = [
-      { key: 'ema_fast', color: '#f59e0b', label: 'EMA8' },
-      { key: 'ema_mid', color: '#3b82f6', label: 'EMA21' },
-      { key: 'ema_slow', color: '#a855f7', label: 'EMA55' },
+      { key: 'ema_fast', color: '#f59e0b',                 label: 'EMA8',  lineWidth: 2,  visible: overlayVis.ema8 },
+      { key: 'ema_mid',  color: 'rgba(59, 130, 246, 0.7)', label: 'EMA21', lineWidth: 1,  visible: overlayVis.ema21 },
+      { key: 'ema_slow', color: '#a855f7',                 label: 'EMA55', lineWidth: 2,  visible: overlayVis.ema55 },
     ] as const;
 
-    emaColors.forEach(({ key, color }) => {
+    emaColors.filter((e) => e.visible).forEach(({ key, color, lineWidth }) => {
       const emaData = dedupByTime(
         candles
           .filter((c) => (c as any)[key] != null)
@@ -245,7 +280,7 @@ export default function ESFIntradayChart({
       if (emaData.length > 0) {
         const emaSeries = chart.addLineSeries({
           color,
-          lineWidth: 2,
+          lineWidth: lineWidth as 1 | 2 | 3,
           crosshairMarkerVisible: false,
           lastValueVisible: false,
           priceLineVisible: false,
@@ -254,101 +289,82 @@ export default function ESFIntradayChart({
       }
     });
 
-    // ── Bollinger Bands ──
-    const bbUpper = dedupByTime(
-      candles.filter((c) => c.bb_hband != null).map((c) => ({ time: parseTime(c.datetime), value: c.bb_hband! }))
-    );
-    const bbLower = dedupByTime(
-      candles.filter((c) => c.bb_lband != null).map((c) => ({ time: parseTime(c.datetime), value: c.bb_lband! }))
-    );
-    if (bbUpper.length > 0) {
-      const bbUpSeries = chart.addLineSeries({
-        color: 'rgba(99, 102, 241, 0.3)',
-        lineWidth: 1,
-        lineStyle: 2,
-        crosshairMarkerVisible: false,
-        lastValueVisible: false,
-        priceLineVisible: false,
-      });
-      bbUpSeries.setData(bbUpper);
-    }
-    if (bbLower.length > 0) {
-      const bbLowSeries = chart.addLineSeries({
-        color: 'rgba(99, 102, 241, 0.3)',
-        lineWidth: 1,
-        lineStyle: 2,
-        crosshairMarkerVisible: false,
-        lastValueVisible: false,
-        priceLineVisible: false,
-      });
-      bbLowSeries.setData(bbLower);
-    }
-
-    // ── Magnetic MA (가장 자력 강한 MA) ──
-    const magneticData = dedupByTime(
-      candles
-        .filter((c) => c.magnetic_ma != null)
-        .map((c) => ({ time: parseTime(c.datetime), value: c.magnetic_ma! }))
-    );
-    if (magneticData.length > 0) {
-      const magneticSeries = chart.addLineSeries({
-        color: '#ff6b6b',
-        lineWidth: 2,
-        lineStyle: 0,
-        crosshairMarkerVisible: true,
-        lastValueVisible: false, // overlay handles label
-        priceLineVisible: false,
-        title: '',
-      });
-      magneticSeries.setData(magneticData);
-      const lastMag = magneticData[magneticData.length - 1]?.value;
-      if (lastMag) axisLabelItems.push({ price: lastMag, text: 'Mag MA', color: '#c0392b' });
+    // ── Bollinger Bands (가독성: opacity 0.18 → 0.12, 매우 미묘) ──
+    if (overlayVis.bb) {
+      const bbUpper = dedupByTime(
+        candles.filter((c) => c.bb_hband != null).map((c) => ({ time: parseTime(c.datetime), value: c.bb_hband! }))
+      );
+      const bbLower = dedupByTime(
+        candles.filter((c) => c.bb_lband != null).map((c) => ({ time: parseTime(c.datetime), value: c.bb_lband! }))
+      );
+      if (bbUpper.length > 0) {
+        const bbUpSeries = chart.addLineSeries({
+          color: 'rgba(99, 102, 241, 0.12)',
+          lineWidth: 1,
+          lineStyle: 3, // dotted (덜 시각적 부담)
+          crosshairMarkerVisible: false,
+          lastValueVisible: false,
+          priceLineVisible: false,
+        });
+        bbUpSeries.setData(bbUpper);
+      }
+      if (bbLower.length > 0) {
+        const bbLowSeries = chart.addLineSeries({
+          color: 'rgba(99, 102, 241, 0.12)',
+          lineWidth: 1,
+          lineStyle: 3,
+          crosshairMarkerVisible: false,
+          lastValueVisible: false,
+          priceLineVisible: false,
+        });
+        bbLowSeries.setData(bbLower);
+      }
     }
 
-    // ── VWATR S/R Zones (top 2 SUPPORT + top 2 RESISTANCE) ──
-    if (vwatrZones && vwatrZones.length > 0) {
-      // strength 순으로 이미 정렬됨 — 타입별 최대 2개씩 선택
-      const supZones = vwatrZones.filter((z) => z.zone_type === 'SUPPORT').slice(0, 2);
-      const resZones = vwatrZones.filter((z) => z.zone_type === 'RESISTANCE').slice(0, 2);
-      const topZones = [...supZones, ...resZones];
-      // 타입별 독립 카운터 (S1/S2, R1/R2)
-      const typeCounter: Record<string, number> = { SUPPORT: 0, RESISTANCE: 0 };
+    // ── Magnetic MA (strategyMode 별) ──
+    if (overlayVis.magMA) {
+      const magneticData = dedupByTime(
+        candles
+          .filter((c) => c.magnetic_ma != null)
+          .map((c) => ({ time: parseTime(c.datetime), value: c.magnetic_ma! }))
+      );
+      if (magneticData.length > 0) {
+        const magneticSeries = chart.addLineSeries({
+          color: '#ff6b6b',
+          lineWidth: 2,
+          lineStyle: 0,
+          crosshairMarkerVisible: true,
+          lastValueVisible: false, // overlay handles label
+          priceLineVisible: false,
+          title: '',
+        });
+        magneticSeries.setData(magneticData);
+        const lastMag = magneticData[magneticData.length - 1]?.value;
+        if (lastMag) axisLabelItems.push({ price: lastMag, text: 'Mag MA', color: '#c0392b' });
+      }
+    }
+
+    // ── VWATR S/R Zones (가독성 개선: top 1만, 중심선만 표시) ──
+    // 이전: top 2 × (upper/lower/center) = 6 lines per type = 12 lines → 차트 70% 점유
+    // 변경: top 1 × center only = 2 lines (S1, R1) → 미니멀
+    if (overlayVis.vwatr && vwatrZones && vwatrZones.length > 0) {
+      const topSup = vwatrZones.filter((z) => z.zone_type === 'SUPPORT')[0];
+      const topRes = vwatrZones.filter((z) => z.zone_type === 'RESISTANCE')[0];
+      const topZones = [topSup, topRes].filter(Boolean);
       topZones.forEach((zone) => {
         const isSup = zone.zone_type === 'SUPPORT';
-        typeCounter[zone.zone_type] += 1;
-        const rank = typeCounter[zone.zone_type];
-        const color = isSup ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)';
-        const label = `VWATR ${isSup ? 'S' : 'R'}${rank} (${zone.ma_type}${zone.ma_period})`;
-
-        // Zone upper edge
-        mainSeries.createPriceLine({
-          price: isSup ? zone.support_upper : zone.resistance_upper,
-          color: color,
-          lineWidth: 2,
-          lineStyle: 2, // Dashed
-          axisLabelVisible: false,
-          title: '',
-        });
-        // Zone lower edge
-        mainSeries.createPriceLine({
-          price: isSup ? zone.support_lower : zone.resistance_lower,
-          color: color,
-          lineWidth: 2,
-          lineStyle: 2,
-          axisLabelVisible: false,
-          title: '',
-        });
-        // Zone center (MA value) — overlay handles axis label
+        const color = isSup ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)';
+        // 중심선만 — zone edge(upper/lower) 제거
         mainSeries.createPriceLine({
           price: zone.ma_value,
           color: color,
-          lineWidth: 3,
-          lineStyle: 0, // Solid — 중심선은 실선으로 강조
+          lineWidth: 2,
+          lineStyle: 2, // Dashed (실선 → dashed로 더 미묘하게)
           axisLabelVisible: false,
           title: '',
         });
-        // Solid color for overlay label
         const solidColor = isSup ? '#22c55e' : '#ef4444';
+        const label = `VWATR ${isSup ? 'S' : 'R'}`;
         axisLabelItems.push({ price: zone.ma_value, text: label, color: solidColor });
       });
     }
@@ -363,9 +379,9 @@ export default function ESFIntradayChart({
     });
     volumeSeries.setData(volumeData);
 
-    // ── Volume Profile Levels ──
+    // ── Volume Profile Levels (strategyMode 별 가시성) ──
     if (volumeProfile) {
-      if (volumeProfile.poc > 0) {
+      if (overlayVis.poc && volumeProfile.poc > 0) {
         mainSeries.createPriceLine({
           price: volumeProfile.poc,
           color: 'rgba(59, 130, 246, 0.7)',
@@ -376,7 +392,7 @@ export default function ESFIntradayChart({
         });
         axisLabelItems.push({ price: volumeProfile.poc, text: 'POC', color: '#3b82f6' });
       }
-      if (volumeProfile.vah > 0) {
+      if (overlayVis.vah && volumeProfile.vah > 0) {
         mainSeries.createPriceLine({
           price: volumeProfile.vah,
           color: 'rgba(255, 255, 255, 0.35)',
@@ -387,7 +403,7 @@ export default function ESFIntradayChart({
         });
         axisLabelItems.push({ price: volumeProfile.vah, text: 'VAH', color: '#6b7280' });
       }
-      if (volumeProfile.val > 0) {
+      if (overlayVis.val && volumeProfile.val > 0) {
         mainSeries.createPriceLine({
           price: volumeProfile.val,
           color: 'rgba(255, 255, 255, 0.35)',
@@ -398,19 +414,21 @@ export default function ESFIntradayChart({
         });
         axisLabelItems.push({ price: volumeProfile.val, text: 'VAL', color: '#6b7280' });
       }
-      // LVN levels
-      (volumeProfile.lvn_levels || []).slice(0, 5).forEach((lvn) => {
-        if (lvn > 0) {
-          mainSeries.createPriceLine({
-            price: lvn,
-            color: 'rgba(234, 179, 8, 0.3)',
-            lineWidth: 1,
-            lineStyle: 3, // dotted
-            axisLabelVisible: false,
-            title: '',
-          });
-        }
-      });
+      // LVN levels — Scalping/All 모드에서만 표시
+      if (overlayVis.lvn) {
+        (volumeProfile.lvn_levels || []).slice(0, 5).forEach((lvn) => {
+          if (lvn > 0) {
+            mainSeries.createPriceLine({
+              price: lvn,
+              color: 'rgba(234, 179, 8, 0.3)',
+              lineWidth: 1,
+              lineStyle: 3, // dotted
+              axisLabelVisible: false,
+              title: '',
+            });
+          }
+        });
+      }
     }
 
     // ── Entry Plan Overlay ──
@@ -733,7 +751,7 @@ export default function ESFIntradayChart({
       subchartList.forEach((c) => c.remove());
       chart.remove();
     };
-  }, [candles, volumeProfile, entryPlan, vwatrZones, subcharts, ticker]);
+  }, [candles, volumeProfile, entryPlan, vwatrZones, subcharts, ticker, strategyMode]);
 
   useEffect(() => {
     const cleanup = buildChart();
@@ -750,26 +768,31 @@ export default function ESFIntradayChart({
     );
   }
 
-  // ── Legend items ──
+  // ── Legend items (strategyMode 별 필터링) ──
   const MONO = "'IBM Plex Mono', monospace";
   type LegendItem = { color: string; dash?: boolean; label: string; desc: string };
-  const legendItems: LegendItem[] = [
-    { color: '#f59e0b',                     label: 'EMA8',    desc: 'Fast EMA (8)' },
-    { color: '#3b82f6',                     label: 'EMA21',   desc: 'Mid EMA (21)' },
-    { color: '#a855f7',                     label: 'EMA55',   desc: 'Slow EMA (55)' },
-    { color: 'rgba(99,102,241,0.7)',  dash: true, label: 'BB',      desc: 'Bollinger Bands 20·2σ' },
-    { color: '#ff6b6b',              dash: true, label: 'Mag MA',  desc: 'Magnetic MA — Mean-Rev. Target' },
-    ...(vwatrZones && vwatrZones.length > 0 ? [
-      { color: '#22c55e', dash: true, label: 'VWATR S', desc: 'VWATR Support Zone' },
-      { color: '#ef4444', dash: true, label: 'VWATR R', desc: 'VWATR Resistance Zone' },
-    ] as LegendItem[] : []),
-    ...(volumeProfile ? [
-      { color: '#3b82f6',                     label: 'POC', desc: 'Point of Control — 최대거래량' },
-      { color: 'rgba(255,255,255,0.55)', dash: true, label: 'VAH', desc: 'Value Area High — 상위 70%' },
-      { color: 'rgba(255,255,255,0.55)', dash: true, label: 'VAL', desc: 'Value Area Low — 하위 70%' },
-      { color: 'rgba(234,179,8,0.6)',    dash: true, label: 'LVN', desc: 'Low Volume Node — 저항 약함' },
-    ] as LegendItem[] : []),
+  const allLegendItems: (LegendItem & { key: keyof ReturnType<typeof getOverlayVisibility> })[] = [
+    { color: '#f59e0b',                                   label: 'EMA8',    desc: 'Fast EMA (8)',     key: 'ema8' },
+    { color: '#3b82f6',                                   label: 'EMA21',   desc: 'Mid EMA (21)',     key: 'ema21' },
+    { color: '#a855f7',                                   label: 'EMA55',   desc: 'Slow EMA (55)',    key: 'ema55' },
+    { color: 'rgba(99,102,241,0.5)', dash: true,          label: 'BB',      desc: 'Bollinger Bands 20·2σ', key: 'bb' },
+    { color: '#ff6b6b',              dash: true,          label: 'Mag MA',  desc: 'Magnetic MA — Mean-Rev. Target', key: 'magMA' },
+    { color: '#22c55e', dash: true,                       label: 'VWATR S', desc: 'VWATR Support Zone', key: 'vwatr' },
+    { color: '#ef4444', dash: true,                       label: 'VWATR R', desc: 'VWATR Resistance Zone', key: 'vwatr' },
+    { color: '#3b82f6',                                   label: 'POC',     desc: 'Point of Control — 최대거래량', key: 'poc' },
+    { color: 'rgba(255,255,255,0.55)', dash: true,        label: 'VAH',     desc: 'Value Area High — 상위 70%', key: 'vah' },
+    { color: 'rgba(255,255,255,0.55)', dash: true,        label: 'VAL',     desc: 'Value Area Low — 하위 70%', key: 'val' },
+    { color: 'rgba(234,179,8,0.6)',    dash: true,        label: 'LVN',     desc: 'Low Volume Node — 저항 약함', key: 'lvn' },
   ];
+  const legendItems: LegendItem[] = allLegendItems
+    .filter((item) => overlayVis[item.key])
+    .filter((item) => {
+      // VWATR S/R은 vwatrZones 데이터가 있어야 표시
+      if (item.label.startsWith('VWATR')) return !!(vwatrZones && vwatrZones.length > 0);
+      // POC/VAH/VAL/LVN은 volumeProfile 데이터가 있어야 표시
+      if (['POC', 'VAH', 'VAL', 'LVN'].includes(item.label)) return !!volumeProfile;
+      return true;
+    });
 
   return (
     <div className="esf-chart-section">
