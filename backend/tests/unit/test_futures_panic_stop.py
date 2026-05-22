@@ -27,8 +27,11 @@ def test_p4_4_panic_stop_patch_in_source():
     )
     # cur_dd 계산 패턴
     assert "rg2_mdd_limit" in src
-    # 봉 시작 시점에 (position is not None and peak_equity > 0) 분기
-    assert "position is not None and peak_equity > 0" in src, (
+    # 봉 시작 시점에 (positions dict 비어있지 않음 + peak_equity > 0) 분기.
+    # Q refactor: position(단일) → positions(dict). 두 형태 모두 panic stop 발동 조건은 동일.
+    assert ("positions and peak_equity > 0" in src) or (
+        "position is not None and peak_equity > 0" in src
+    ), (
         "P4-4 regression: panic stop must be evaluated at bar start with position held + valid peak."
     )
 

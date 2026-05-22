@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 from dotenv import load_dotenv
@@ -342,6 +342,40 @@ class SP500FuturesConfig:
         "GC=F":  (1.5, 2.0),  # 디폴트 = 최적 (실증)
         "MGC=F": (1.5, 2.0),
     })
+
+    # T: 자산별 strategy 차등화 (per-ticker overrides).
+    # 허용 키:
+    #   - enable_short: bool (default True) — False면 SHORT 진입 전체 차단
+    #   - enable_long: bool (default True) — False면 LONG 진입 전체 차단
+    #   - enable_bear_trend_bypass: bool (default True) — False면 N override + bear-trend bypass 비활성
+    #   - enable_mean_reversion_bypass: bool (default True) — False면 L mean-reversion bypass 비활성
+    # S 진단(4종 walk-forward) 기반 default:
+    #   - GC=F: SHORT 4건 모두 net -$26,169 → SHORT 차단 (금 강세장에서 mean-reversion 부적합)
+    #   - CL=F: SHORT 11건 net -$3,432 → SHORT 차단 (LONG/SHORT 모두 net negative, 그래도 LONG은 +$2,665)
+    #   - ES=F / NQ=F: baseline 유지 (NQ는 N bypass가 Q1'26 +$24,648 win 입증)
+    per_ticker_overrides: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
+        "GC=F":  {"enable_short": False},
+        "MGC=F": {"enable_short": False},
+        "CL=F":  {"enable_short": False},
+        "MCL=F": {"enable_short": False},
+    })
+
+    # U: regime별 strategy 매핑 (regime-based switching).
+    # 허용 키 (per regime):
+    #   - mr_short: bool — MR-SHORT 전략 활성/비활성
+    #   - short_threshold_adj: float — SHORT 진입 threshold 조정 (음수=완화, 양수=강화)
+    # P-3 paradox 해결: BULL에서 MR-SHORT 비활성(LONG 기회 보호), NEUTRAL에서 활성.
+    # BEAR에서는 SHORT threshold 추가 완화로 trend-following SHORT 우선.
+    regime_strategy_modes: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
+        "BULL":    {"mr_short": False, "short_threshold_adj": -10.0},
+        "NEUTRAL": {"mr_short": True,  "short_threshold_adj": -10.0},
+        "BEAR":    {"mr_short": True,  "short_threshold_adj": -15.0},
+        "CRISIS":  {"mr_short": False, "short_threshold_adj": 0.0},
+    })
+
+    # V: 전역 LONG-only mode. True면 모든 ticker SHORT 진입 차단 (per_ticker_overrides + MR-SHORT 모두 무시).
+    # 19 사이클(A→S) 진단 결론(baseline ES SHORT net negative)을 직접 검증 + 가장 simple/safe baseline.
+    long_only_mode: bool = False
 
     # 익절 설정
     tp_atr_mult: float = 3.0
@@ -794,6 +828,16 @@ class ConfigManager:
                 config.sp500_futures.entry_threshold_boost_map = dict(
                     sp500f["entry_threshold_boost_map"]
                 )
+            # T: 자산별 strategy 차등화 (YAML override)
+            if "per_ticker_overrides" in sp500f:
+                config.sp500_futures.per_ticker_overrides = {
+                    k: dict(v) for k, v in sp500f["per_ticker_overrides"].items()
+                }
+            # U: regime별 strategy 매핑 (YAML override)
+            if "regime_strategy_modes" in sp500f:
+                config.sp500_futures.regime_strategy_modes = {
+                    k: dict(v) for k, v in sp500f["regime_strategy_modes"].items()
+                }
 
         # ESF Intraday Strategy
         esf = yaml_data.get("esf_intraday", {})

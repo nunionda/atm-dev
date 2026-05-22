@@ -445,6 +445,12 @@ class SP500FuturesStrategy(BaseStrategy):
             return None
 
         direction = self._determine_direction(df)
+        # T: per-ticker override 조회 (default True = baseline 동작 유지).
+        allow_short = self._get_ticker_override(code, "enable_short", True)
+        allow_long = self._get_ticker_override(code, "enable_long", True)
+        allow_bear_bypass = self._get_ticker_override(code, "enable_bear_trend_bypass", True)
+        allow_mr_bypass = self._get_ticker_override(code, "enable_mean_reversion_bypass", True)
+
         # N (Walk-Forward 진단): bear-trend SHORT override.
         # _determine_direction이 NEUTRAL 또는 LONG이라도, 강한 약세 추세 setup
         # (EMA 역배열 + close<EMA_mid + MACD<0 + RSI<50) 모두 충족하면 SHORT 강제.
@@ -452,12 +458,26 @@ class SP500FuturesStrategy(BaseStrategy):
         # 가중치 우위(MA200 lag)를 신뢰하지 않는 게 합리적.
         # baseline Q4/Q1 약세 분기에 _determine_direction이 LONG 다수 반환하던
         # 것을 SHORT로 override해 약세장 LONG counter-trend 손실 방지.
-        if direction != FuturesDirection.SHORT and self._is_bear_trend_short_setup(df):
+        # T: enable_bear_trend_bypass=False면 N override 비활성화.
+        if (
+            allow_bear_bypass
+            and allow_short
+            and direction != FuturesDirection.SHORT
+            and self._is_bear_trend_short_setup(df)
+        ):
             old = direction.name
             direction = FuturesDirection.SHORT
-            logger.info("N override | %s → SHORT (bear-trend setup)", old)
+            logger.info("N override | %s → SHORT (bear-trend setup) | %s", old, code)
 
         if direction == FuturesDirection.NEUTRAL:
+            return None
+
+        # T: per-ticker SHORT/LONG 차단 게이트.
+        # S 진단(4종 walk-forward) 기반: GC/CL은 SHORT net negative → enable_short=False.
+        # NQ는 N bypass가 +$24,648 win 입증 → default True 유지.
+        if direction == FuturesDirection.SHORT and not allow_short:
+            return None
+        if direction == FuturesDirection.LONG and not allow_long:
             return None
 
         is_long = direction == FuturesDirection.LONG
@@ -480,14 +500,14 @@ class SP500FuturesStrategy(BaseStrategy):
         # L: mean-reversion (강세장 과매수 후 반락) — z>=2, RSI>75, BB upper
         # N: bear-trend (약세 추세 진입) — EMA 역배열, close<EMA_mid, MACD<0
         # 둘 중 하나라도 충족 시 4-Layer threshold 우회.
+        # T: per-ticker bypass 활성/비활성 (enable_mean_reversion_bypass / enable_bear_trend_bypass).
         if total_score < threshold:
-            if not is_long and (
-                self._is_mean_reversion_short_setup(df)
-                or self._is_bear_trend_short_setup(df)
-            ):
+            mr_ok = allow_mr_bypass and self._is_mean_reversion_short_setup(df)
+            bear_ok = allow_bear_bypass and self._is_bear_trend_short_setup(df)
+            if not is_long and (mr_ok or bear_ok):
                 logger.info(
-                    "SHORT bypass | total=%.1f<%.1f thr",
-                    total_score, threshold,
+                    "SHORT bypass | %s | total=%.1f<%.1f thr | mr=%s bear=%s",
+                    code, total_score, threshold, mr_ok, bear_ok,
                 )
             else:
                 return None
@@ -766,14 +786,16 @@ class SP500FuturesStrategy(BaseStrategy):
             else:
                 threshold = self.fc.entry_threshold  # NEUTRAL: 50
 
-            # J (Walk-Forward I 진단): BULL/NEUTRAL regime에서 SHORT 진입은
-            # threshold를 추가 -10 완화. 배경: Q2'26 walk-forward에서
-            # _determine_direction은 SHORT 13건 검출했으나 4-Layer total_score가
-            # threshold(50) 못 넘겨 모두 차단. EMA 정배열 + close>MA200 환경에서
-            # 자연스럽게 trend layer가 SHORT에 0점 → threshold 완화로 강한
-            # SHORT 시그널(L1+L3+L4=40+)이 진입 가능.
-            if not is_long and regime in ("BULL", "NEUTRAL"):
-                threshold = max(30.0, threshold - 10.0)
+            # J + U (Walk-Forward I 진단): regime별 SHORT threshold 조정.
+            # 배경: Q2'26 walk-forward에서 _determine_direction은 SHORT 13건 검출했으나
+            # 4-Layer total_score가 threshold(50) 못 넘겨 모두 차단. EMA 정배열 +
+            # close>MA200 환경에서 trend layer가 SHORT에 자연 0점 → threshold 완화로
+            # 강한 SHORT 시그널(L1+L3+L4=40+)이 진입 가능.
+            # U: regime_strategy_modes에서 short_threshold_adj 조회 (BULL/NEUTRAL -10, BEAR -15).
+            if not is_long:
+                default_adj = -10.0 if regime in ("BULL", "NEUTRAL") else 0.0
+                adj = self._get_regime_mode(regime, "short_threshold_adj", default_adj)
+                threshold = max(30.0, threshold + adj)
 
             # 레짐별 차등 counter-bias 페널티
             penalty = get_counter_bias_penalty(regime)
@@ -1217,6 +1239,35 @@ class SP500FuturesStrategy(BaseStrategy):
             return 0.0
         mp = getattr(self.fc, "entry_threshold_boost_map", None) or {}
         return float(mp.get(ticker, 0.0))
+
+    def _get_ticker_override(self, ticker: Optional[str], key: str, default: bool) -> bool:
+        """T: per-ticker strategy override 조회.
+
+        허용 키: enable_short, enable_long, enable_bear_trend_bypass,
+        enable_mean_reversion_bypass. 매칭 없으면 default.
+
+        V: long_only_mode=True면 enable_short 키 조회 시 무조건 False 반환
+        (모든 SHORT 진입 차단, per-ticker override보다 우선).
+        """
+        if key == "enable_short" and getattr(self.fc, "long_only_mode", False):
+            return False
+        if not ticker:
+            return default
+        mp = getattr(self.fc, "per_ticker_overrides", None) or {}
+        overrides = mp.get(ticker, {})
+        return bool(overrides.get(key, default))
+
+    def _get_regime_mode(self, regime: Optional[str], key: str, default):
+        """U: regime별 strategy 매핑 조회.
+
+        허용 키: mr_short (bool), short_threshold_adj (float).
+        매칭 없으면 default.
+        """
+        if not regime:
+            return default
+        mp = getattr(self.fc, "regime_strategy_modes", None) or {}
+        modes = mp.get(regime, {})
+        return modes.get(key, default)
 
     def _get_atr_mult(self, ticker: Optional[str], adx: float) -> float:
         """

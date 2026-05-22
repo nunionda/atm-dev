@@ -525,14 +525,26 @@ class FuturesBacktester:
                         equity=equity,
                     )
 
-                    # P+Q (Walk-Forward 재설계): MR-SHORT 별도 path.
+                    # P+Q+U (Walk-Forward 재설계): MR-SHORT 별도 path.
                     # Q (dict refactor): 1 ticker 1 position 제약 해제 → LONG 보유 중에도
-                    # SHORT 진입 가능. P-3 BULL 비활성화는 유지 — Q+P-3 해제 실험에서
-                    # BULL regime MR-SHORT가 baseline ES에서 net negative 확인.
-                    if signal is None and "SHORT" not in positions:
+                    # SHORT 진입 가능.
+                    # T: per-ticker enable_short=False면 MR-SHORT path도 차단.
+                    # U: regime_strategy_modes.mr_short 기반으로 활성/비활성 결정
+                    #   - BULL: False (LONG 기회 보호, P-3 paradox 해결)
+                    #   - NEUTRAL/BEAR: True (mean-reversion 적정 환경)
+                    #   - CRISIS: False (극단적 하락에서 신규 진입 위험)
+                    allow_short_for_ticker = self.strategy._get_ticker_override(
+                        self.ticker, "enable_short", True
+                    )
+                    if signal is None and "SHORT" not in positions and allow_short_for_ticker:
                         rr = getattr(self.strategy, "_last_regime_result", None)
                         regime = getattr(rr, "regime", None) if rr else None
-                        if regime != "BULL":
+                        # U: regime별 MR-SHORT 활성 여부 조회 (default: BULL/CRISIS 제외)
+                        default_mr = regime not in ("BULL", "CRISIS")
+                        mr_enabled = self.strategy._get_regime_mode(
+                            regime, "mr_short", default_mr
+                        )
+                        if mr_enabled:
                             mr_signal = self._get_mr_short_strategy().generate_short_signal(
                                 ticker=self.ticker,
                                 df=df_slice,
